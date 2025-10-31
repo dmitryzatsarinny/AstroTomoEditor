@@ -4,6 +4,13 @@
 #include <Services/DicomRange.h>
 #include <vtkDICOMApplyRescale.h>
 #include <vtk-9.5/vtkGDCMImageReader.h>
+#include <vtkImageCast.h>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <numeric>
+#include <vector>
 
 namespace {
     class VtkErrorCatcher : public vtkCommand {
@@ -16,6 +23,79 @@ namespace {
         bool hasError = false;
         std::string message;
     };
+}
+
+
+static std::vector<int> buildSampleIndices(int first, int last, int step)
+{
+    std::vector<int> out;
+    if (last < first) return out;
+    step = std::max(1, step);
+    out.reserve(static_cast<size_t>((last - first) / step) + 2);
+    for (int v = first; v <= last; v += step)
+        out.push_back(v);
+    if (out.empty() || out.back() != last)
+        out.push_back(last);
+    return out;
+}
+
+// --- Сглаживание и поиск первого значимого пика справа от threshold ---
+// mH        — входная гистограмма (256 значений, например распределение HU)
+// threshold — индекс, откуда начинаем поиск
+// outPeak   — возвращает индекс найденного пика
+// minFrac   — минимальная доля от глобального максимума (0.0–1.0), напр. 0.05
+// Возвращает true, если пик найден, иначе false
+static bool detectFirstPeakAfter(const QVector<quint64>& mH, int threshold, int& outPeak,
+    double minFrac = 0.05, int minWidth = 5)
+{
+    const int N = mH.size();
+    if (N < 3 || threshold >= N - 2)
+        return false;
+
+    // --- 1. Сглаживание (простое окно) ---
+    const int win = 9;
+    QVector<double> h(N);
+    const int R = win / 2;
+    auto at = [&](int i) {
+        if (i < 0) i = -i;
+        if (i >= N) i = 2 * (N - 1) - i;
+        return double(mH[i]);
+        };
+    for (int i = 0; i < N; ++i) {
+        double s = 0;
+        for (int k = -R; k <= R; ++k)
+            s += at(i + k);
+        h[i] = s / win;
+    }
+
+    // --- 2. Порог по амплитуде ---
+    const double maxVal = *std::max_element(h.begin(), h.end());
+    if (maxVal <= 0.0)
+        return false;
+    const double minPeakHeight = maxVal * minFrac;
+
+    // --- 3. Поиск пика ---
+    int startRise = -1;
+    for (int i = threshold + 2; i < N - 2; ++i)
+    {
+        // начало роста
+        if (h[i] > h[i - 1] && startRise == -1)
+            startRise = i - 1;
+
+        // спуск после роста — возможно, это пик
+        if (startRise >= 0 && h[i] > h[i + 1])
+        {
+            int width = i - startRise;
+            if (width >= minWidth && h[i] >= minPeakHeight)
+            {
+                outPeak = i;
+                return true;
+            }
+            // сбросить состояние, если пик был слишком узким
+            startRise = -1;
+        }
+    }
+    return false;
 }
 
 PlanarView::PlanarView(QWidget* parent) : QWidget(parent)
@@ -306,6 +386,8 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     mScene->clear();
     avalibletoreconstruction = false;
     mImageItem = mScene->addPixmap(QPixmap());
+    Dicom.huZeroShift = 0.0;
+    Dicom.huZeroShiftValid = false;
 
     if (files.isEmpty()) {
         mScroll->setRange(0, 0);
@@ -530,20 +612,33 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         // Заодно сохраним «инверсию» сразу в Dicom.TypeOfRecord и передадим в buildCache (ниже).
         if (modalityStr == "CT") {
             Dicom.TypeOfRecord = CT;
-            if (Dicom.intercept < -1000) 
+            if (Dicom.intercept < -1000)
             { 
-                Dicom.physicalMin = 0; 
-                Dicom.physicalMax = 2048; 
+                Dicom.physicalMin = 0;
+                Dicom.physicalMax = 2048;
             }
             else 
             { 
-                Dicom.physicalMin = -1024; 
-                Dicom.physicalMax = 1024; 
+                Dicom.physicalMin = -1024;
+                Dicom.physicalMax = 1024;
             }
-            Dicom.RealMin = -1000; 
+            Dicom.RealMin = -1000;
             Dicom.RealMax = 1000;
+
+            //double peakHU = 0.0;
+            //if (detectFirstPeakAfter(volume, Dicom.slope, Dicom.intercept, -500.0, peakHU))
+            //{
+            //    Dicom.huZeroShift = peakHU;
+            //    Dicom.huZeroShiftValid = true;
+            //    Dicom.physicalMax = 2 * Dicom.huZeroShift;
+            //}
+            //else
+            //{
+            //    Dicom.huZeroShift = 0.0;
+            //    Dicom.huZeroShiftValid = false;
+            //}
         }
-        else if (modalityStr == "MR" || modalityStr == "MRI") 
+        else if (modalityStr == "MR" || modalityStr == "MRI")
         {
             Dicom.TypeOfRecord = MRI;
             Dicom.physicalMin = 0; Dicom.physicalMax = 255;
@@ -591,6 +686,19 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 }
 
 // ===== cache / display ======================================================
+
+static inline uchar wl8fast(double v, double min, double max, bool invMono1)
+{
+    int window = max - min;
+    double x = (v - min) * 255.0 / window;
+    int y = static_cast<int>(std::floor(x));
+    if (y < 1)
+        y = 0;
+    if (y > 255)
+        y = 255;
+    if (invMono1) y = 255 - y;
+    return static_cast<uchar>(y);
+}
 
 static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, bool invMono1)
 {
@@ -650,6 +758,50 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
 
     mSlices.clear();
     mSlices.reserve(total);
+
+    if (Dicom.TypeOfRecord == CT)
+    {
+        //buildHistogram
+        QVector<quint64> mH;
+        mH.assign(256, 0);
+
+        int ext[6];
+        volume->GetExtent(ext);
+
+        const int nx = ext[1] - ext[0] + 1;
+        const int ny = ext[3] - ext[2] + 1;
+        const int nz = ext[5] - ext[4] + 1;
+
+        vtkIdType incX, incY, incZ;  // ВНИМАНИЕ: ИНКРЕМЕНТЫ В БАЙТАХ
+        volume->GetIncrements(incX, incY, incZ);
+
+        // стартовый адрес (xmin, ymin, zmin)
+        auto* p0 = static_cast<const uint8_t*>(
+            volume->GetScalarPointer(ext[0], ext[2], ext[4]));
+
+        const int step = 1; // без субсэмплинга
+
+        for (int i = 0; i < nx * ny * nz; i++)
+        {
+            const double vHU = ((int)*(p0 + i) * Dicom.slope) - Dicom.intercept;
+            mH[wl8fast(vHU, Dicom.physicalMin, Dicom.physicalMax, invertMono1)]++;
+        }
+        mH[0] = 0;
+
+        int peakHU = 0;
+        if (detectFirstPeakAfter(mH, 64, peakHU))
+        {
+            Dicom.huZeroShift = peakHU;
+            Dicom.huZeroShiftValid = true;
+            int realpeakHU = wl8fast(peakHU, Dicom.physicalMin, Dicom.physicalMax, invertMono1);
+            Dicom.physicalMax -= (2 * Dicom.huZeroShift);
+        }
+        else
+        {
+            Dicom.huZeroShift = 0.0;
+            Dicom.huZeroShiftValid = false;
+        }
+    }
 
     // Идём сверху вниз (как у тебя было: z = z1..z0), с периодической прокачкой прогресса
     for (int z = z1, idx = 0; z >= z0; --z, ++idx)
