@@ -1,0 +1,208 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>qml;cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;hm;inl;inc;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>qrc;rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Form Files">
+      <UniqueIdentifier>{99349809-55BA-4b9d-BF79-8FDBB0286EB3}</UniqueIdentifier>
+      <Extensions>ui</Extensions>
+    </Filter>
+    <Filter Include="Translation Files">
+      <UniqueIdentifier>{639EADAA-A684-42e4-A9AD-28FC9BCB8F7C}</UniqueIdentifier>
+      <Extensions>ts</Extensions>
+    </Filter>
+    <Filter Include="Source Files\Loader">
+      <UniqueIdentifier>{1f5ffe82-2656-48e9-a440-bd40d3c41eb2}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Window">
+      <UniqueIdentifier>{e11aeb05-744d-48d3-8c5c-ea1e7f314be8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Window">
+      <UniqueIdentifier>{df78f1d6-9b5b-4a6f-9fdf-9c89482bcc88}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Services">
+      <UniqueIdentifier>{9f27711a-03ea-427a-a1f9-f8fb96f6dd4f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Services">
+      <UniqueIdentifier>{eece7a6e-bacf-4a3c-b6ce-32d02dd61ef7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Window\Explorer">
+      <UniqueIdentifier>{88f1ded2-9e61-495a-9449-0250cff1e9a7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Window\Explorer">
+      <UniqueIdentifier>{2f7905d0-6fdb-4aa3-9355-99d08a1bc58a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Window\MainWindow">
+      <UniqueIdentifier>{a92db5b9-5665-4b65-97af-b7f17c6159fa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Window\MainWindow">
+      <UniqueIdentifier>{8fd4ae1e-5e47-41e7-9aa0-6dfd6c7c155d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Window\Render">
+      <UniqueIdentifier>{7aedd44d-aac7-4ecc-bcc7-d20e354f9b37}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Window\Render">
+      <UniqueIdentifier>{07afd8b9-08d0-4f05-be40-5dc4d2f4ab0f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Loader\main.cpp">
+      <Filter>Source Files\Loader</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\DicomSniffer.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Explorer\ExplorerDialog.cpp">
+      <Filter>Source Files\Window\Explorer</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\ContentFilterProxy.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\MainWindow\MainWindow.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\MainWindow\TitleBar.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\MainWindow\SeriesListPanel.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\MainWindow\PlanarView.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\RenderView.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\ClipBoxController.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\TransferFunction.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\VolumeFix3DR.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\VolumeStlExporter.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\Tools.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\ToolsScissors.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\ToolsRemoveConnected.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\HistogramDialog.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\DicomRange.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Services\Pool.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\DicomSniffer.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\DicomParcer.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\PatientInfo.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\Human.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\MouseControl.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\TransferFunction.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\VolumeFix3DR.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\VolumeStlExporter.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\Tools.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\DicomRange.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <QtMoc Include="Window\Explorer\ExplorerDialog.h">
+      <Filter>Header Files\Window\Explorer</Filter>
+    </QtMoc>
+    <QtMoc Include="Services\ContentFilterProxy.h">
+      <Filter>Header Files\Services</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\PlanarView.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\SeriesListPanel.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\TitleBar.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\MainWindow.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\RenderView.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\ClipBoxController.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\TransferFunctionEditor.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\TransferFunctionEditor.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\ToolsScissors.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\ToolsRemoveConnected.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\HistogramDialog.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+  </ItemGroup>
+  <ItemGroup>
+    <QtRcc Include="Resource.qrc">
+      <Filter>Resource Files</Filter>
+    </QtRcc>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="Resource.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="Resources\dicom_heart_icon.ico">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+</Project>

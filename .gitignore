@@ -1,0 +1,46 @@
+# --- Visual Studio ---
+.vs/
+*.vcxproj.user
+*.suo
+*.sdf
+*.opensdf
+*.tlog
+*.obj
+*.log
+*.pdb
+*.idb
+*.cachefile
+*.ipch
+*.db
+
+# --- Build folders ---
+x64/
+x86/
+Release/
+Debug/
+build*/
+out/
+bin/
+lib/
+
+# --- CMake ---
+CMakeFiles/
+CMakeCache.txt
+CMakeSettings.json
+*.cmake
+
+# --- Qt ---
+*.pro.user
+*.qmlc
+*.moc
+*.qrc.dep
+
+# --- VTK / GDCM temporary ---
+*.dll
+*.pyd
+*.ilk
+
+# --- OS / Misc ---
+Thumbs.db
+.DS_Store
+*.tmp

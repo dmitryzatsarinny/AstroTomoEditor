@@ -1,0 +1,10 @@
+<RCC>
+    <qresource prefix="/icons">
+        <file>Resources/dicom_heart.ico</file>
+        <file>Resources/dicom_heart.png</file>
+        <file>Resources/redo-no.svg</file>
+        <file>Resources/redo-yes.svg</file>
+        <file>Resources/undo-no.svg</file>
+        <file>Resources/undo-yes.svg</file>
+    </qresource>
+</RCC>
