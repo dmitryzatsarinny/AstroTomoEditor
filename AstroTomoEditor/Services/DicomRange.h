@@ -14,8 +14,6 @@ struct DicomInfo
     bool rawActualFromTags;
     double mSpX{ 1.0 }, mSpY{ 1.0 }, mSpZ{ 1.0 };
     bool SpCreated{ false };
-    double huZeroShift{ 0.0 };
-    bool   huZeroShiftValid{ false };
 };
 
 

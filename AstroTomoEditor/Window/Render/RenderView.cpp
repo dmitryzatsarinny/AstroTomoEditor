@@ -1401,20 +1401,55 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     updateUndoRedoUi();
 
     // 5) применяем разумный пресет TF по диапазону данных
-    TF::ApplyPreset(prop, TFPreset::Grayscale, DataMin, DataMax);
+    if (mHistDlg)
+    {
+        mHistDlg->close();
+        mHistDlg = nullptr;
+    }
+
+    reloadTfMenu();
     pump(78);
+
+    TF::ApplyPreset(prop, TFPreset::Grayscale, DataMin, DataMax);
+
+    if ((Dicom.TypeOfRecord == CT || Dicom.TypeOfRecord == CT3DR) && mCustomCtIndex >= 0)
+        applyCustomPresetByIndex(mCustomCtIndex, prop, DataMin, DataMax);
+    else if ((Dicom.TypeOfRecord == MRI || Dicom.TypeOfRecord == MRI3DR) && mCustomMrIndex >= 0)
+        applyCustomPresetByIndex(mCustomMrIndex, prop, DataMin, DataMax);
+
+    pump(88);
 
     // 6) включаем маркер, первый рендер
     if (mOrMarker) mOrMarker->SetEnabled(1);
     if (rw) rw->Render();
-    pump(88);
-
-    // 7) перезагрузим меню TF (кастомные пресеты) и финальный рендер
-    reloadTfMenu();
-    if (rw) rw->Render();
     pump(96);
 
     // guard доведёт до 100 и вызовет renderFinished()
+}
+
+void RenderView::applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop,
+    double dataMin, double dataMax)
+{
+    if (idx < 0 || idx >= mCustom.size() || !prop) return;
+
+    const auto& P = mCustom[idx];
+    TF::ApplyPoints(prop, P.points, dataMin, dataMax, P.colorSpace);
+
+    // --- синхронизируем базу (как у тебя в меню) ---
+    if (!mBaseCTF) mBaseCTF = vtkSmartPointer<vtkColorTransferFunction>::New();
+    if (!mBaseOTF) mBaseOTF = vtkSmartPointer<vtkPiecewiseFunction>::New();
+    if (auto* c = prop->GetRGBTransferFunction(0)) mBaseCTF->DeepCopy(c);
+    if (auto* o = prop->GetScalarOpacity(0))       mBaseOTF->DeepCopy(o);
+
+    // --- если активна маска — наложить её поверх базы ---
+    if (mHistMaskActive && mBaseOTF) {
+        auto masked = BuildMaskedOTF(mBaseOTF, mHistMaskLo, mHistMaskHi);
+        prop->SetColor(0, mBaseCTF);
+        prop->SetScalarOpacity(0, masked);
+    }
+
+    if (auto* m = mVolume ? mVolume->GetMapper() : nullptr) m->Modified();
+    if (mVolume) mVolume->Modified();
 }
 
 void RenderView::reloadTfMenu()
@@ -1429,6 +1464,25 @@ void RenderView::reloadTfMenu()
 
     // загрузить кастомные из диска
     mCustom = TF::LoadCustomPresets();
+    
+    // --- Найдём индексы для автоприменения CT/MR ---
+    mCustomCtIndex = -1;
+    mCustomMrIndex = -1;
+
+    auto findByKeys = [&](const QStringList& keys) -> int {
+        for (int i = 0; i < mCustom.size(); ++i) {
+            const QString name = mCustom[i].name;
+            for (const auto& k : keys) {
+                if (name.contains(k, Qt::CaseInsensitive))
+                    return i;
+            }
+        }
+        return -1;
+        };
+    mCustomCtIndex = findByKeys(mCtKeys);
+    mCustomMrIndex = findByKeys(mMrKeys);
+
+
     if (!mCustom.isEmpty()) {
         mTfMenu->addSeparator();
         for (int i = 0; i < mCustom.size(); ++i) {

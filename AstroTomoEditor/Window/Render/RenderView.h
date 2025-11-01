@@ -145,6 +145,7 @@ private:
     void commitNewImage(vtkImageData* im); // пушит в undo и устанавливает новый
     void setMapperInput(vtkImageData* im);
     void updateUndoRedoUi();
+    void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);
 
     QToolButton* mBtnHist{ nullptr };
     QPointer<HistogramDialog> mHistDlg;
@@ -157,6 +158,12 @@ private:
 
     double DataMin = 0.0;
     double DataMax = 255.0;
+
+    int mCustomCtIndex = -1;
+    int mCustomMrIndex = -1;
+
+    QStringList mCtKeys = { "CT", };
+    QStringList mMrKeys = { "MR", "MRI" };
 
     void openTfEditor();
 

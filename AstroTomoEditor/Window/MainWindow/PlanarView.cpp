@@ -40,63 +40,104 @@ static std::vector<int> buildSampleIndices(int first, int last, int step)
 }
 
 // --- Сглаживание и поиск первого значимого пика справа от threshold ---
-// mH        — входная гистограмма (256 значений, например распределение HU)
+// mH        — входная гистограмма (256 значений)
 // threshold — индекс, откуда начинаем поиск
 // outPeak   — возвращает индекс найденного пика
-// minFrac   — минимальная доля от глобального максимума (0.0–1.0), напр. 0.05
-// Возвращает true, если пик найден, иначе false
-static bool detectFirstPeakAfter(const QVector<quint64>& mH, int threshold, int& outPeak,
-    double minFrac = 0.05, int minWidth = 5)
+// minFrac   — минимальная доля от глобального максимума (0..1)
+// minWidth  — минимальная ширина пика (в бинах) по FWHM
+// minPromFrac — минимальная проминентность как доля от глобального максимума
+// Первый осмысленный пик справа от threshold (берём самый первый, а не "лучший")
+static bool detectFirstPeakAfter(const QVector<quint64>& mH,
+    int threshold,
+    int& outPeak,
+    double minFrac = 0.03,
+    int    minWidthSoft = 0) // 0 = не требовать ширину
 {
     const int N = mH.size();
-    if (N < 3 || threshold >= N - 2)
-        return false;
+    if (N < 3 || threshold >= N - 2) return false;
 
-    // --- 1. Сглаживание (простое окно) ---
-    const int win = 9;
+    // 1) Сглаживание (box 9)
+    const int win = 9, R = win / 2;
     QVector<double> h(N);
-    const int R = win / 2;
     auto at = [&](int i) {
         if (i < 0) i = -i;
         if (i >= N) i = 2 * (N - 1) - i;
         return double(mH[i]);
         };
     for (int i = 0; i < N; ++i) {
-        double s = 0;
-        for (int k = -R; k <= R; ++k)
-            s += at(i + k);
+        double s = 0; for (int k = -R; k <= R; ++k) s += at(i + k);
         h[i] = s / win;
     }
 
-    // --- 2. Порог по амплитуде ---
+    // 2) Порог по амплитуде
     const double maxVal = *std::max_element(h.begin(), h.end());
-    if (maxVal <= 0.0)
-        return false;
-    const double minPeakHeight = maxVal * minFrac;
+    if (maxVal <= 0.0) return false;
+    const double minPeakHeight = maxVal * std::clamp(minFrac, 0.0, 1.0);
 
-    // --- 3. Поиск пика ---
-    int startRise = -1;
-    for (int i = threshold + 2; i < N - 2; ++i)
+    // Вспомогалки
+    auto deriv = [&](int i) { return h[i + 1] - h[i]; };
+    auto fwhm = [&](int p)->int {
+        const double half = h[p] * 0.5;
+        int L = p, Rr = p;
+        while (L > 0 && h[L] > half) --L;
+        while (Rr<N - 1 && h[Rr]>half) ++Rr;
+        return Rr - L;
+        };
+
+    // 3) Поиск ПЕРВОГО пика с поддержкой плато
+    const double epsFlat = maxVal * 1e-4;
+    const int    maxFlat = 12;
+
+    bool inRise = false; int riseStart = -1;
+
+    for (int i = std::max(threshold + 1, 1); i < N - 2; ++i)
     {
-        // начало роста
-        if (h[i] > h[i - 1] && startRise == -1)
-            startRise = i - 1;
+        const double d0 = deriv(i - 1);
+        const double d1 = deriv(i);
 
-        // спуск после роста — возможно, это пик
-        if (startRise >= 0 && h[i] > h[i + 1])
+        if (!inRise && d0 > 0) { inRise = true; riseStart = i - 1; }
+
+        if (inRise)
         {
-            int width = i - startRise;
-            if (width >= minWidth && h[i] >= minPeakHeight)
+            // плато
+            int j = i, flat = 0;
+            while (j < N - 2 && std::abs(deriv(j)) <= epsFlat && flat < maxFlat) { ++j; ++flat; }
+
+            // начался спуск либо уже спускаемся
+            if ((j < N - 2 && (deriv(j) < -epsFlat || h[j + 1] < h[j])) || d1 < 0)
             {
-                outPeak = i;
-                return true;
+                // максимум на вершине ростового сегмента
+                int L = std::max(riseStart, 0);
+                int Rr = std::min(j + 1, N - 1);
+                int p = L;
+                for (int k = L + 1; k <= Rr; ++k) if (h[k] > h[p]) p = k;
+
+                // ВАЖНО: проверяем только высоту (и необязательную мягкую ширину)
+                if (h[p] >= minPeakHeight) {
+                    if (minWidthSoft > 0) {
+                        if (fwhm(p) < minWidthSoft) {
+                            // мягкий отказ: не считаем пик "достаточно широким" — но продолжаем поиск дальше,
+                            // если хочешь брать вообще любой — закомментируй этот блок.
+                        }
+                        else {
+                            outPeak = p; return true;
+                        }
+                    }
+                    else {
+                        outPeak = p; return true; // берём самый первый
+                    }
+                }
+
+                // иначе ищем дальше
+                inRise = false; riseStart = -1;
+                i = std::max(p, i);
             }
-            // сбросить состояние, если пик был слишком узким
-            startRise = -1;
         }
     }
     return false;
 }
+
+
 
 PlanarView::PlanarView(QWidget* parent) : QWidget(parent)
 {
@@ -386,8 +427,6 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     mScene->clear();
     avalibletoreconstruction = false;
     mImageItem = mScene->addPixmap(QPixmap());
-    Dicom.huZeroShift = 0.0;
-    Dicom.huZeroShiftValid = false;
 
     if (files.isEmpty()) {
         mScroll->setRange(0, 0);
@@ -508,7 +547,8 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             Dicom = GetDicomRangesVTK(pixReader);
         }
         // 2b) Если СЖАТО — декодируем через vtkGDCMImageReader
-        else {
+        else 
+        {
             vtkSmartPointer<vtkGDCMImageReader> gdcm = vtkSmartPointer<vtkGDCMImageReader>::New();
             auto errObs2 = vtkSmartPointer<VtkErrorCatcher>::New();
             gdcm->AddObserver(vtkCommand::ErrorEvent, errObs2);
@@ -624,19 +664,6 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             }
             Dicom.RealMin = -1000;
             Dicom.RealMax = 1000;
-
-            //double peakHU = 0.0;
-            //if (detectFirstPeakAfter(volume, Dicom.slope, Dicom.intercept, -500.0, peakHU))
-            //{
-            //    Dicom.huZeroShift = peakHU;
-            //    Dicom.huZeroShiftValid = true;
-            //    Dicom.physicalMax = 2 * Dicom.huZeroShift;
-            //}
-            //else
-            //{
-            //    Dicom.huZeroShift = 0.0;
-            //    Dicom.huZeroShiftValid = false;
-            //}
         }
         else if (modalityStr == "MR" || modalityStr == "MRI")
         {
@@ -745,9 +772,9 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
 
     // --- Универсальный вход: ВСЕГДА от готового vtkImageData ---
     vtkNew<vtkImageCast> cast;
-    cast->SetInputData(volume);             // <-- вместо SetInputConnection(srcPort)
+    cast->SetInputData(volume);
     cast->SetOutputScalarTypeToDouble();
-    cast->Update();                         // <-- ОБЯЗАТЕЛЬНО
+    cast->Update();
 
     vtkImageData* imgD = cast->GetOutput();
     if (!imgD) {
@@ -761,45 +788,64 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
 
     if (Dicom.TypeOfRecord == CT)
     {
-        //buildHistogram
-        QVector<quint64> mH;
-        mH.assign(256, 0);
+        QVector<quint64> mH(256, 0);
 
-        int ext[6];
-        volume->GetExtent(ext);
+        // Приведём к double, чтобы не париться с типами
+        vtkNew<vtkImageCast> cast;
+        cast->SetInputData(volume);
+        cast->SetOutputScalarTypeToDouble();
+        cast->Update();
+        vtkImageData* imgD = cast->GetOutput();
 
-        const int nx = ext[1] - ext[0] + 1;
-        const int ny = ext[3] - ext[2] + 1;
-        const int nz = ext[5] - ext[4] + 1;
+        const double minPhys = Dicom.physicalMin;
+        const double maxPhys = Dicom.physicalMax;
+        const double window = std::max(1.0, maxPhys - minPhys);
 
-        vtkIdType incX, incY, incZ;  // ВНИМАНИЕ: ИНКРЕМЕНТЫ В БАЙТАХ
-        volume->GetIncrements(incX, incY, incZ);
-
-        // стартовый адрес (xmin, ymin, zmin)
-        auto* p0 = static_cast<const uint8_t*>(
-            volume->GetScalarPointer(ext[0], ext[2], ext[4]));
-
-        const int step = 1; // без субсэмплинга
-
-        for (int i = 0; i < nx * ny * nz; i++)
+        for (int z = z1; z >= z0; --z)
         {
-            const double vHU = ((int)*(p0 + i) * Dicom.slope) - Dicom.intercept;
-            mH[wl8fast(vHU, Dicom.physicalMin, Dicom.physicalMax, invertMono1)]++;
+            // Определяем фактические инкременты по X/Y как разницу указателей
+            auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
+            auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
+            auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
+            if (!p00 || !p10 || !p01) continue;
+
+            const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
+            const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
+            const bool xPositive = (incXb_raw >= 0);
+            const bool yPositive = (incYb_raw >= 0);
+            const int  xStart = xPositive ? x0 : x1;
+            const int  yStart = yPositive ? y0 : y1;
+            const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
+
+            for (int yy = 0; yy < h; ++yy)
+            {
+                const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
+                auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
+                if (!row0) continue;
+
+                for (int xx = 0; xx < w; ++xx)
+                {
+                    const double raw = *reinterpret_cast<const double*>(row0 + stepXb * xx);
+                    const double vHU = raw * Dicom.slope - Dicom.intercept;
+
+                    double x = (vHU - minPhys) * 255.0 / window;
+                    int y = static_cast<int>(std::floor(x));
+                    if (y < 1) y = 0;
+                    if (y > 255) y = 255;
+                    mH[y]++;
+                }
+            }
+            mH[0] = 0;
         }
-        mH[0] = 0;
 
         int peakHU = 0;
+
         if (detectFirstPeakAfter(mH, 64, peakHU))
         {
-            Dicom.huZeroShift = peakHU;
-            Dicom.huZeroShiftValid = true;
-            int realpeakHU = wl8fast(peakHU, Dicom.physicalMin, Dicom.physicalMax, invertMono1);
-            Dicom.physicalMax -= (2 * Dicom.huZeroShift);
-        }
-        else
-        {
-            Dicom.huZeroShift = 0.0;
-            Dicom.huZeroShiftValid = false;
+            const double vHU = window / 2 - peakHU / 255.0 * window;
+            int y = static_cast<int>(std::floor(vHU));
+            int x = 0;
+            Dicom.physicalMax -= (2 * y);
         }
     }
 
