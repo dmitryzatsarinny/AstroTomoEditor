@@ -17,7 +17,13 @@ public:
 
 
 	void setMode(Mode m) { mode_ = m; invalidateFilter(); }
-	void setCheckDicomMagic(bool on) { checkMagic_ = on; invalidateFilter(); }
+	void setCheckDicomMagic(bool on) {
+		if (checkMagic_ == on) return;
+		checkMagic_ = on;
+		if (!checkMagic_)
+			cache_.clear();
+		invalidateFilter();
+	}
 
 
 protected:
@@ -26,7 +32,7 @@ protected:
 
 private:
 	Mode mode_ = DicomFiles;
-	bool checkMagic_ = true;
+	bool checkMagic_ = false;
 	mutable QHash<QString, QPair<QDateTime, bool>> cache_;
 };
 

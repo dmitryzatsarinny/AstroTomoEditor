@@ -11,6 +11,7 @@ class QDialogButtonBox;
 class QModelIndex;
 class QSortFilterProxyModel;                                    // Тоже forward-declaration: используется в сигнатуре слота.
 class ContentFilterProxy;
+class QCheckBox;
 
 class ExplorerDialog : public QDialog                           // Объявляем собственный диалог, который наследуется от QDialog.
 {
@@ -83,6 +84,7 @@ private:
     QComboBox* m_driveCombo = nullptr;                          // Combo со списком дисков.
     QComboBox* m_pathCombo = nullptr;                           // Combo/line edit текущего пути (история путей
     QComboBox* m_typeCombo = nullptr;                           // Combo со списком файлов.
+    QCheckBox* m_magicCheck = nullptr;                          // Флаг глубокой проверки файлов без расширений.
     QTreeView* m_view = nullptr;                                // Дерево файловой системы.
     QFileSystemModel* m_model = nullptr;                        // Модель файловой системы (лениво читает директории).
     ContentFilterProxy* m_proxy = nullptr;

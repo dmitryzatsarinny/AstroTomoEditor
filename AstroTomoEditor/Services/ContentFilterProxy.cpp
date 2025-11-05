@@ -29,10 +29,11 @@ bool ContentFilterProxy::filterAcceptsRow(int row, const QModelIndex& parent) co
 	case Volume3D:
 		return name.endsWith(".3dr", Qt::CaseInsensitive);
 	case DicomFiles:
-	default:
 		if (name.endsWith(".dcm", Qt::CaseInsensitive)) return true;
+		if (name.endsWith(".dicom", Qt::CaseInsensitive)) return true;
+		if (name.endsWith(".ima", Qt::CaseInsensitive)) return true;
 		if (DicomSniffer::isDicomdirName(name)) return true;
-
+	default:
 
 		if (!checkMagic_) return false;
 

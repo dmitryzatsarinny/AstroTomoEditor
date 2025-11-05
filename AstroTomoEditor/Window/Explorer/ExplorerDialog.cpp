@@ -1,6 +1,7 @@
 ﻿#include "ExplorerDialog.h"
 #include "..\..\Services\ContentFilterProxy.h"
 #include "..\..\Services\DicomSniffer.h"
+#include <QCheckBox>
 
 static inline QString normPath(const QString& p)
 {
@@ -24,6 +25,9 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     m_pathCombo = new QComboBox(this);                      // Комбо с историей путей/вводом пути.
     m_pathCombo->setEditable(true);                         // Разрешаем ручной ввод пути (lineEdit внутри).
     m_typeCombo = new QComboBox(this);                      // Комбо со списком типов.
+    m_magicCheck = new QCheckBox(tr("Deep Checking"), this); // Опция глубокой проверки.
+    m_magicCheck->setToolTip(tr("Проверять файлы без DICOM-расширения по сигнатуре (может замедлять загрузку каталогов)."));
+    m_magicCheck->setChecked(false);
 
     m_typeCombo->addItem(tr("DICOM"), int(ContentFilterProxy::DicomFiles));
     m_typeCombo->addItem(tr("3D Volume (*.3dr)"), int(ContentFilterProxy::Volume3D));
@@ -31,6 +35,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     top->addWidget(m_driveCombo, 0);                        // Добавить комбо дисков (столбец ширины по контенту).
     top->addWidget(m_pathCombo, 1);                         // Путь занимает оставшееся место (stretch = 1).
     top->addWidget(m_typeCombo, 0);                         // Добавить комбо типов (столбец ширины по контенту).
+    top->addWidget(m_magicCheck, 0);                        // Чекбокс глубокой проверки
     mainLay->addLayout(top);                                // Вставить верхнюю панель в главный лэйаут.
 
     // Модель файловой системы
@@ -46,7 +51,12 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     m_proxy->setSourceModel(m_model);
     m_proxy->setDynamicSortFilter(true);
     m_proxy->setMode(ContentFilterProxy::DicomFiles);
-    m_proxy->setCheckDicomMagic(true);
+    m_proxy->setCheckDicomMagic(m_magicCheck->isChecked());
+
+    connect(m_magicCheck, &QCheckBox::toggled, this, [this](bool on) {
+        if (m_proxy)
+            m_proxy->setCheckDicomMagic(on);
+        });
 
 
     // Представление — как в Проводнике: таблица с колонками
@@ -200,6 +210,14 @@ void ExplorerDialog::onTypeChanged(int index)
 {
     const auto mode = static_cast<ContentFilterProxy::Mode>(m_typeCombo->itemData(index).toInt());
     m_proxy->setMode(mode);
+    if (m_magicCheck) {
+        const bool enableMagic = (mode == ContentFilterProxy::DicomFiles);
+        m_magicCheck->setEnabled(enableMagic);
+        if (!enableMagic && m_magicCheck->isChecked())
+            m_magicCheck->setChecked(false);
+        if (enableMagic)
+            m_proxy->setCheckDicomMagic(m_magicCheck->isChecked());
+    }
 }
 
 void ExplorerDialog::applyFiltersForType()

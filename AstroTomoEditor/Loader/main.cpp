@@ -23,7 +23,7 @@ int main(int argc, char* argv[])
     //vtkNew<vtkFileOutputWindow> fow;
     //fow->SetFileName("vtk.log");
     //vtkOutputWindow::SetInstance(fow);
-    //vtkOutputWindow::SetGlobalWarningDisplay(false);
+    vtkOutputWindow::SetGlobalWarningDisplay(false);
 
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication app(argc, argv);

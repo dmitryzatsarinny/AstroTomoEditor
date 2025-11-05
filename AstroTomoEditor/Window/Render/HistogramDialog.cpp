@@ -12,6 +12,132 @@
 #include <numeric>
 #include <cmath>
 
+// === производные и кривизна ==================================================
+static void firstSecondDeriv(const QVector<double>& s, QVector<double>& d1, QVector<double>& d2)
+{
+    const int N = s.size();
+    d1.resize(N); d2.resize(N);
+    if (N < 5) { std::fill(d1.begin(), d1.end(), 0.0); std::fill(d2.begin(), d2.end(), 0.0); return; }
+    d1[0] = d1[N - 1] = 0.0; d2[0] = d2[1] = d2[N - 2] = d2[N - 1] = 0.0;
+    for (int i = 1; i < N - 1; ++i) d1[i] = 0.5 * (s[i + 1] - s[i - 1]);
+    for (int i = 2; i < N - 2; ++i) d2[i] = 0.5 * (d1[i + 1] - d1[i - 1]);
+}
+
+// перегиб как максимум кривизны на восходящем склоне в [winL..winR]
+static int leftInflectionByCurvature(const QVector<double>& s,
+    const QVector<double>& d1,
+    const QVector<double>& d2,
+    int winL, int winR, int peakIdx)
+{
+    winL = std::max(winL, 2);
+    winR = std::max(winR, winL + 2);
+
+    const double peakH = s[peakIdx];
+    const double minH = 0.15 * peakH;   // фильтр по уровню (15%..85% высоты пика)
+    const double maxH = 0.85 * peakH;
+
+    int best = -1;
+    double bestKappa = -1.0;
+
+    for (int i = winL + 5; i <= winR - 5; ++i) {      // не трогаем края окна
+        if (d1[i] <= 0.0) continue;               // нужен восходящий склон
+        if (s[i] < minH || s[i] > maxH) continue; // избегаем дна и самой вершины
+
+        const double denom = std::pow(1.0 + d1[i] * d1[i], 1.5);
+        const double kappa = std::abs(d2[i]) / (denom > 0.0 ? denom : 1.0);
+        if (kappa > bestKappa) { bestKappa = kappa; best = i; }
+    }
+    // фолбэк: если не нашли — берем середину окна
+    if (best < 0) best = (winL + winR) / 2;
+    return best;
+}
+
+// правая граница: μ,σ по правому хвосту [lo..255] в HU
+static void meanSigmaHU_rightTail_full(const QVector<quint64>& h, int lo,
+    double axisMin, double axisMax,
+    double& mu, double& sigma)
+{
+    lo = std::clamp(lo, 0, 255);
+    const int hi = 255;
+    const double K = (axisMax - axisMin) / 255.0;
+
+    long double W = 0, S1 = 0, S2 = 0;
+    for (int i = lo; i <= hi; ++i) {
+        const long double w = (long double)h[i];
+        const long double x = (long double)(axisMin + K * i);
+        W += w; S1 += w * x; S2 += w * x * x;
+    }
+    if (W <= 0) { mu = axisMin + K * ((lo + hi) * 0.5); sigma = 0.0; return; }
+    mu = (double)(S1 / W);
+    const double var = (double)(S2 / W - (S1 / W) * (S1 / W));
+    sigma = var > 0 ? std::sqrt(var) : 0.0;
+}
+
+// === robust peak utils ======================================================
+struct PeakInfo {
+    int idx = -1;
+    int leftValley = -1;
+    int rightValley = -1;
+    double prominence = 0.0;
+    int fwhmBins = 0;
+};
+
+static int findNextValley(const QVector<double>& s, int from) {
+    for (int i = std::clamp(from + 1, 1, (int)(s.size() - 2)); i < s.size() - 1; ++i)
+        if (s[i - 1] > s[i] && s[i] < s[i + 1]) return i;
+    return s.size() - 1;
+}
+static int findPrevValley(const QVector<double>& s, int from) {
+    for (int i = std::clamp(from - 1, 1, (int)(s.size() - 2)); i >= 1; --i)
+        if (s[i - 1] < s[i] && s[i] < s[i + 1]) return i;
+    return 0;
+}
+
+// локальная «вершина» допускает плато (>= соседей)
+static bool isLocalPeak(const QVector<double>& s, int i) {
+    return (i > 0 && i + 1 < s.size() && s[i] >= s[i - 1] && s[i] >= s[i + 1] &&
+        (s[i] > s[i - 1] || s[i] > s[i + 1]));
+}
+
+static PeakInfo analyzePeak(const QVector<double>& s, int p) {
+    PeakInfo R; R.idx = p;
+    R.leftValley = findPrevValley(s, p);
+    R.rightValley = findNextValley(s, p);
+    const double base = std::max(s[R.leftValley], s[R.rightValley]);
+    R.prominence = std::max(0.0, s[p] - base);
+
+    // FWHM (по уровню base + prominence/2)
+    const double half = base + R.prominence * 0.5;
+    int L = p, Rr = p;
+    while (L > R.leftValley && s[L] > half) --L;
+    while (Rr<R.rightValley && s[Rr] > half) ++Rr;
+    R.fwhmBins = std::max(1, Rr - L);
+    return R;
+}
+
+static int findContrastPeakAfter(const QVector<double>& s, int startBin,
+    int minCenterBin, double minPromFrac, int minWidthBins) // CHANGED
+{
+    if (s.size() < 5) return -1;
+    const double gmax = *std::max_element(s.begin(), s.end());
+    const double promLevels[2] = { minPromFrac, std::max(0.5 * minPromFrac, 0.01) };
+
+    for (double promFrac : promLevels) {
+        for (int i = std::max(1, startBin); i < s.size() - 1; ++i) {
+            if (i < minCenterBin) continue;                           // CHANGED: апекс пика должен быть правее 260 HU
+            if (!isLocalPeak(s, i)) continue;
+            const PeakInfo P = analyzePeak(s, i);
+            if (P.prominence >= gmax * promFrac && P.fwhmBins >= std::max(1, minWidthBins))
+                return i;
+        }
+    }
+    // fallback: максимум в правой части, но тоже ≥ minCenterBin
+    int argmax = -1; double vmax = -1;
+    for (int i = std::max(minCenterBin, startBin); i < s.size(); ++i)
+        if (s[i] > vmax) { vmax = s[i]; argmax = i; }
+    return argmax;
+}
+
 // простое «боксовое» сглаживание
 static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
 {
@@ -205,24 +331,37 @@ void HistogramDialog::setRange(int loBin, int hiBin, bool emitSig)
 
 void HistogramDialog::autoRange()
 {
-    QVector<quint64> h = mH;
-    if (mIgnoreZeros && !h.isEmpty()) 
-        h[0] = 0;
+    QVector<double> s = mSmooth;
+    if (s.isEmpty()) { setRange(0, 255, true); return; }
+    if (mIgnoreZeros && !s.isEmpty()) s[0] = 0.0;
 
-    const quint64 total = std::accumulate(h.begin(), h.end(), quint64(0));
-    if (total == 0) { setRange(0, 255, true); return; }
+    const int bin200 = dataFromAxis(200.0);
+    const int minCenterBin = dataFromAxis(260.0);
 
-    const quint64 lCut = total / 200; // 0.5%
-    const quint64 rCut = total / 200;
+    // 1) находим контрастный пик правее 260 HU (твоя робастная функция)
+    const int peak = findContrastPeakAfter(s, bin200, minCenterBin, 0.035, 4);
+    if (peak < 0) { setRange(bin200, 255, true); return; }
 
-    quint64 acc = 0; int l = 0;
-    for (; l < 256; ++l) { acc += mH[l]; if (acc >= lCut) break; }
+    // 2) перегиб = максимум кривизны в окне [200HU .. peak]
+    QVector<double> d1, d2; firstSecondDeriv(s, d1, d2);
+    const int leftInflect = std::clamp(
+        leftInflectionByCurvature(s, d1, d2, bin200, peak - 1, peak), 0, 255);
 
-    acc = 0; int r = 255;
-    for (; r >= 0; --r) { acc += mH[r]; if (acc >= rCut) break; }
+    // 3) μ,σ по правому хвосту от этого перегиба до конца гистограммы
+    double muHU = 0, sigmaHU = 0;
+    meanSigmaHU_rightTail_full(mH, leftInflect, mAxisMin, mAxisMax, muHU, sigmaHU);
 
-    setRange(l, r, true);
+    // 4) финальные границы: [перегиб ; μ + 2σ] (климпим по оси HU)
+    const int loBin = leftInflect;
+    int hiBin = dataFromAxis(std::min(muHU + 2.0 * sigmaHU, mAxisMax));
+    hiBin = std::clamp(hiBin, 0, 255);
+
+    if (hiBin <= loBin) hiBin = std::min(loBin + 12, 255);
+
+    setRange(loBin, hiBin, true);
 }
+
+
 
 static double percentileCap(const QVector<quint64>& h, double q /*0..1*/)
 {
