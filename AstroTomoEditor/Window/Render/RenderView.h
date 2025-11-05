@@ -53,7 +53,8 @@ public:
     vtkVolume* volume() const { return mVolume; }
     vtkImageData* image() const { return mImage; }
     void setImage(vtkSmartPointer<vtkImageData> img);
-    
+    DicomInfo GetDicomInfo() const { return DI; };
+
 signals:
     void renderStarted();
     void renderProgress(int processed);
@@ -75,7 +76,6 @@ private slots:
 
 private:
     vtkSmartPointer<vtkImageData> mImage;
-    vtkSmartPointer<vtkImageData> mImageU8ForHist;
 
     QVTKOpenGLNativeWidget* mVtk{ nullptr };
     vtkSmartPointer<vtkRenderer> mRenderer;
@@ -110,6 +110,7 @@ private:
 
     QVector<TF::CustomPreset> mCustom;
     void reloadTfMenu();
+    void reloadHistogram();
 
     bool mOverlaysBuilt{ false };
     bool mOverlaysShown{ false };
@@ -161,6 +162,8 @@ private:
 
     int mCustomCtIndex = -1;
     int mCustomMrIndex = -1;
+    
+    DicomInfo DI;
 
     QStringList mCtKeys = { "CT", };
     QStringList mMrKeys = { "MR", "MRI" };

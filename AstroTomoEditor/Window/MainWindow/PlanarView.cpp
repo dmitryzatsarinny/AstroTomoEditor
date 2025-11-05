@@ -50,8 +50,8 @@ static std::vector<int> buildSampleIndices(int first, int last, int step)
 static bool detectFirstPeakAfter(const QVector<quint64>& mH,
     int threshold,
     int& outPeak,
-    double minFrac = 0.03,
-    int    minWidthSoft = 0) // 0 = не требовать ширину
+    double minFrac = 0.05,
+    int    minWidthSoft = 3) // 0 = не требовать ширину
 {
     const int N = mH.size();
     if (N < 3 || threshold >= N - 2) return false;
@@ -114,18 +114,13 @@ static bool detectFirstPeakAfter(const QVector<quint64>& mH,
 
                 // ВАЖНО: проверяем только высоту (и необязательную мягкую ширину)
                 if (h[p] >= minPeakHeight) {
-                    if (minWidthSoft > 0) {
-                        if (fwhm(p) < minWidthSoft) {
-                            // мягкий отказ: не считаем пик "достаточно широким" — но продолжаем поиск дальше,
-                            // если хочешь брать вообще любой — закомментируй этот блок.
-                        }
-                        else {
-                            outPeak = p; return true;
-                        }
+                    if (fwhm(p) < 5) {  // слишком узкий — флуктуация
+                        inRise = false;
+                        riseStart = -1;
+                        continue;       // ищем дальше
                     }
-                    else {
-                        outPeak = p; return true; // берём самый первый
-                    }
+                    outPeak = p;
+                    return true;
                 }
 
                 // иначе ищем дальше
@@ -664,12 +659,20 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             }
             Dicom.RealMin = -1000;
             Dicom.RealMax = 1000;
+            Dicom.XTitle = "Hounsfield Units";
+            Dicom.YTitle = "Voxel count";
+            Dicom.XLable = "HU";
+            Dicom.YLable = "N";
         }
         else if (modalityStr == "MR" || modalityStr == "MRI")
         {
             Dicom.TypeOfRecord = MRI;
             Dicom.physicalMin = 0; Dicom.physicalMax = 255;
             Dicom.RealMin = 0; Dicom.RealMax = 255;
+            Dicom.XTitle = "MRI intensity";
+            Dicom.YTitle = "Voxel count";
+            Dicom.XLable = "AU";
+            Dicom.YLable = "N";
         }
 
     }

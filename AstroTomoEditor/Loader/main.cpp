@@ -11,22 +11,23 @@ static void ConfigureDllSearch()
     AddDllDirectory(L".\\bin");
     AddDllDirectory(L".\\plugins");
     SetDllDirectoryW(L"");
+    QCoreApplication::addLibraryPath(QCoreApplication::applicationDirPath() + "/plugins");
 }
 
 int main(int argc, char* argv[])
 {
     ConfigureDllSearch();
 
-    vtkNew<vtkFileOutputWindow> fow;
-    fow->SetFileName("vtk.log");
-    vtkOutputWindow::SetInstance(fow);
-    vtkOutputWindow::SetGlobalWarningDisplay(false);
+    QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+
+    //vtkNew<vtkFileOutputWindow> fow;
+    //fow->SetFileName("vtk.log");
+    //vtkOutputWindow::SetInstance(fow);
+    //vtkOutputWindow::SetGlobalWarningDisplay(false);
 
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication app(argc, argv);
 
-
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
 
     ExplorerDialog dlg;
     if (dlg.exec() == QDialog::Accepted) {

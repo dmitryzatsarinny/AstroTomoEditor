@@ -425,16 +425,25 @@ void RenderView::openHistogram()
 {
     if (!mImage || !mVolume) return;
 
+    mHistDlg->show();
+    mHistDlg->raise();
+    mHistDlg->activateWindow();
+}
+
+void RenderView::reloadHistogram()
+{
+    if (!mImage || !mVolume) return;
+
+    if (mHistDlg)
+    {
+        mHistDlg->close();
+        mHistDlg = nullptr;
+    }
+
     if (!mHistDlg) {
 
-        if (mHistDlg) 
-        { 
-            mHistDlg->close(); 
-            mHistDlg = nullptr; 
-        }
-
-        mHistDlg = new HistogramDialog(this, mImage);
-        mHistDlg->setFixedAxis(true, -1000.0, 1000.0);
+        mHistDlg = new HistogramDialog(this, DI, mImage);
+        mHistDlg->setFixedAxis(true, DI.RealMin, DI.RealMax);
 
         // 1) при первом открытии — снять копии базовых функций
         if (mVolume && !mHistMaskActive) {
@@ -484,10 +493,6 @@ void RenderView::openHistogram()
 
         mHistDlg->refreshFromImage(mImage);
     }
-
-    mHistDlg->show();
-    mHistDlg->raise();
-    mHistDlg->activateWindow();
 }
 
 vtkSmartPointer<vtkImageData> RenderView::cloneImage(vtkImageData* src)
@@ -1287,6 +1292,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     }
     pump(25);
 
+    DI = Dicom;
+
     // 2) настраиваем mapper/prop (без тяжёлого рендера пока)
     auto mapper = vtkSmartPointer<vtkGPUVolumeRayCastMapper>::New();
     mapper->SetInputData(image);
@@ -1307,14 +1314,12 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetIndependentComponents(true);
     prop->SetColor(0, ctf);
     prop->SetScalarOpacity(0, otf);
-    prop->SetInterpolationType(VTK_LINEAR_INTERPOLATION);
-    prop->ShadeOn();
+    prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
+    //prop->ShadeOn();
     prop->SetAmbient(0.55);
     prop->SetDiffuse(0.25);
     prop->SetSpecular(0.10);
     prop->SetSpecularPower(10.0);
-
-
 
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
@@ -1381,7 +1386,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     }
     mScissors->attach(mVtk, mRenderer, mImage, mVolume);
 
-    if (!mRemoveConn) {
+    if (!mRemoveConn) 
+    {
         mRemoveConn = std::make_unique<ToolsRemoveConnected>(this);
         mRemoveConn->setAllowNavigation(true);
         mRemoveConn->setOnImageReplaced([this](vtkImageData* im) 
@@ -1401,12 +1407,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     updateUndoRedoUi();
 
     // 5) применяем разумный пресет TF по диапазону данных
-    if (mHistDlg)
-    {
-        mHistDlg->close();
-        mHistDlg = nullptr;
-    }
-
+    reloadHistogram();
     reloadTfMenu();
     pump(78);
 

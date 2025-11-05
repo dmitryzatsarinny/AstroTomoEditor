@@ -23,8 +23,10 @@
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Filename).moc</QtMocFileName>
     </ClCompile>
+    <ClCompile Include="Services\CornerGrip.cpp" />
     <ClCompile Include="Services\DicomRange.cpp" />
     <ClCompile Include="Services\DicomSniffer.cpp" />
+    <ClCompile Include="Services\Save3DR.cpp" />
     <ClCompile Include="Services\VolumeFix3DR.cpp" />
     <ClCompile Include="Window\Explorer\ExplorerDialog.cpp" />
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
@@ -48,8 +50,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <QtMoc Include="Services\CornerGrip.h" />
     <ClInclude Include="Services\DicomRange.h" />
     <ClInclude Include="Services\PatientInfo.h" />
+    <ClInclude Include="Services\Save3DR.h" />
     <ClInclude Include="Services\VolumeFix3DR.h" />
     <QtMoc Include="Window\Render\HistogramDialog.h" />
     <ClInclude Include="Window\Render\Tools.h" />
@@ -148,7 +152,8 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>D:\Library\vtk-dicom\install\Debug\lib;D:\Library\vtk\install\debug\lib;D:\Library\GDCM\install\Debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vtkDICOM-9.5d.lib;gdcmMSFF.lib;vtkgdcm-9.5d.lib;vtkCommonMath-9.5d.lib;vtkCommonCore-9.5d.lib;vtkCommonDataModel-9.5d.lib;vtkImagingStencil-9.5d.lib;vtkFiltersPoints-9.5d.lib;vtkImagingMorphological-9.5d.lib;vtkImagingHybrid-9.5d.lib;vtkImagingMath-9.5d.lib;vtkFiltersModeling-9.5d.lib;vtkIOGeometry-9.5d.lib;vtkCommonExecutionModel-9.5d.lib;vtkCommonTransforms-9.5d.lib;vtkInteractionWidgets-9.5d.lib;vtkRenderingAnnotation-9.5d.lib;vtkDICOMParser-9.5d.lib;vtkIOCore-9.5d.lib;vtkIOImage-9.5d.lib;vtkImagingCore-9.5d.lib;vtkImagingGeneral-9.5d.lib;vtkImagingColor-9.5d.lib;vtkFiltersCore-9.5d.lib;vtkFiltersGeneral-9.5d.lib;vtkFiltersSources-9.5d.lib;vtkInteractionStyle-9.5d.lib;vtkRenderingCore-9.5d.lib;vtkRenderingOpenGL2-9.5d.lib;vtkRenderingFreeType-9.5d.lib;vtkRenderingContext2D-9.5d.lib;vtkRenderingVolume-9.5d.lib;vtkRenderingVolumeOpenGL2-9.5d.lib;vtkGUISupportQt-9.5d.lib;vtksys-9.5d.lib;vtkloguru-9.5d.lib;vtkzlib-9.5d.lib;vtklz4-9.5d.lib;vtklzma-9.5d.lib;vtkjpeg-9.5d.lib;vtkpng-9.5d.lib;vtktiff-9.5d.lib;vtkglad-9.5d.lib;vtkfreetype-9.5d.lib;vtkexpat-9.5d.lib;vtklibxml2-9.5d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>delayimp.lib;vtkDICOM-9.5d.lib;gdcmMSFF.lib;vtkgdcm-9.5d.lib;vtkCommonMath-9.5d.lib;vtkCommonCore-9.5d.lib;vtkCommonDataModel-9.5d.lib;vtkImagingStencil-9.5d.lib;vtkFiltersPoints-9.5d.lib;vtkImagingMorphological-9.5d.lib;vtkImagingHybrid-9.5d.lib;vtkImagingMath-9.5d.lib;vtkFiltersModeling-9.5d.lib;vtkIOGeometry-9.5d.lib;vtkCommonExecutionModel-9.5d.lib;vtkCommonTransforms-9.5d.lib;vtkInteractionWidgets-9.5d.lib;vtkRenderingAnnotation-9.5d.lib;vtkDICOMParser-9.5d.lib;vtkIOCore-9.5d.lib;vtkIOImage-9.5d.lib;vtkImagingCore-9.5d.lib;vtkImagingGeneral-9.5d.lib;vtkImagingColor-9.5d.lib;vtkFiltersCore-9.5d.lib;vtkFiltersGeneral-9.5d.lib;vtkFiltersSources-9.5d.lib;vtkInteractionStyle-9.5d.lib;vtkRenderingCore-9.5d.lib;vtkRenderingOpenGL2-9.5d.lib;vtkRenderingFreeType-9.5d.lib;vtkRenderingContext2D-9.5d.lib;vtkRenderingVolume-9.5d.lib;vtkRenderingVolumeOpenGL2-9.5d.lib;vtkGUISupportQt-9.5d.lib;vtksys-9.5d.lib;vtkloguru-9.5d.lib;vtkzlib-9.5d.lib;vtklz4-9.5d.lib;vtklzma-9.5d.lib;vtkjpeg-9.5d.lib;vtkpng-9.5d.lib;vtktiff-9.5d.lib;vtkglad-9.5d.lib;vtkfreetype-9.5d.lib;vtkexpat-9.5d.lib;vtklibxml2-9.5d.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>vtkRenderingOpenGL2-9.5.dll;vtkInteractionStyle-9.5.dll;vtkInteractionWidgets-9.5.dll;vtkFiltersModeling-9.5.dll;vtkIOGeometry-9.5.dll;vtkgdcm-9.5.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -157,7 +162,8 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>D:\Library\vtk-dicom\install\Release\lib;D:\Library\vtk\install\Release\lib;D:\Library\GDCM\install\Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>vtkDICOM-9.5.lib;vtkgdcm-9.5.lib;gdcmMSFF.lib;vtkCommonMath-9.5.lib;vtkCommonCore-9.5.lib;vtkCommonDataModel-9.5.lib;vtkImagingMorphological-9.5.lib;vtkFiltersModeling-9.5.lib;vtkImagingStencil-9.5.lib;vtkImagingMath-9.5.lib;vtkIOGeometry-9.5.lib;vtkFiltersPoints-9.5.lib;vtkCommonExecutionModel-9.5.lib;vtkCommonTransforms-9.5.lib;vtkInteractionWidgets-9.5.lib;vtkRenderingAnnotation-9.5.lib;vtkDICOMParser-9.5.lib;vtkIOCore-9.5.lib;vtkIOImage-9.5.lib;vtkImagingCore-9.5.lib;vtkImagingGeneral-9.5.lib;vtkImagingColor-9.5.lib;vtkFiltersCore-9.5.lib;vtkFiltersGeneral-9.5.lib;vtkFiltersSources-9.5.lib;vtkInteractionStyle-9.5.lib;vtkRenderingCore-9.5.lib;vtkRenderingOpenGL2-9.5.lib;vtkRenderingFreeType-9.5.lib;vtkRenderingContext2D-9.5.lib;vtkRenderingVolume-9.5.lib;vtkRenderingVolumeOpenGL2-9.5.lib;vtkGUISupportQt-9.5.lib;vtksys-9.5.lib;vtkloguru-9.5.lib;vtkzlib-9.5.lib;vtklz4-9.5.lib;vtklzma-9.5.lib;vtkjpeg-9.5.lib;vtkpng-9.5.lib;vtktiff-9.5.lib;vtkglad-9.5.lib;vtkfreetype-9.5.lib;vtkexpat-9.5.lib;vtklibxml2-9.5.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>delayimp.lib;vtkDICOM-9.5.lib;vtkgdcm-9.5.lib;gdcmMSFF.lib;vtkCommonMath-9.5.lib;vtkCommonCore-9.5.lib;vtkCommonDataModel-9.5.lib;vtkImagingMorphological-9.5.lib;vtkFiltersModeling-9.5.lib;vtkImagingStencil-9.5.lib;vtkImagingMath-9.5.lib;vtkIOGeometry-9.5.lib;vtkFiltersPoints-9.5.lib;vtkCommonExecutionModel-9.5.lib;vtkCommonTransforms-9.5.lib;vtkInteractionWidgets-9.5.lib;vtkRenderingAnnotation-9.5.lib;vtkDICOMParser-9.5.lib;vtkIOCore-9.5.lib;vtkIOImage-9.5.lib;vtkImagingCore-9.5.lib;vtkImagingGeneral-9.5.lib;vtkImagingColor-9.5.lib;vtkFiltersCore-9.5.lib;vtkFiltersGeneral-9.5.lib;vtkFiltersSources-9.5.lib;vtkInteractionStyle-9.5.lib;vtkRenderingCore-9.5.lib;vtkRenderingOpenGL2-9.5.lib;vtkRenderingFreeType-9.5.lib;vtkRenderingContext2D-9.5.lib;vtkRenderingVolume-9.5.lib;vtkRenderingVolumeOpenGL2-9.5.lib;vtkGUISupportQt-9.5.lib;vtksys-9.5.lib;vtkloguru-9.5.lib;vtkzlib-9.5.lib;vtklz4-9.5.lib;vtklzma-9.5.lib;vtkjpeg-9.5.lib;vtkpng-9.5.lib;vtktiff-9.5.lib;vtkglad-9.5.lib;vtkfreetype-9.5.lib;vtkexpat-9.5.lib;vtklibxml2-9.5.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <DelayLoadDLLs>vtkRenderingOpenGL2-9.5.dll;vtkInteractionStyle-9.5.dll;vtkInteractionWidgets-9.5.dll;vtkFiltersModeling-9.5.dll;vtkIOGeometry-9.5.dll;vtkgdcm-9.5.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="Configuration">

@@ -110,6 +110,12 @@
     <ClCompile Include="Services\DicomRange.cpp">
       <Filter>Source Files\Services</Filter>
     </ClCompile>
+    <ClCompile Include="Services\Save3DR.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\CornerGrip.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -146,6 +152,9 @@
       <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
     <ClInclude Include="Services\DicomRange.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\Save3DR.h">
       <Filter>Header Files\Services</Filter>
     </ClInclude>
   </ItemGroup>
@@ -188,6 +197,9 @@
     </QtMoc>
     <QtMoc Include="Window\Render\HistogramDialog.h">
       <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Services\CornerGrip.h">
+      <Filter>Header Files\Services</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>

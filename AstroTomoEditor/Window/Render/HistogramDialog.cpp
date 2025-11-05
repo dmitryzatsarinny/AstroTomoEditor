@@ -34,10 +34,11 @@ static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
     return out;
 }
 
-HistogramDialog::HistogramDialog(QWidget* parent, vtkImageData* image)
+HistogramDialog::HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* image)
     : QDialog(parent), mImage(image)
 {
     setWindowTitle(tr("Histogram"));
+    Dicom = DI;
     setModal(false);
     resize(860, 460);
     buildUi();
@@ -64,7 +65,7 @@ void HistogramDialog::buildUi()
 
     auto* row = new QHBoxLayout();
     row->addStretch();
-    mBtnAuto = new QPushButton(tr("Автодиапазон"), this);
+    mBtnAuto = new QPushButton(tr("Auto Range"), this);
     row->addWidget(mBtnAuto);
     connect(mBtnAuto, &QPushButton::clicked, this, &HistogramDialog::autoRange);
     v->addLayout(row);
@@ -122,23 +123,6 @@ void HistogramDialog::buildHistogram()
     for (int i = 0; i < nx * ny * nz; i++)
         mH[(int)*(p0 + i)]++;
 
-    //// тройной цикл с byte-increments
-    //const uint8_t* pz = p0;
-    //for (int k = 0; k < nz; k += step) {
-    //    const uint8_t* py = pz;
-    //    for (int j = 0; j < ny; j += step) {
-    //        const uint8_t* px = py;
-    //        for (int i = 0; i < nx; i += step) {
-    //            uint8_t v = *px;
-    //            //if (mIgnoreZeros && v == 0) continue;
-    //            int bin = std::clamp(int(v), 0, 255);
-    //            mH[bin]++;
-    //            px += incX * step;   // смещение по X — в байтах
-    //        }
-    //        py += incY * step;       // смещение по Y — в байтах
-    //    }
-    //    pz += incZ * step;           // смещение по Z — в байтах
-    //}
     mH[0] = 0;
     mSmooth = smoothBox(mH, 9);
 }
@@ -251,76 +235,155 @@ static double percentileCap(const QVector<quint64>& h, double q /*0..1*/)
 
 void HistogramDialog::paintCanvas()
 {
-    const int w = std::max(300, mCanvas->width());
-    const int h = std::max(160, mCanvas->height());
+    const int w = std::max(360, mCanvas->width());
+    const int h = std::max(220, mCanvas->height());
     mCache = QImage(w, h, QImage::Format_ARGB32_Premultiplied);
     mCache.fill(Qt::transparent);
     QPainter p(&mCache);
-    p.fillRect(0, 0, w, h, QColor(22, 23, 26));
+    p.setRenderHint(QPainter::Antialiasing, true);
 
-    const QRectF r = QRectF(60, 18, w - 60 - 24, h - 48 - 12);
-    p.setPen(QColor(255, 255, 255, 30)); p.drawRect(r);
+    // --- Calm dark palette ---
+    const QColor bg(62, 66, 73);          // фон
+    const QColor grid(102, 108, 116);     // сетка
+    const QColor axisCol(232, 235, 238);  // оси/подписи
+    const QColor lineCol(215, 60, 60);    // линия
+    const QColor fillAll(210, 215, 222, 60);  // серая заливка вне окна
+    const QColor fillSel(235, 120, 120, 70);  // розовая заливка в окне
+    const QColor limitCol(90, 200, 90);   // зелёные ограничители
 
-    // --- робастная нормализация ---
-    // база для масштаба: либо максимум по всем, либо по 99.5 перцентилю
+    p.fillRect(0, 0, w, h, bg);
+
+    // Поле графика
+    const QRectF r(78, 32, w - 120, h - 96);
+
+    // --- нормализация (как было) ---
     QVector<quint64> hForNorm = mH;
-    if (mIgnoreZeros && !hForNorm.isEmpty()) hForNorm[0] = 0; // не даём нулевому бину доминировать
-    const double cap = percentileCap(hForNorm, 0.995);        // мягкий клип
+    if (mIgnoreZeros && !hForNorm.isEmpty()) hForNorm[0] = 0;
+    const double cap = percentileCap(hForNorm, 0.995);
     const double denom = (cap > 0.0) ? cap : 1.0;
-
     auto val = [&](int i)->double {
         const double v = (i >= 0 && i < mSmooth.size()) ? mSmooth[i] : 0.0;
-        return std::clamp(v / (denom * 0.95), 0.0, 1.0);
+        return std::clamp(v / denom, 0.0, 1.0);
         };
 
-    // кривая
-    QPainterPath pathAll, pathSel;
-    pathAll.moveTo(r.left(), r.bottom());
-    pathSel.moveTo(r.left(), r.bottom());
-    for (int i = 0; i < 256; ++i) {
-        const double x = r.left() + dataToX(i) * r.width();
-        const double y = r.bottom() - r.height() * std::clamp(val(i), 0.0, 1.0);
-        pathAll.lineTo(x, y);
-        if (i >= mLo && i <= mHi) pathSel.lineTo(x, y);
-        else                      pathSel.lineTo(x, r.bottom());
+    // --- сетка Y ---
+    p.setPen(QPen(grid, 1));
+    QFontMetrics fm(p.font());
+    const double stepY = niceStep(cap / 5.0);
+    for (double v = 0; v <= cap + 1e-9; v += stepY) {
+        const double y = r.bottom() - (v / cap) * r.height();
+        p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
+        QString lbl;
+        if (v >= 1e6) lbl = QString::number(v / 1e6, 'f', 1) + "M";
+        else if (v >= 1e3) lbl = QString::number(v / 1e3, 'f', 0) + "k";
+        else               lbl = QString::number(int(std::round(v)));
+        p.setPen(axisCol);
+        p.drawText(QPointF(r.left() - fm.horizontalAdvance(lbl) - 10, y + fm.ascent() / 3), lbl);
+        p.setPen(QPen(grid, 1));
     }
-    pathAll.lineTo(r.right(), r.bottom()); pathAll.closeSubpath();
-    p.fillPath(pathAll, QColor(200, 220, 220, 60));
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(QPen(QColor(220, 60, 60, 220), 2.0));
-    p.drawPath(pathSel);
 
-    // зелёные ограничители + подписи (ОСЬ a..b)
+    // --- сетка X + аккуратная центровка подписей ---
+    const double a = mAxisMin, b = mAxisMax;
+    const double full = b - a;
+    const double stepX = niceStep(full / 8.0);
+    QFontMetrics fmX(p.font());
+    auto drawXLabel = [&](double x, const QString& s) {
+        const int tw = fmX.horizontalAdvance(s);
+        // если подпись у левого/правого края — прижимаем, иначе центрируем
+        double left = x - tw / 2.0;
+        if (left < r.left() + 1) left = r.left() + 1;
+        if (left + tw > r.right() - 1) left = r.right() - 1 - tw;
+        p.drawText(QPointF(left, r.bottom() + 22), s);
+        };
+
+    for (double v = std::ceil(a / stepX) * stepX; v <= b + 1e-9; v += stepX) {
+        const int d = dataFromAxis(v);
+        const double x = r.left() + dataToX(d) * r.width();
+        p.setPen(QPen(grid, 1));
+        p.drawLine(QPointF(x, r.bottom()), QPointF(x, r.top()));
+        p.setPen(axisCol);
+        drawXLabel(x, QString::number(int(std::lround(v))));
+    }
+
+    // --- готовим пути: вся гистограмма и окно выбора ---
+    QPainterPath pathAll, pathSel, pathLine;
+    auto addPoint = [&](int i, QPainterPath& ph) {
+        const double x = r.left() + dataToX(i) * r.width();
+        const double y = r.bottom() - r.height() * val(i);
+        ph.lineTo(x, y);
+        };
+
+    // полная область
+    pathAll.moveTo(r.left(), r.bottom());
+    for (int i = 0; i < 256; ++i) addPoint(i, pathAll);
+    pathAll.lineTo(r.right(), r.bottom()); pathAll.closeSubpath();
+
+    // только между mLo..mHi
+    pathSel.moveTo(r.left() + dataToX(mLo) * r.width(), r.bottom());
+    for (int i = mLo; i <= mHi; ++i) addPoint(i, pathSel);
+    pathSel.lineTo(r.left() + dataToX(mHi) * r.width(), r.bottom());
+    pathSel.closeSubpath();
+
+    // линия контура (по всем точкам)
+    pathLine.moveTo(r.left(), r.bottom() - r.height() * val(0));
+    for (int i = 1; i < 256; ++i) {
+        const double x = r.left() + dataToX(i) * r.width();
+        const double y = r.bottom() - r.height() * val(i);
+        pathLine.lineTo(x, y);
+    }
+
+    // заливки
+    p.fillPath(pathAll, fillAll);  // серая везде
+    p.fillPath(pathSel, fillSel);  // розовая только внутри окна
+
+    // контур
+    p.setPen(QPen(lineCol, 2.0));
+    p.drawPath(pathLine);
+
+    // --- зелёные ограничители ---
     auto drawLimit = [&](int d) {
         const double x = r.left() + dataToX(d) * r.width();
         const double vAxis = axisFromData(d);
-        p.setPen(QPen(QColor(20, 120, 20), 2.0));
+        p.setPen(QPen(limitCol, 2.0));
         p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
-        p.setPen(QColor(20, 120, 20));
+        p.setPen(limitCol);
         QFont f = p.font(); f.setBold(true); p.setFont(f);
         p.drawText(QPointF(x - 16, r.top() - 6), QString::number(std::lround(vAxis)));
+        p.setFont(QFont());
         };
     drawLimit(mLo);
     drawLimit(mHi);
 
-    // ось X: подписи по a..b
-    p.setPen(QColor(255, 255, 255, 160));
-    p.drawText(QPointF(8, 14), tr("N"));
-    p.drawText(QPointF(w - 40, h - 6), tr("HU")); // подпись оси X (для КТ)
+    // --- оси со стрелками ---
+    auto arrow = [&](QPointF a0, QPointF a1) {
+        p.setPen(QPen(axisCol, 2));
+        p.drawLine(a0, a1);
+        const double L = 8.0;
+        const double ang = std::atan2(a1.y() - a0.y(), a1.x() - a0.x());
+        QPointF u(a1.x() - L * std::cos(ang - 0.35), a1.y() - L * std::sin(ang - 0.35));
+        QPointF v2(a1.x() - L * std::cos(ang + 0.35), a1.y() - L * std::sin(ang + 0.35));
+        p.drawLine(a1, u); p.drawLine(a1, v2);
+        };
+    arrow(QPointF(r.left(), r.bottom()), QPointF(r.right() + 12, r.bottom())); // X →
+    arrow(QPointF(r.left(), r.bottom()), QPointF(r.left(), r.top() - 12));     // Y ↑
 
-    const double a = mAxisMin, b = mAxisMax;
-    const double full = b - a;
-    const double step = niceStep(full / 6.0);
-    for (double v = std::ceil(a / step) * step; v <= b + 1e-9; v += step) {
-        const int d = dataFromAxis(v);
-        const double x = r.left() + dataToX(d) * r.width();
-        p.setPen(QColor(255, 255, 255, 50));
-        p.drawLine(QPointF(x, r.bottom()), QPointF(x, r.bottom() + 6));
-        p.setPen(QColor(255, 255, 255, 130));
-        p.drawText(QPointF(x - 18, r.bottom() + 20), QString::number(int(std::lround(v))));
-    }
+    // --- подписи осей (EN) + маленькие "N" и "HU" у стрелок ---
+    p.setPen(axisCol);
+    QFont f = p.font(); f.setBold(true); p.setFont(f);
+    p.drawText(QRectF(r.left(), h - 38, r.width(), 30),
+        Qt::AlignHCenter | Qt::AlignVCenter, Dicom.XTitle);
+    p.save();
+    p.translate(28, r.center().y());
+    p.rotate(-90);
+    p.drawText(QRectF(-r.height() / 2, -18, r.height(), 30),
+        Qt::AlignHCenter | Qt::AlignVCenter, Dicom.YTitle);
+    p.restore();
+    p.setFont(QFont());
+    // маленькие подписи у стрелок
+    p.drawText(QPointF(r.right() + 12, r.bottom() + 16), Dicom.XLable);
+    p.drawText(QPointF(r.left() - 14, r.top() - 12), Dicom.YLable);
 
-    // вывести
+    // вывод
     QPainter q(mCanvas);
     q.drawImage(0, 0, mCache);
 }

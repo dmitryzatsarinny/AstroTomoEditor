@@ -4,6 +4,7 @@
 #include "SeriesListPanel.h"
 #include "PlanarView.h"
 #include <QScopedValueRollback>
+#include <Services/Save3DR.h>
 
 namespace 
 {
@@ -113,42 +114,55 @@ void MainWindow::buildUi()
     mFooter->setObjectName("InnerStatusBar");
     mFooter->setFixedHeight(28);
     auto* fb = new QHBoxLayout(mFooter);
-    fb->setContentsMargins(8, 4, 8, 4);
+    fb->setContentsMargins(20, 4, 20, 4);
     fb->setSpacing(8);
-
-    // центрируем текст
-    auto* centerWrap = new QWidget(mFooter);
-    auto* cLay = new QHBoxLayout(centerWrap);
-    cLay->setContentsMargins(0, 0, 0, 0);
-    cLay->addStretch();
-    mStatusText = new QLabel(tr("Ready"), centerWrap);
-    mStatusText->setAlignment(Qt::AlignCenter);
-    cLay->addWidget(mStatusText);
-    cLay->addStretch();
 
     // прогресс (справа от текста)
     mProgBox = new QWidget(mFooter);
     auto* pbLay = new QHBoxLayout(mProgBox);
     pbLay->setContentsMargins(0, 0, 0, 0);
+    constexpr int kProgWidth = 180;
+
     mProgress = new QProgressBar(mProgBox);
     mProgress->setTextVisible(false);
     mProgress->setFixedHeight(4);
-    mProgress->setFixedWidth(180);
+    mProgress->setFixedWidth(kProgWidth);
     mProgress->setRange(0, 100);
     mProgress->setValue(0);
+    mProgBox->setVisible(false);
     pbLay->addWidget(mProgress);
+    
+    // чтобы место сохранялось даже при hide()
+    auto pol = mProgBox->sizePolicy();
+    pol.setRetainSizeWhenHidden(true);
+    mProgBox->setSizePolicy(pol);
+    mProgBox->setFixedWidth(kProgWidth);
     mProgBox->setVisible(false);
 
+    auto* leftMirror = new QWidget(mFooter);
+    leftMirror->setFixedWidth(kProgWidth);
+    leftMirror->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+
+    // --- ЦЕНТР: текст в расширяющемся контейнере ---
+    auto* centerWrap = new QWidget(mFooter);
+    auto* cLay = new QHBoxLayout(centerWrap);
+    cLay->setContentsMargins(0, 0, 0, 0);
+
+    mStatusText = new QLabel(tr("Ready"), centerWrap);
+    mStatusText->setAlignment(Qt::AlignCenter);
+    mStatusText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    cLay->addWidget(mStatusText);
+
+    // --- Сборка футера: [лев.зеркало][центр][правый прогресс]
+    fb->addWidget(leftMirror, 0);
     fb->addWidget(centerWrap, 1);
     fb->addWidget(mProgBox, 0, Qt::AlignRight);
 
-    mSizeGrip = new QSizeGrip(mFooter);
-    mSizeGrip->setFixedSize(14, 14);
-    mSizeGrip->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    mSizeGrip->setToolTip(tr("Изменить размер"));
-    fb->addWidget(mSizeGrip, 0, Qt::AlignRight | Qt::AlignBottom);
-
     v->addWidget(mFooter, 0);
+
+    mCornerGrip = new CornerGrip(mFooter);
+    mCornerGrip->raise();
+    //QTimer::singleShot(0, this, [this] { positionCornerGrip(); });
 
     outer->addWidget(central);
     mOuter = outer;
@@ -163,6 +177,11 @@ void MainWindow::buildUi()
     sb->setStyleSheet("QStatusBar{ background:transparent; border:0; margin:0; padding:0; }");
     setStatusBar(sb);
     sb->hide(); 
+}
+
+void MainWindow::showEvent(QShowEvent* e) {
+    QMainWindow::showEvent(e);
+    positionCornerGrip();      // на случай показа после построения
 }
 
 void MainWindow::buildStyles()
@@ -365,6 +384,29 @@ void MainWindow::wireSignals()
 
     connect(mTitle, &TitleBar::volumeClicked, this, &MainWindow::onShowVolume3D);
     connect(mTitle, &TitleBar::planarClicked, this, &MainWindow::onShowPlanar2D);
+
+    // Подписка на клик из заголовка
+    connect(mTitle, &TitleBar::save3DRRequested, this, &MainWindow::onSave3DR);
+
+    // Горячая клавиша Ctrl+S (по желанию)
+    auto* actSave = new QAction(tr("Сохранить 3DR"), this);
+    actSave->setShortcut(QKeySequence::Save);
+    connect(actSave, &QAction::triggered, this, &MainWindow::onSave3DR);
+    addAction(actSave);
+}
+
+void MainWindow::onSave3DR()
+{
+    if (!mRenderView) return;
+
+    auto vol = mRenderView->image();
+    if (!vol) {
+        QMessageBox::warning(this, tr("Сохранение 3DR"), tr("Нет объёма для сохранения."));
+        return;
+    }
+
+    DicomInfo di = mRenderView->GetDicomInfo();
+    Save3DR::saveWithDialog(this, mRenderView->image(), &di);
 }
 
 void MainWindow::StartLoading()
@@ -384,7 +426,10 @@ void MainWindow::StartLoading()
 
 void MainWindow::StopLoading()
 {
-    QApplication::setOverrideCursor(Qt::ArrowCursor);
+    // Снять override-курсор(ы) со стека
+    while (QApplication::overrideCursor())
+        QApplication::restoreOverrideCursor();
+
     if (mUiToDisable) mUiToDisable->setEnabled(true);
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -430,7 +475,28 @@ void MainWindow::changeEvent(QEvent* e)
 {
     QMainWindow::changeEvent(e);
     if (e->type() == QEvent::WindowStateChange)
+    {
         applyMaximizedUi(isMaximized());
+        positionCornerGrip();
+    }
+}
+
+void MainWindow::resizeEvent(QResizeEvent* e)
+{
+    QMainWindow::resizeEvent(e);
+    positionCornerGrip();
+}
+
+void MainWindow::positionCornerGrip()
+{
+    if (!mFooter || !mCornerGrip)
+        return;
+
+    const int insetX = 2;
+    const int insetY = 2;
+    const int x = mFooter->width() - mCornerGrip->width() - insetX;
+    const int y = mFooter->height() - mCornerGrip->height() - insetY;
+    mCornerGrip->move(x, y);
 }
 
 void MainWindow::applyMaximizedUi(bool maxed)
@@ -441,7 +507,7 @@ void MainWindow::applyMaximizedUi(bool maxed)
     // Проставим property, чтобы стиль подхватил разные радиусы
     if (mCentralCard) { mCentralCard->setProperty("maxed", maxed); mCentralCard->style()->unpolish(mCentralCard); mCentralCard->style()->polish(mCentralCard); }
     if (mTitle) { mTitle->setProperty("maxed", maxed);       mTitle->style()->unpolish(mTitle);             mTitle->style()->polish(mTitle); }
-    if (mSizeGrip) mSizeGrip->setVisible(!maxed);
+    if (mCornerGrip) mCornerGrip->setVisible(!maxed);
 }
 
 void MainWindow::onExitRequested()
@@ -470,7 +536,7 @@ void MainWindow::onSeriesActivated(const QString& /*seriesUID*/, const QVector<Q
     if (mRenderView)
         mRenderView->hideOverlays();
 
-    if (mTitle) { mTitle->set2DVisible(false); mTitle->set3DVisible(false); mTitle->set3DChecked(false); mTitle->set2DChecked(false); }
+    if (mTitle) { mTitle->set2DVisible(false); mTitle->set3DVisible(false); mTitle->set3DChecked(false); mTitle->set2DChecked(false); mTitle->setSaveVisible(false);}
 
     mViewerStack->setCurrentWidget(mPlanar);
     mStatusText->setText(tr("Series loading…"));
@@ -612,6 +678,7 @@ void MainWindow::onShowVolume3D()
         mViewerStack->addWidget(mRenderView);
     }
 
+    mTitle->setSaveVisible(true);
 
     mRenderView->setVolume(vtkVol, mPlanar->GetDicomInfo());
     mViewerStack->setCurrentWidget(mRenderView);
@@ -630,6 +697,8 @@ void MainWindow::onShowPlanar2D()
 
         // <<< здесь обновляем состояние кнопок TitleBar
         if (mTitle) { mTitle->set2DChecked(true); mTitle->set3DChecked(false); }
+
+        mTitle->setSaveVisible(false);
 
         mTitle->set2DVisible(true);
         if (mPlanar->IsAvalibleToReconstruct())

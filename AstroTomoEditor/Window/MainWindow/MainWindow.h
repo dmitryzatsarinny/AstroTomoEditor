@@ -7,6 +7,7 @@
 #include <Window/Explorer/ExplorerDialog.h>
 #include <Window/Render/RenderView.h>
 #include <QElapsedTimer>
+#include <Services/CornerGrip.h>
 
 class QSplitter;
 class QStackedWidget;
@@ -52,8 +53,12 @@ private slots:
     // окно с данными пациента
     void showPatientDetails();
 
+    void onSave3DR();
+
 protected:
     void changeEvent(QEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
+    void showEvent(QShowEvent*) override;
 
 private:
     // построение и настройка UI
@@ -64,6 +69,7 @@ private:
     void applyMaximizedUi(bool maximized);
     void ensurePatientDialog();
     void showInfo(const QString& text);
+    void positionCornerGrip();
 
 private:
     // --- данные контекста ---
@@ -88,7 +94,8 @@ private:
     QLabel* mStatusText{ nullptr };
     QWidget* mProgBox{ nullptr };
     QProgressBar* mProgress{ nullptr };
-    QSizeGrip* mSizeGrip{ nullptr };
+    CornerGrip* mCornerGrip = nullptr;
+    
 
     // --- окно пациента ---
     QPointer<QWidget> mPatientDlg;

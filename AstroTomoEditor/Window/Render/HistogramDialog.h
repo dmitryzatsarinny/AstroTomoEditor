@@ -2,6 +2,7 @@
 #include <QDialog>
 #include <QVector>
 #include <QImage>
+#include <Services/DicomRange.h>
 
 
 class QWidget;
@@ -11,7 +12,7 @@ class vtkImageData;
 class HistogramDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit HistogramDialog(QWidget* parent, vtkImageData* image = nullptr);
+    explicit HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* image = nullptr);
 
     // Фиксированная ось a..b для подписей (a ↔ 0, b ↔ 255)
     void setFixedAxis(bool enabled, double a = 0.0, double b = 255.0);
@@ -74,7 +75,7 @@ private:
     QVector<quint64> mH;        // 256 бинов
     QVector<double>  mSmooth;   // сглаженная кривая (визуализация)
     QImage           mCache;
-
+    DicomInfo        Dicom;
     // ось для подписей
     bool   mAxisFixed{ false };
     double mAxisMin{ 0.0 };

@@ -97,7 +97,6 @@
 #include <vtkDataArray.h>
 #include <vtkDICOMParser.h>
 #include <vtkDICOMTag.h>
-#include <vtkOutputWindow.h>
 #include <vtkFileOutputWindow.h>
 #include <vtkImageCast.h>
 

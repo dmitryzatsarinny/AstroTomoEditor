@@ -76,8 +76,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     mainLay->addWidget(m_view, 1);            // Добавляем вид в основной лэйаут (stretch = 1).
 
     // Кнопки
-    m_buttons = new QDialogButtonBox(         // Создаём стандартные кнопки Ok/Cancel.
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
+    m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     m_buttons->button(QDialogButtonBox::Ok)->setText(tr("OK"));     // Локализуем надписи.
     m_buttons->button(QDialogButtonBox::Cancel)->setText(tr("Cancel"));
     mainLay->addWidget(m_buttons);            // Вставляем блок кнопок в низ диалога.
@@ -101,14 +100,16 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     mStatusBar->show();
     mStatusText->clear();
 
-    if (auto* mainLy = qobject_cast<QVBoxLayout*>(layout())) {
+    if (auto* mainLy = qobject_cast<QVBoxLayout*>(layout())) 
+    {
         int i = mainLy->indexOf(m_buttons);
-        if (i < 0) i = mainLy->count();
-        mainLy->insertWidget(i, mStatusBar); // статус-бар над кнопками
+        if (i < 0) 
+            i = mainLy->count();
+        mainLy->insertWidget(i, mStatusBar);
     }
-    else {
+    else 
+    {
         auto* v = new QVBoxLayout(this);
-        // здесь должны быть твои основные виджеты...
         v->addWidget(mStatusBar);
         setLayout(v);
     }
