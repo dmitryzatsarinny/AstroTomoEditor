@@ -74,9 +74,6 @@
     <ClCompile Include="Window\MainWindow\TitleBar.cpp">
       <Filter>Source Files\Window\MainWindow</Filter>
     </ClCompile>
-    <ClCompile Include="Window\MainWindow\SeriesListPanel.cpp">
-      <Filter>Source Files\Window\MainWindow</Filter>
-    </ClCompile>
     <ClCompile Include="Window\MainWindow\PlanarView.cpp">
       <Filter>Source Files\Window\MainWindow</Filter>
     </ClCompile>
@@ -200,6 +197,9 @@
     </QtMoc>
     <QtMoc Include="Services\CornerGrip.h">
       <Filter>Header Files\Services</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\SeriesListPanel.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>

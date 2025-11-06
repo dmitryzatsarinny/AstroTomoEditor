@@ -325,12 +325,23 @@ void MainWindow::wireSignals()
             mStatusText->setText(tr("DICOM files detection 0%"));
             StartLoading();
             mProgBox->setVisible(true);
-            mProgress->setRange(0, std::max(1, total));
+            mProgress->setRange(0, std::max(1, total));  // ← переключит из 0..0 в 0..total
             mProgress->setValue(0);
         });
 
     connect(mSeries, &SeriesListPanel::scanProgress, this,
         [this](int processed, int total, const QString& path) {
+
+            if (total <= 0) {
+                // Ещё идёт перечисление файлов — показываем индикатор занято,
+                // чтобы не "залипать" на Prepare to scan
+                mStatusText->setText(tr("Searching… %1 files checked: %2")
+                    .arg(processed)
+                    .arg(QFileInfo(path).fileName()));
+                mProgress->setRange(0, 0); // индетерминатный режим
+                return;
+            }
+
             const int pct = (total > 0) ? (processed * 100 / total) : 0;
             mStatusText->setText(tr("Header reading: %1 (%2%)")
                 .arg(QFileInfo(path).fileName())
@@ -437,10 +448,13 @@ void MainWindow::StopLoading()
 void MainWindow::onOpenStudy()
 {
     if (mTitle) { mTitle->set2DChecked(true); mTitle->set3DChecked(false); }
-    mStatusText->setText(tr("Prepare to scan. Please wait."));
-    qApp->processEvents(QEventLoop::AllEvents);
 
-    // Запуск на следующем тике
+    mProgBox->setVisible(true);
+    mProgress->setRange(0, 0);
+    mStatusText->setText(tr("Searching DICOM files…"));
+    StartLoading();
+
+    qApp->processEvents(QEventLoop::AllEvents);
     QTimer::singleShot(0, this, &MainWindow::startScan);
 }
 

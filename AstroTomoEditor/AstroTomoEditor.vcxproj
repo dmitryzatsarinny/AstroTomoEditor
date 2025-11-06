@@ -32,7 +32,12 @@
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
     <ClCompile Include="Window\MainWindow\MainWindow.cpp" />
     <ClCompile Include="Window\MainWindow\PlanarView.cpp" />
-    <ClCompile Include="Window\MainWindow\SeriesListPanel.cpp" />
+    <QtMoc Include="Window\MainWindow\SeriesListPanel.cpp">
+      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
+      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Filename).moc</QtMocFileName>
+      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|x64'">input</DynamicSource>
+      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Filename).moc</QtMocFileName>
+    </QtMoc>
     <ClCompile Include="Window\Render\ClipBoxController.cpp" />
     <ClCompile Include="Window\Render\HistogramDialog.cpp" />
     <ClCompile Include="Window\Render\RenderView.cpp" />

@@ -26,7 +26,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     m_pathCombo->setEditable(true);                         // Разрешаем ручной ввод пути (lineEdit внутри).
     m_typeCombo = new QComboBox(this);                      // Комбо со списком типов.
     m_magicCheck = new QCheckBox(tr("Deep Checking"), this); // Опция глубокой проверки.
-    m_magicCheck->setToolTip(tr("Проверять файлы без DICOM-расширения по сигнатуре (может замедлять загрузку каталогов)."));
+    m_magicCheck->setToolTip(tr("Check files without DICOM extension by signature."));
     m_magicCheck->setChecked(false);
 
     m_typeCombo->addItem(tr("DICOM"), int(ContentFilterProxy::DicomFiles));
@@ -244,7 +244,7 @@ void ExplorerDialog::populateDrives()
         QString label = root;                           // Метка по умолчанию — сам путь.
 #ifdef Q_OS_WIN
         if (root.size() >= 2 && root[1] == ':')
-            label = tr("Диск %1").arg(root.left(2));    // Красивее: "Диск C:".
+            label = tr("Disk %1").arg(root.left(2));    // Красивее: "Диск C:".
 #endif
         m_driveCombo->addItem(label, root);             // Текст в UI и userData = сам путь.
     }
