@@ -10,9 +10,23 @@ enum class Action {
     Scissors,
     InverseScissors,
     RemoveUnconnected,
-    RemoveSelected,
     RemoveConnected,
-    // задел: FillHoles, MorphOpen, ...
+    RemoveSelected,
+    VoxelEraser,
+    VoxelRecovery,
+    AddBase,
+    FillEmpty,
+    TotalSmoothing,
+    PrepareSurface,
+    ClearSurface,
+    Plus,
+    Minus
+};
+
+enum class App {
+    Histogram,
+    Templates,
+    Electrodes
 };
 
 namespace Tools {
@@ -21,5 +35,9 @@ namespace Tools {
         std::function<void(Action)> onAction);
 
     QString ToDisplayName(Action a);
-    void ApplyAction(vtkVolumeProperty* prop, Action action, double min, double max);
+
+    QMenu* CreateAppMenu(QWidget* parent,
+        std::function<void(App)> onAction);
+
+    QString ToDisplayAppName(App a);
 }

@@ -48,6 +48,12 @@ public:
     bool IsLoading() { return loading; }
     void StartLoading() { loading = true; }
     void StopLoading() { loading = false; }
+    struct ValidationReport {
+        QVector<QString> good, bad;
+        QString reason;
+    };
+    static ValidationReport filterSeriesByConsistency(const QVector<QString>& files);
+
 signals:
     void loadStarted(int total);
     void loadProgress(int processed, int total);
@@ -62,8 +68,6 @@ public slots:
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
-    void wheelEvent(QWheelEvent* e) override;
-    void keyPressEvent(QKeyEvent* e) override;
     bool eventFilter(QObject* obj, QEvent* ev) override;
     
 private:
@@ -86,11 +90,8 @@ private:
         }
     };
     static bool readPixelKeyQuick(const QString& file, DicomPixelKey& out, QString* errMsg = nullptr);
-    struct ValidationReport {
-        QVector<QString> good, bad;
-        QString reason;
-    };
-    static ValidationReport filterSeriesByConsistency(const QVector<QString>& files);
+    
+    
 
 private:
     DicomInfo Dicom;

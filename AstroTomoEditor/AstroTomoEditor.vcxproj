@@ -32,6 +32,7 @@
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
     <ClCompile Include="Window\MainWindow\MainWindow.cpp" />
     <ClCompile Include="Window\MainWindow\PlanarView.cpp" />
+    <ClCompile Include="Window\Render\WheelSpinButton.cpp" />
     <QtMoc Include="Window\MainWindow\SeriesListPanel.cpp">
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Filename).moc</QtMocFileName>
@@ -55,6 +56,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <QtMoc Include="Window\Render\WheelSpinButton.h" />
     <QtMoc Include="Services\CornerGrip.h" />
     <ClInclude Include="Services\DicomRange.h" />
     <ClInclude Include="Services\PatientInfo.h" />
@@ -65,6 +67,7 @@
     <QtMoc Include="Window\Render\ToolsScissors.h" />
     <QtMoc Include="Window\Render\ToolsRemoveConnected.h" />
     <ClInclude Include="Window\Render\TransferFunction.h" />
+    <ClInclude Include="Window\Render\U8Span.h" />
     <ClInclude Include="Window\Render\VolumeStlExporter.h" />
     <QtMoc Include="Window\Render\TransferFunctionEditor.h" />
     <QtMoc Include="Window\Render\ClipBoxController.h" />
@@ -121,12 +124,12 @@
   </ImportGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'" Label="QtSettings">
     <QtInstall>QT6</QtInstall>
-    <QtModules>core;gui;widgets;opengl;openglwidgets</QtModules>
+    <QtModules>core;gui;widgets;concurrent;opengl;openglwidgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x64'" Label="QtSettings">
     <QtInstall>QT6</QtInstall>
-    <QtModules>core;gui;widgets;opengl;openglwidgets</QtModules>
+    <QtModules>core;gui;widgets;concurrent;opengl;openglwidgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">

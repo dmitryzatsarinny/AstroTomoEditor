@@ -16,7 +16,7 @@ TitleBar::TitleBar(QWidget* parent) : QWidget(parent)
     // LEFT
     mLeft = new QWidget(this);
     auto* l = new QHBoxLayout(mLeft);
-    l->setContentsMargins(0, 8, 0, 0);
+    l->setContentsMargins(0, 8, 6, 0);
     l->setSpacing(8);
 
     mIcon = new QLabel(mLeft);
@@ -26,6 +26,7 @@ TitleBar::TitleBar(QWidget* parent) : QWidget(parent)
 
     mAppTitle = new QLabel(tr("AstroDicomEditor"), mLeft);
     mAppTitle->setStyleSheet("font-weight:600; font-size:20px;");
+    mAppTitle->setContentsMargins(0, -3, 0, 0);
     l->addWidget(mAppTitle);
 
     mLeft->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
@@ -264,10 +265,24 @@ void TitleBar::set3DChecked(bool on)
 void TitleBar::setPatientInfo(const PatientInfo& info)
 {
     mInfo = info;
+    auto formatName = [](const QString& fullName) -> QString {
+        QStringList parts = fullName.split(' ', Qt::SkipEmptyParts);
+        if (parts.isEmpty())
+            return QStringLiteral("No Patient");
+
+        QString fam = parts.value(0);
+        QString ini;
+        if (parts.size() > 1)
+            ini += parts[1].left(1).toUpper() + ".";
+        if (parts.size() > 2)
+            ini += parts[2].left(1).toUpper() + ".";
+
+        return QString("%1 %2").arg(fam, ini).trimmed();
+        };
+
     const QString line = info.patientName.isEmpty()
         ? tr("No Patient")
-        : tr("%1  •  ID: %2  •  %3  •  %4")
-        .arg(info.patientName, info.patientId, info.sex, info.birthDate);
+        : tr("Patient: %1").arg(formatName(info.patientName));
 
     mPatientBtn->setText(line);
 

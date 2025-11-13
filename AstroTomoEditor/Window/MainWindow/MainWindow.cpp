@@ -70,7 +70,8 @@ void MainWindow::buildUi()
     // левая панель
     mSeries = new SeriesListPanel(mSplit);
     mSeries->setObjectName("SeriesPanel");
-    mSeries->setMinimumWidth(260);
+    mSeries->setMinimumWidth(100);
+    mSeries->setMaximumWidth(300);
     mSeries->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     // правая область — стек просмотров
@@ -321,13 +322,13 @@ void MainWindow::wireSignals()
         this, &MainWindow::showInfo);
 
     connect(mSeries, &SeriesListPanel::scanStarted, this,
-        [this](int total) {
-            mStatusText->setText(tr("DICOM files detection 0%"));
-            StartLoading();
-            mProgBox->setVisible(true);
-            mProgress->setRange(0, std::max(1, total));  // ← переключит из 0..0 в 0..total
-            mProgress->setValue(0);
-        });
+    [this](int total) {
+        mStatusText->setText(tr("DICOM files detection 0%"));
+        StartLoading();
+        mProgBox->setVisible(true);
+        mProgress->setRange(0, std::max(1, total));  // ← переключит из 0..0 в 0..total
+        mProgress->setValue(0);
+    });
 
     connect(mSeries, &SeriesListPanel::scanProgress, this,
         [this](int processed, int total, const QString& path) {

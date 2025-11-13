@@ -4,6 +4,7 @@
 #include <memory>
 #include <vtkSmartPointer.h>
 #include <QPoint>
+#include "U8Span.h"
 
 class QWidget;
 class QVTKOpenGLNativeWidget;
@@ -53,16 +54,41 @@ private:
     void redraw();
 
     // ядро
-    vtkSmartPointer<vtkImageData> makeBinaryMask(vtkImageData* src) const;  // uchar 0/1
-    bool screenToSeedIJK(const QPoint& pDevice, vtkImageData* binMask, int ijk[3]) const;
-    int  floodFill6(vtkImageData* binMask, const int seed[3], std::vector<uint8_t>& mark) const;
-    void applyKeepOnlySelected(vtkImageData* image, const std::vector<uint8_t>& mark) const;
-    void applyRemoveSelected(vtkImageData* image, const std::vector<uint8_t>& mark) const;
-
+    void makeBinaryMask(vtkImageData* m_image);  // uchar 0/1
+    bool screenToSeedIJK(const QPoint& pDevice, int ijk[3]) const;
+    int floodFill6(const Volume& bin, const int seed[3], std::vector<uint8_t>& mark) const;
+    void applyKeepOnlySelected(const std::vector<uint8_t>& mark);
+    void applyRemoveSelected(const std::vector<uint8_t>& mark);
+    void RemoveConnectedRegions(const std::vector<uint8_t>& mark, const int seed[3]) const;
+    
     // world↔ijk
     bool worldToIJK(const double world[3], int ijk[3]) const;
     void displayToWorld(double xd, double yd, double z01, double out[3]) const;
     void setHoverHighlightSizeVoxels(int r) { m_hoverRadiusVoxels = std::max(0, r); }
+
+    // Построить маску выбранной компоненты (1 = принадлежит компоненте seed)
+    bool buildSelectedComponentMask(vtkImageData* image, const int seed[3], std::vector<uint8_t>& outMask, int& outCount) const;
+
+    // Удалить несвязанные области (оставить только выбранную компоненту)
+    void removeUnconnected(const std::vector<uint8_t>& selMask);
+
+    // Снять «кожуру» за один шаг (обнулить граничные воксели mask) Возвращает число единиц в outMask после шага.
+    int peelOnce(const std::vector<uint8_t>& inMask, std::vector<uint8_t>& outMask, const int ext[6]) const;
+
+    // Оставить только часть маски, связанную с seed (через floodFill6)
+    int keepOnlyConnectedFromSeed(std::vector<uint8_t>& mask, const int ext[6], const int seed[3]) const;
+
+    // Умное снятие кожуры (итерации + порог «резкого падения») Возвращает число выполненных итераций (didPeelIters).
+    int smartPeel(std::vector<uint8_t>& mask, const std::vector<uint8_t>& selMask, const int ext[6], const int seed[3], double dropFrac, int maxIters) const;
+
+    // «Recovery»: дилатация внутри исходной выбранной компоненты
+    void recoveryDilate(std::vector<uint8_t>& mask, const std::vector<uint8_t>& selMask, const int ext[6], int iters) const;
+
+    // Применить бинарную маску к изображению: 0 — обнулить, 1 — оставить
+    void applyKeepMask(vtkImageData* image, const std::vector<uint8_t>& keepMask) const;
+
+    // быстрый поиск ближайшего непустого соседа
+    bool findNearestNonEmptyConnectedVoxel(vtkImageData* image, const int seed[3], int outIJK[3]) const;
 
 private:
     enum class State { Off, WaitingClick};
@@ -74,10 +100,13 @@ private:
 
     QVTKOpenGLNativeWidget* m_vtk = nullptr;
     vtkRenderer* m_renderer = nullptr;
-    vtkSmartPointer<vtkImageData> m_image;
     vtkVolume* m_volume = nullptr;
 
-    Action                         m_mode;
+    vtkImageData* m_image;
+    Volume m_vol;
+    Volume m_bin;
+
+    Action m_mode;
 
     std::function<void(vtkImageData*)> m_onImageReplaced;
     std::function<void()>              m_onFinished;
@@ -103,9 +132,6 @@ private:
     vtkSmartPointer<class vtkOutlineFilter>   mHoverOutline;
     vtkSmartPointer<class vtkPolyDataMapper>  mHoverMapper;
     vtkSmartPointer<class vtkActor>           mHoverActor;
-
-    // Кэш маски на время работы инструмента (чтобы не пересчитывать на каждый move)
-    vtkSmartPointer<vtkImageData> mHoverMask;
 
     int m_hoverRadiusVoxels{ 0 };
     void ensureHoverPipeline();

@@ -50,10 +50,10 @@ namespace DicomParcer
     QString mapSex(QString sx)
     {
         sx = sx.trimmed().toUpper();
-        if (sx == "M") return "М";
-        if (sx == "F") return "Ж";
-        if (sx == "O") return "Др.";
-        if (sx == "U") return "Неизв.";
+        if (sx == "M") return "Male";
+        if (sx == "F") return "Female";
+        if (sx == "O") return "Other";
+        if (sx == "U") return "No";
         return sx;
     }
 

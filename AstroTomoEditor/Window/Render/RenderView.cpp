@@ -33,6 +33,8 @@
 #include <vtkProperty.h>
 #include <vtkPolyDataNormals.h>
 #include <Services/DicomRange.h>
+#include <QTimer>
+#include <QLineEdit>
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
 VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
@@ -189,15 +191,47 @@ void RenderView::buildOverlay()
     rightPanel->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 
     auto* rv = new QVBoxLayout(rightPanel);
-    rv->setContentsMargins(0, 12, 12, 0);
+    rv->setContentsMargins(0, 42, 12, 0);
     rv->setSpacing(6);
+
+    auto makeSmallBtn = [&](QWidget* parent, const QString& text) {
+        auto* b = new QToolButton(parent);
+        b->setText(text);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setFocusPolicy(Qt::NoFocus);
+        b->setFixedSize(44, 26);
+        b->setStyleSheet(
+            "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
+            " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
+            "QToolButton:hover{ background:rgba(255,255,255,40); }"
+            "QToolButton:pressed{ background:rgba(255,255,255,70); }"
+            "QToolButton:checked{ background:rgba(0,180,100,140); }"
+        );
+        return b;
+        };
 
     auto makeBtn = [&](QWidget* parent, const QString& text) {
         auto* b = new QToolButton(parent);
         b->setText(text);
         b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
-        b->setFixedSize(56, 26);
+        b->setFixedSize(62, 26);
+        b->setStyleSheet(
+            "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
+            " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
+            "QToolButton:hover{ background:rgba(255,255,255,40); }"
+            "QToolButton:pressed{ background:rgba(255,255,255,70); }"
+            "QToolButton:checked{ background:rgba(0,180,100,140); }"
+        );
+        return b;
+        };
+
+    auto makeMiddleBtn = [&](QWidget* parent, const QString& text) {
+        auto* b = new QToolButton(parent);
+        b->setText(text);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setFocusPolicy(Qt::NoFocus);
+        b->setFixedSize(126, 26);
         b->setStyleSheet(
             "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
             " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
@@ -213,7 +247,7 @@ void RenderView::buildOverlay()
         b->setText(text);
         b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
-        b->setFixedSize(180, 26);
+        b->setFixedSize(146, 26);
         b->setStyleSheet(
             "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
             " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
@@ -223,6 +257,7 @@ void RenderView::buildOverlay()
         );
         return b;
         };
+
 
     mBtnAP = makeBtn(rightPanel, "AP");
     mBtnPA = makeBtn(rightPanel, "PA");
@@ -289,7 +324,7 @@ void RenderView::buildOverlay()
     th->addWidget(mBtnTF);
 
 
-    mBtnTools = makeBigBtn(topPanel, tr("Tools"));
+    mBtnTools = makeBigBtn(topPanel, tr("Edit"));
     mBtnTools->setCheckable(true);
 
 
@@ -324,12 +359,53 @@ void RenderView::buildOverlay()
     mBtnTools->setPopupMode(QToolButton::InstantPopup);
     th->addWidget(mBtnTools);
     
-    mBtnHist = makeBigBtn(topPanel, tr("Histogram"));
-    th->addWidget(mBtnHist);
-    connect(mBtnHist, &QToolButton::clicked, this, &RenderView::openHistogram);
+    mBtnShift = new WheelSpinButton(topPanel);
+    mBtnShift->setRange(1, 99);
+    mBtnShift->setValue(mShiftValue);
+    mBtnShift->setWheelStep(1);        // обычный шаг
+    th->addWidget(mBtnShift);
+
+    connect(mBtnShift, QOverload<int>::of(&QSpinBox::valueChanged),
+        this, [this](int v) {
+            onShiftChanged(v);
+        });
+
+
+    mBtnApps = makeMiddleBtn(topPanel, tr("Applications"));
+    mBtnApps->setCheckable(true);
+
+
+    mBtnApps->setStyleSheet(
+        mBtnApps->styleSheet() +
+        " QToolButton:checked{"
+        "   background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+        "     stop:0 rgba(0,200,120,160), stop:1 rgba(0,160,90,140));"
+        "   border:1px solid rgba(0,255,160,220);"
+        "   border-radius:6px;"
+        "   padding:0 8px;"
+        "}"
+        " QToolButton:checked:!pressed{"
+        "   outline: none;"
+        "}"
+    );
+
+
+    mAppsMenu = Tools::CreateAppMenu(mTopOverlay, [this](App a) { AppModeChanged(a); });
+    applyMenuStyle(mAppsMenu, mBtnApps->width());
+
+    connect(mAppsMenu, &QMenu::aboutToShow, this, [this] {
+        if (!mAppActive) return;
+        if (mHistDlg)
+            mHistDlg->close();
+        setAppUiActive(false, mCurrentApp);
+        });
+
+    mBtnApps->setMenu(mAppsMenu);
+    mBtnApps->setPopupMode(QToolButton::InstantPopup);
+    th->addWidget(mBtnApps);
 
     {
-        mBtnUndo = makeBtn(topPanel, "");
+        mBtnUndo = makeSmallBtn(topPanel, "");
         mBtnUndo->setToolButtonStyle(Qt::ToolButtonIconOnly);
         mBtnUndo->setIcon(QIcon(":/icons/Resources/undo-no.svg"));
         mBtnUndo->setIconSize(QSize(20, 20));
@@ -337,7 +413,7 @@ void RenderView::buildOverlay()
         mBtnUndo->setEnabled(false);
         th->addWidget(mBtnUndo);
 
-        mBtnRedo = makeBtn(topPanel, "");
+        mBtnRedo = makeSmallBtn(topPanel, "");
         mBtnRedo->setToolButtonStyle(Qt::ToolButtonIconOnly);
         mBtnRedo->setIcon(QIcon(":/icons/Resources/redo-no.svg"));
         mBtnRedo->setIconSize(QSize(20, 20));
@@ -421,6 +497,11 @@ BuildMaskedOTF(vtkPiecewiseFunction* base, double lo, double hi)
     return out;
 }
 
+void RenderView::onShiftChanged(int val)
+{
+    mShiftValue = val;
+}
+
 void RenderView::openHistogram()
 {
     if (!mImage || !mVolume) return;
@@ -428,6 +509,7 @@ void RenderView::openHistogram()
     mHistDlg->show();
     mHistDlg->raise();
     mHistDlg->activateWindow();
+    mHistDlg->refreshFromImage(mImage);
 }
 
 void RenderView::reloadHistogram()
@@ -491,6 +573,11 @@ void RenderView::reloadHistogram()
             mHistDlg = nullptr;
             });
 
+        mHistDlg->setOnFinished([this]()
+            {
+                setAppUiActive(false, mCurrentApp);
+            });
+
         mHistDlg->refreshFromImage(mImage);
     }
 }
@@ -542,7 +629,7 @@ void RenderView::commitNewImage(vtkImageData* im)
     // 3) обновить маппер и перерисовать
     setMapperInput(mImage);
     updateUndoRedoUi();
-    if (mHistDlg) 
+    if (mHistDlg && mHistDlg->isVisible())
         mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
 }
@@ -559,7 +646,7 @@ void RenderView::onUndo()
     mImage = prev;
     setMapperInput(mImage);
     updateUndoRedoUi();
-    if (mHistDlg) mHistDlg->refreshFromImage(mImage);
+    if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
 }
 
@@ -574,7 +661,7 @@ void RenderView::onRedo()
     mImage = next;
     setMapperInput(mImage);
     updateUndoRedoUi();
-    if (mHistDlg) mHistDlg->refreshFromImage(mImage);
+    if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
 }
 
@@ -585,13 +672,30 @@ void RenderView::setToolUiActive(bool on, Action a)
     if (on) 
     {
         mCurrentTool = a;
-        mBtnTools->setText(tr("Tools: %1").arg(Tools::ToDisplayName(a)));
+        mBtnTools->setText(tr("Edit: %1").arg(Tools::ToDisplayName(a)));
         mBtnTools->setChecked(true);
     }
     else 
     {
-        mBtnTools->setText(tr("Tools"));
+        mBtnTools->setText(tr("Edit"));
         mBtnTools->setChecked(false);
+    }
+}
+
+void RenderView::setAppUiActive(bool on, App a)
+{
+    mAppActive = on;
+    if (!mBtnApps) return;
+    if (on)
+    {
+        mCurrentApp = a;
+        mBtnApps->setText(tr("App: %1").arg(Tools::ToDisplayAppName(a)));
+        mBtnApps->setChecked(true);
+    }
+    else
+    {
+        mBtnApps->setText(tr("Applications"));
+        mBtnApps->setChecked(false);
     }
 }
 
@@ -613,11 +717,34 @@ bool RenderView::ToolModeChanged(Action a)
         mScissors->handle(a);
         return true;
     }
-    if (mRemoveConn && (a == Action::RemoveUnconnected || a == Action::RemoveSelected)) 
+    if (mRemoveConn && (a == Action::RemoveUnconnected || a == Action::RemoveSelected || a == Action::RemoveConnected))
     {
         setToolUiActive(true, a);
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
         mRemoveConn->handle(a);
+        return true;
+    }
+
+    if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
+    return false;
+}
+
+bool RenderView::AppModeChanged(App a)
+{
+    if (!mVolume) return false;
+
+    if (mAppActive) 
+    {
+        if (mHistDlg)    mHistDlg->close();
+        
+        setAppUiActive(false, mCurrentApp);
+        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    if (mHistDlg && (a == App::Histogram))
+    {
+        setAppUiActive(true, a);
+        openHistogram();
         return true;
     }
 
@@ -868,7 +995,9 @@ void RenderView::onSaveBuiltStl()
 
 void RenderView::setImage(vtkSmartPointer<vtkImageData> img)
 {
-    mImage = img;
+    if (img)
+        mImage = img;
+
     if (mVolume) {
         if (auto* m = mVolume->GetMapper())
             m->SetInputDataObject(mImage);
@@ -1184,67 +1313,6 @@ void RenderView::setViewPreset(ViewPreset v)
     mVtk->renderWindow()->Render();
 }
 
-vtkSmartPointer<vtkImageData> RenderView::makeUint8Proxy(vtkImageData* src)
-{
-    if (!src) return nullptr;
-    int ext[6]; src->GetExtent(ext);
-
-    auto out = vtkSmartPointer<vtkImageData>::New();
-    out->SetExtent(ext);
-    out->SetSpacing(src->GetSpacing());
-    out->SetOrigin(src->GetOrigin());
-    if (auto* dm = src->GetDirectionMatrix()) out->SetDirectionMatrix(dm);
-    out->AllocateScalars(VTK_UNSIGNED_CHAR, 1); // 1-компонентный U8
-
-    const int st = src->GetScalarType();
-
-    // ВАЖНО: база — от (xmin,ymin,zmin), а не просто GetScalarPointer()
-    const unsigned char* sb = static_cast<const unsigned char*>(
-        src->GetScalarPointer(ext[0], ext[2], ext[4]));
-    unsigned char* db = static_cast<unsigned char*>(
-        out->GetScalarPointer(ext[0], ext[2], ext[4]));
-
-    vtkIdType si[3]; src->GetIncrements(si); // шаги по X,Y,Z — в БАЙТАХ
-    vtkIdType di[3]; out->GetIncrements(di); // шаги по X,Y,Z — в БАЙТАХ
-
-    auto readAsDouble = [&](const unsigned char* p)->double {
-        switch (st) {
-        case VTK_CHAR:           return *reinterpret_cast<const char*>(p);
-        case VTK_UNSIGNED_CHAR:  return *reinterpret_cast<const unsigned char*>(p);
-        case VTK_SHORT:          return *reinterpret_cast<const short*>(p);
-        case VTK_UNSIGNED_SHORT: return *reinterpret_cast<const unsigned short*>(p);
-        case VTK_INT:            return *reinterpret_cast<const int*>(p);
-        case VTK_UNSIGNED_INT:   return *reinterpret_cast<const unsigned int*>(p);
-        case VTK_FLOAT:          return *reinterpret_cast<const float*>(p);
-        case VTK_DOUBLE:         return *reinterpret_cast<const double*>(p);
-        default:                 return 0.0;
-        }
-        };
-
-    auto toU8 = [](double v)->unsigned char {
-        if (v < 0.0)   return 0u;
-        if (v > 255.0) return 255u;
-        return static_cast<unsigned char>(std::lround(v)); // или floor/только cast — по вкусу
-        };
-
-    for (int k = ext[4]; k <= ext[5]; ++k)
-        for (int j = ext[2]; j <= ext[3]; ++j)
-            for (int i = ext[0]; i <= ext[1]; ++i) {
-                const unsigned char* sp = sb
-                    + (i - ext[0]) * si[0]
-                    + (j - ext[2]) * si[1]
-                    + (k - ext[4]) * si[2];
-                unsigned char* dp = db
-                    + (i - ext[0]) * di[0]
-                    + (j - ext[2]) * di[1]
-                    + (k - ext[4]) * di[2];
-
-                *dp = toU8(readAsDouble(sp)); // берём первую компоненту
-            }
-
-    return out;
-}
-
 void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
 {
     auto pump = [&](int p) {
@@ -1326,6 +1394,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     const double smin = std::min({ sp[0],sp[1],sp[2] });
     prop->SetScalarOpacityUnitDistance(std::max(0.3 * smin, 1e-3));
     pump(40);
+
+    mShiftValue = 3;
 
     //// (доп.) градиентная непрозрачность
     //{

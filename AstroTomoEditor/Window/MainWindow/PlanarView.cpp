@@ -232,7 +232,7 @@ bool PlanarView::eventFilter(QObject* obj, QEvent* ev)
     if (!mSlices.isEmpty()) {
         if (ev->type() == QEvent::Wheel) {
             auto* w = static_cast<QWheelEvent*>(ev);
-            const int delta = (w->angleDelta().y() > 0) ? -1 : +1;
+            const int delta = (w->angleDelta().y() > 0) ? 1 : -1;
             nudgeSlice(delta);
             w->accept();
             return true;
@@ -240,10 +240,10 @@ bool PlanarView::eventFilter(QObject* obj, QEvent* ev)
         if (ev->type() == QEvent::KeyPress) {
             auto* k = static_cast<QKeyEvent*>(ev);
             switch (k->key()) {
-            case Qt::Key_PageUp:   pageSlice(-10); return true;
-            case Qt::Key_PageDown: pageSlice(+10); return true;
-            case Qt::Key_Up:       nudgeSlice(-1); return true;
-            case Qt::Key_Down:     nudgeSlice(+1); return true;
+            case Qt::Key_PageUp:   pageSlice(10); return true;
+            case Qt::Key_PageDown: pageSlice(-10); return true;
+            case Qt::Key_Up:       nudgeSlice(1); return true;
+            case Qt::Key_Down:     nudgeSlice(-1); return true;
             default: break;
             }
         }
@@ -417,6 +417,32 @@ static bool canReconstructVolume(const QVector<QString>& files)
 void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 {
     // --- сброс UI/состояния ---
+    emit loadStarted(0);
+    emit showInfo(tr("Preparing…"));
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    // ЛОКАЛЬНЫЙ помощник для «фазового» прогресса(до известного Z)
+        auto pump = [] {
+        // не чаще, чем ~каждые 12–16 мс, чтобы не душить UI
+        static QElapsedTimer t; if (!t.isValid()) t.start();
+        if (t.elapsed() > 12) { qApp->processEvents(QEventLoop::ExcludeUserInputEvents); t.restart(); }
+        };
+
+    auto phaseStart = [&](const QString& msg, int total = 100) {
+        emit loadStarted(total);          // временная шкала 0..100 (или другой total)
+        emit showInfo(msg);
+        pump();
+        };
+    auto phaseStep = [&](int value, const QString& msg = QString()) {
+        if (!msg.isEmpty()) emit showInfo(msg);
+        emit loadProgress(value, 100);
+        pump();
+        };
+    auto phaseDone = [&] {
+        emit loadProgress(100, 100);
+        pump();
+        };
+
     mSlices.clear();
     mIndex = 0;
     mScene->clear();
@@ -433,12 +459,18 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     vtkSmartPointer<vtkImageData> volume;
     bool isCompressed = false;
     vtkAlgorithmOutput* srcPort = nullptr;
+    bool invertMono1 = false;
 
     // --- ветка .3dr ---
     const bool is3dr = (files.size() == 1 && files.front().endsWith(".3dr", Qt::CaseInsensitive));
     if (is3dr) {
+        phaseStart(tr("Loading 3DR…"));
         QString err; bool isMRI = false;
+
+        // если Load3DR_Normalized внутри долго читает файл — дай пользователю жизнь
         volume = Load3DR_Normalized(files.front(), isMRI);
+        phaseStep(50, tr("3DR: normalizing…"));   // «фиктивный» шаг посередине
+        pump();
 
         if (!volume) {
             emit showWarning(tr("3DR load failed."));
@@ -446,6 +478,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             emit loadFinished(0);
             return;
         }
+
         // DICOM-поля для .3dr
         if (isMRI) {
             Dicom.TypeOfRecord = MRI3DR;
@@ -462,29 +495,30 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         // Ориентация по умолчанию
         mDir = QMatrix3x3(); mDir(0, 0) = mDir(1, 1) = mDir(2, 2) = 1.0f;
         mOrg[0] = mOrg[1] = mOrg[2] = 0.0;
+
+        phaseDone();
     }
     else
     {
-        // --- ветка DICOM ---
-        auto report = filterSeriesByConsistency(files);                   // быстрый фильтр геометрии
-        if (!report.bad.isEmpty()) {
-            emit filesFiltered(report.good.size(), report.bad.size());
-            emit showInfo(report.reason);
-        }
-        const QVector<QString> toRead = report.good.isEmpty() ? files : report.good;
-
-        // Сформируем список имён
+        // 0) имена
+        phaseStart(tr("Reading file list…"));
         auto names = vtkSmartPointer<vtkStringArray>::New();
-        names->SetNumberOfValues(toRead.size());
-        for (vtkIdType i = 0; i < static_cast<vtkIdType>(toRead.size()); ++i)
-            names->SetValue(i, toRead[int(i)].toUtf8().constData());
+        names->SetNumberOfValues(files.size());
+        for (vtkIdType i = 0; i < static_cast<vtkIdType>(files.size()); ++i) {
+            names->SetValue(i, files[int(i)].toUtf8().constData());
+            if ((i & 31) == 0) phaseStep(int((100ll * (i + 1)) / std::max<vtkIdType>(1, files.size())));
+        }
+        phaseDone();
 
-        // 1) ЧИТАЕМ МЕТАДАННЫЕ/СОРТИРОВКУ через vtkDICOMReader (без декодирования)
+        // 1) метаданные/сортировка
+        phaseStart(tr("Reading DICOM metadata…"));
         vtkSmartPointer<vtkDICOMReader> mdReader = vtkSmartPointer<vtkDICOMReader>::New();
         auto errObs1 = vtkSmartPointer<VtkErrorCatcher>::New();
         mdReader->AddObserver(vtkCommand::ErrorEvent, errObs1);
         mdReader->SetFileNames(names);
-        mdReader->UpdateInformation();                                     // *** важно: только инфо
+        mdReader->UpdateInformation();               // может занять время
+        phaseStep(60, tr("Parsing metadata…"));
+        pump();
 
         if (errObs1->hasError || !mdReader->GetMetaData()) {
             emit showWarning(tr("DICOM metadata read failed."));
@@ -493,24 +527,31 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             return;
         }
 
-        // Определяем сжатый TS по метаданным
         auto md = mdReader->GetMetaData();
         auto isCompressedTS = [&](vtkDICOMMetaData* m)->bool {
             if (!m || !m->Has(DC::TransferSyntaxUID)) return false;
             const std::string ts = m->Get(DC::TransferSyntaxUID).AsString();
-            return ts.rfind("1.2.840.10008.1.2.4.", 0) == 0   // JPEG*, JPEG-LS, JPEG2000
-                || ts == "1.2.840.10008.1.2.5";              // RLE
+            return ts.rfind("1.2.840.10008.1.2.4.", 0) == 0 || ts == "1.2.840.10008.1.2.5";
             };
-        isCompressed = isCompressedTS(md);
+        bool isCompressed = isCompressedTS(md);
+        phaseDone();
 
         // 2a) Если НЕ сжато — обычный vtkDICOMReader
         if (!isCompressed) {
+            phaseStart(tr("Decoding pixels… (uncompressed)"));
             auto pixReader = vtkSmartPointer<vtkDICOMReader>::New();
             auto errObs2 = vtkSmartPointer<VtkErrorCatcher>::New();
             pixReader->AddObserver(vtkCommand::ErrorEvent, errObs2);
             pixReader->SetFileNames(names);
-            pixReader->UpdateInformation();
-            pixReader->Update();
+
+            pixReader->UpdateInformation();          // долгая точка №1
+            phaseStep(40, tr("Allocating image…"));
+            pump();
+
+            pixReader->Update();                     // долгая точка №2
+            phaseStep(90, tr("Preparing geometry…"));
+            pump();
+
             if (errObs2->hasError || !pixReader->GetOutput()) {
                 emit showWarning(tr("DICOM read failed."));
                 mScroll->setRange(0, 0);
@@ -539,17 +580,26 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             }
 
             // DICOM-диапазоны/VOI
+            phaseDone();
             Dicom = GetDicomRangesVTK(pixReader);
+            pump();
         }
         // 2b) Если СЖАТО — декодируем через vtkGDCMImageReader
-        else 
-        {
+        else {
+            phaseStart(tr("Decoding pixels… (compressed via GDCM)"));
             vtkSmartPointer<vtkGDCMImageReader> gdcm = vtkSmartPointer<vtkGDCMImageReader>::New();
             auto errObs2 = vtkSmartPointer<VtkErrorCatcher>::New();
             gdcm->AddObserver(vtkCommand::ErrorEvent, errObs2);
-            gdcm->SetFileNames(names);                         // *** ВАЖНО: вся серия, не один файл
-            gdcm->UpdateInformation();
-            gdcm->Update();
+            gdcm->SetFileNames(names);
+
+            gdcm->UpdateInformation();               // долгая точка №1
+            phaseStep(35, tr("Preparing decoder…"));
+            pump();
+
+            gdcm->Update();                          // долгая точка №2
+            phaseStep(85, tr("Preparing geometry…"));
+            pump();
+
             if (errObs2->hasError || !gdcm->GetOutput()) {
                 emit showWarning(tr("GDCM decode failed."));
                 mScroll->setRange(0, 0);
@@ -558,6 +608,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             }
             volume = gdcm->GetOutput();
             srcPort = gdcm->GetOutputPort();
+
 
             // Геометрия LPS — по метаданным mdReader (единое место истины)
             double iop[6]{ 1,0,0, 0,1,0 };
@@ -576,6 +627,9 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
                 const auto ipp = md->Get(DC::ImagePositionPatient);
                 mOrg[0] = ipp.GetDouble(0); mOrg[1] = ipp.GetDouble(1); mOrg[2] = ipp.GetDouble(2);
             }
+
+            phaseStep(90, tr("Estimating spacing…"));
+            pump();
 
             // ---- Итоговый spacing: X/Y из volume, Z — проверяем и при необходимости считаем по IPP ----
             auto finalizeSpacing = [&](double sp[3]) {
@@ -620,6 +674,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 
             // DICOM-диапазоны/VOI — считаем по mdReader, он одинаков для обоих путей
             Dicom = GetDicomRangesVTK(mdReader);
+            
             if (!Dicom.SpCreated)
             {
                 Dicom.SpCreated = true;
@@ -629,11 +684,13 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
                 Dicom.mSpY = mSpY;
                 Dicom.mSpZ = mSpZ;
             }
+
+            phaseDone();
         }
 
         // Доп. интерпретация modality / VOI
+        phaseStart(tr("Interpreting modality…"));
         vtkDICOMMetaData* md2 = mdReader->GetMetaData();
-        bool invertMono1 = false;
         QString modalityStr;
         if (md2) {
             if (md2->Has(DC::PhotometricInterpretation)) {
@@ -674,29 +731,28 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             Dicom.XLable = "AU";
             Dicom.YLable = "N";
         }
-
+        phaseDone();
     }
 
     // --- общие параметры (spacing/dims) ---
 
-    if (!Dicom.SpCreated)
-    {
+    if (!Dicom.SpCreated) {
         Dicom.SpCreated = true;
         double sp[3]{ 1,1,1 }; volume->GetSpacing(sp);
-        mSpX = (sp[0] > 0) ? sp[0] : 1.0;  mSpY = (sp[1] > 0) ? sp[1] : 1.0;  mSpZ = (sp[2] > 0) ? sp[2] : 1.0;
-        Dicom.mSpX = mSpX;
-        Dicom.mSpY = mSpY;
-        Dicom.mSpZ = mSpZ;
+        mSpX = sp[0] > 0 ? sp[0] : 1.0;
+        mSpY = sp[1] > 0 ? sp[1] : 1.0;
+        mSpZ = sp[2] > 0 ? sp[2] : 1.0;
+        Dicom.mSpX = mSpX; Dicom.mSpY = mSpY; Dicom.mSpZ = mSpZ;
     }
 
-    { 
-        int* dims = volume->GetDimensions(); 
-        X = dims[0]; Y = dims[1]; Z = dims[2]; 
-    }
+    int ext[6]; volume->GetExtent(ext);
+    X = ext[1] - ext[0] + 1; Y = ext[3] - ext[2] + 1; Z = ext[5] - ext[4] + 1;
 
+    // теперь «настоящий» детерминированный прогресс 0..Z
     emit loadStarted(Z);
+    emit showInfo(tr("Caching slices… 0/%1").arg(Z));
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    const bool invertMono1 = false;
     buildCache(volume, srcPort, invertMono1, Dicom);
 
     avalibletoreconstruction = (Z > 1) && !mSlices.isEmpty();
@@ -710,8 +766,10 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 
     emit loadFinished(Z);
     mScroll->setRange(0, std::max(0, int(mSlices.size() - 1)));
-    mScroll->setPageStep(std::max(1, int(mSlices.size() / 20)));
-    mScroll->setValue(std::max(0, int(mSlices.size() - 1)));
+    mScroll->setSingleStep(1);
+    mScroll->setPageStep(std::max(1, int(mSlices.size() / 10)));
+    mScroll->setEnabled(mSlices.size() > 1);
+    mScroll->setValue(int(mSlices.size() - 1));
     setSlice(mScroll->value());
 }
 
@@ -935,29 +993,6 @@ void PlanarView::resizeEvent(QResizeEvent* e)
 {
     QWidget::resizeEvent(e);
     if (mAutoFit) fitToWindow();
-}
-
-void PlanarView::wheelEvent(QWheelEvent* e)
-{
-    if (!mSlices.isEmpty()) {
-        const int delta = (e->angleDelta().y() > 0) ? -1 : +1;
-        mScroll->setValue(std::clamp(mScroll->value() + delta, mScroll->minimum(), mScroll->maximum()));
-        e->accept();
-        return;
-    }
-    QWidget::wheelEvent(e);
-}
-
-void PlanarView::keyPressEvent(QKeyEvent* e)
-{
-    if (mSlices.isEmpty()) { QWidget::keyPressEvent(e); return; }
-    int v = mScroll->value();
-    if (e->key() == Qt::Key_PageUp)      v -= 10;
-    else if (e->key() == Qt::Key_PageDown) v += 10;
-    else if (e->key() == Qt::Key_Up)     v -= 1;
-    else if (e->key() == Qt::Key_Down)   v += 1;
-    else { QWidget::keyPressEvent(e); return; }
-    mScroll->setValue(std::clamp(v, mScroll->minimum(), mScroll->maximum()));
 }
 
 void PlanarView::setWindowLevel(double level, double width)

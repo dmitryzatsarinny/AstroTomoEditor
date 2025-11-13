@@ -11,6 +11,7 @@
 #include <QPainterPath>
 #include <numeric>
 #include <cmath>
+#include "RenderView.h"
 
 // === производные и кривизна ==================================================
 static void firstSecondDeriv(const QVector<double>& s, QVector<double>& d1, QVector<double>& d2)
@@ -168,7 +169,6 @@ HistogramDialog::HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* im
     setModal(false);
     resize(860, 460);
     buildUi();
-    // ВАЖНО: не считаем гистограмму здесь — первый пересчёт через refreshFromImage()
 }
 
 void HistogramDialog::setFixedAxis(bool enabled, double a, double b)
@@ -202,31 +202,21 @@ void HistogramDialog::refreshFromImage(vtkImageData* image)
     mImage = image;
     buildHistogram();
 
-    // первый запуск: весь диапазон данных
-    if (mLo == 0 && mHi == 255) {
-        emit rangeChanged(mLo, mHi);
-    }
-    else {
-        setRange(mLo, mHi, /*emit*/true);
-    }
+    if (mLo == 0 && mHi == 255) emit rangeChanged(mLo, mHi);
+    else                        setRange(mLo, mHi, /*emit*/true);
+
     if (mCanvas) mCanvas->update();
 }
-
-
 
 void HistogramDialog::buildHistogram()
 {
     // гарантируем 256 бинов и обнуляем
     mH.assign(256, 0);
 
-    if (!mImage) { mSmooth = smoothBox(mH, 9); return; }
-
-    // проверим тип
-    if (mImage->GetScalarType() != VTK_UNSIGNED_CHAR ||
-        mImage->GetNumberOfScalarComponents() != 1)
-    {
-        mSmooth = smoothBox(mH, 9);
-        return;
+    if (!mImage) 
+    { 
+        mSmooth = smoothBox(mH, 9); 
+        return; 
     }
 
     int ext[6];
@@ -244,10 +234,18 @@ void HistogramDialog::buildHistogram()
         mImage->GetScalarPointer(ext[0], ext[2], ext[4]));
 
 
-    const int step = 1; // без субсэмплинга
+    for (int z = 0; z < nz; z += SubStep) {
+        const uint8_t* pZ = p0 + z * incZ;
 
-    for (int i = 0; i < nx * ny * nz; i++)
-        mH[(int)*(p0 + i)]++;
+        for (int y = 0; y < ny; y += SubStep) {
+            const uint8_t* pY = pZ + y * incY;
+
+            for (int x = 0; x < nx; x += SubStep) {
+                const uint8_t v = pY[x * incX];
+                mH[v]++;
+            }
+        }
+    }
 
     mH[0] = 0;
     mSmooth = smoothBox(mH, 9);
@@ -307,6 +305,12 @@ bool HistogramDialog::eventFilter(QObject* o, QEvent* e)
     }
 
     return QDialog::eventFilter(o, e);
+}
+
+void HistogramDialog::done(int r)
+{
+    if (m_onFinished) m_onFinished();
+    QDialog::done(r);
 }
 
 void HistogramDialog::setRangeAxis(double loAxis, double hiAxis, bool emitSig)
@@ -408,14 +412,18 @@ void HistogramDialog::paintCanvas()
     // --- сетка Y ---
     p.setPen(QPen(grid, 1));
     QFontMetrics fm(p.font());
+
+    const int mul = SubStep * SubStep * SubStep;
+
     const double stepY = niceStep(cap / 5.0);
     for (double v = 0; v <= cap + 1e-9; v += stepY) {
         const double y = r.bottom() - (v / cap) * r.height();
         p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
+        double shownV = v * mul;
         QString lbl;
-        if (v >= 1e6) lbl = QString::number(v / 1e6, 'f', 1) + "M";
-        else if (v >= 1e3) lbl = QString::number(v / 1e3, 'f', 0) + "k";
-        else               lbl = QString::number(int(std::round(v)));
+        if (shownV >= 1e6) lbl = QString::number(shownV / 1e6, 'f', 1) + "M";
+        else if (shownV >= 1e3) lbl = QString::number(shownV / 1e3, 'f', 0) + "k";
+        else               lbl = QString::number(int(std::round(shownV)));
         p.setPen(axisCol);
         p.drawText(QPointF(r.left() - fm.horizontalAdvance(lbl) - 10, y + fm.ascent() / 3), lbl);
         p.setPen(QPen(grid, 1));

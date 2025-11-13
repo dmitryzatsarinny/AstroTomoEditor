@@ -3,7 +3,7 @@
 #include <QVector>
 #include <QImage>
 #include <Services/DicomRange.h>
-
+#include "U8Span.h"
 
 class QWidget;
 class QPushButton;
@@ -16,6 +16,7 @@ public:
 
     // Фиксированная ось a..b для подписей (a ↔ 0, b ↔ 255)
     void setFixedAxis(bool enabled, double a = 0.0, double b = 255.0);
+    void setOnFinished(std::function<void()> cb) { m_onFinished = std::move(cb); }
 
     // Полный пересчёт гистограммы от текущего тома
     void refreshFromImage(vtkImageData* image);
@@ -28,10 +29,11 @@ signals:
 
 protected:
     bool eventFilter(QObject* o, QEvent* e) override;
+    void done(int r) override;
 
 private:
     enum class Drag { None, Left, Right, Pan };
-
+    std::function<void()> m_onFinished;
     // UI
     void buildUi();
     void paintCanvas();
@@ -84,6 +86,8 @@ private:
     // выбор пользователя — ВСЕГДА в ДАННЫХ 0..255
     int mLo{ 0 };
     int mHi{ 255 };
+
+    int SubStep = 2;
 
     // UI
     QWidget* mCanvas{ nullptr };

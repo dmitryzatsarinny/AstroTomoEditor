@@ -20,6 +20,9 @@
 #include "HistogramDialog.h"
 #include <vtkDICOMReader.h>
 #include <Services/DicomRange.h>
+#include <QSpinBox>
+#include "WheelSpinButton.h"
+#include "U8Span.h"
 
 class QVTKOpenGLNativeWidget;
 class vtkRenderer;
@@ -47,6 +50,7 @@ public:
     void setViewPreset(ViewPreset v);
     void centerOnVolume();
     void hideOverlays();
+    int GetShift() { return mShiftValue; };
 
     QVTKOpenGLNativeWidget* vtkWidget() const { return mVtk; }
     vtkRenderer* renderer() const { return mRenderer; }
@@ -73,10 +77,10 @@ private slots:
     void onUndo();
     void onRedo();
     void openHistogram();
+    void onShiftChanged(int val);
 
 private:
     vtkSmartPointer<vtkImageData> mImage;
-
     QVTKOpenGLNativeWidget* mVtk{ nullptr };
     vtkSmartPointer<vtkRenderer> mRenderer;
     vtkSmartPointer<vtkRenderWindow> mWindow;
@@ -131,6 +135,7 @@ private:
     void showOverlays();
     bool applyPreset(TFPreset p);
     bool ToolModeChanged(Action a);
+    bool AppModeChanged(App a);
 
     bool mToolActive{ false };
     Action mCurrentTool{};
@@ -148,10 +153,22 @@ private:
     void updateUndoRedoUi();
     void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);
 
-    QToolButton* mBtnHist{ nullptr };
+    QToolButton* mBtnApps{ nullptr };
+    QMenu* mAppsMenu{ nullptr };
+
+    bool mAppActive{ false };
+    App mCurrentApp{};
+    void setAppUiActive(bool on, App a);
+
     QPointer<HistogramDialog> mHistDlg;
     vtkSmartPointer<vtkColorTransferFunction> mBaseCTF;
     vtkSmartPointer<vtkPiecewiseFunction>     mBaseOTF;
+
+    WheelSpinButton* mBtnShift{ nullptr };
+    int mShiftValue = 3;
+
+    QToolButton* mBtnTemplate{ nullptr };
+    QToolButton* mBtnElectrod{ nullptr };
 
     bool   mHistMaskActive{ false };
     double mHistMaskLo{ 0.0 };
@@ -172,6 +189,4 @@ private:
 
     void addStlPreview();
     void clearStlPreview();
-
-    vtkSmartPointer<vtkImageData> makeUint8Proxy(vtkImageData* src);
 };
