@@ -8,6 +8,7 @@
 #include <Window/Render/RenderView.h>
 #include <QElapsedTimer>
 #include <Services/CornerGrip.h>
+#include "PatientDialog.h"
 
 class QSplitter;
 class QStackedWidget;
@@ -22,6 +23,7 @@ class TitleBar;
 class SeriesListPanel;
 class PlanarView;
 class RenderView;
+class PatientDialog;
 
 class MainWindow final : public QMainWindow
 {
@@ -88,6 +90,7 @@ private:
     QStackedWidget* mViewerStack{ nullptr };  // справа: 2D и 3D стеки
     PlanarView* mPlanar{ nullptr };  // 2D просмотр
     RenderView* mRenderView{ nullptr };  // 3D просмотр (лениво создаём)
+    PatientDialog* mPatientDlg = nullptr;
 
     // --- нижняя панель / статус ---
     QWidget* mFooter{ nullptr };
@@ -95,14 +98,6 @@ private:
     QWidget* mProgBox{ nullptr };
     QProgressBar* mProgress{ nullptr };
     CornerGrip* mCornerGrip = nullptr;
-    
-
-    // --- окно пациента ---
-    QPointer<QWidget> mPatientDlg;
-    QLabel* mPD_Name{ nullptr };
-    QLabel* mPD_Id{ nullptr };
-    QLabel* mPD_Sex{ nullptr };
-    QLabel* mPD_Birth{ nullptr };
 
     bool mLoading = false;
     QWidget* mUiToDisable = nullptr;

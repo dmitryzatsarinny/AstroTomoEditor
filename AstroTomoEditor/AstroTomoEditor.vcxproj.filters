@@ -116,6 +116,12 @@
     <ClCompile Include="Window\Render\WheelSpinButton.cpp">
       <Filter>Source Files\Window\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Window\MainWindow\DialogShell.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\MainWindow\PatientDialog.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -159,6 +165,12 @@
     </ClInclude>
     <ClInclude Include="Window\Render\U8Span.h">
       <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\HoverDelegate.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\MainWindow\DialogShell.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -209,6 +221,9 @@
     </QtMoc>
     <QtMoc Include="Window\Render\WheelSpinButton.h">
       <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\PatientDialog.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>

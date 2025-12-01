@@ -9,7 +9,7 @@
 class TitleBar : public QWidget {
     Q_OBJECT
 public:
-    explicit TitleBar(QWidget* parent = nullptr);
+    explicit TitleBar(QWidget* parent = nullptr, int typeofwindow = 0, const QString titlename = "AstroDicomEditor");
     void setPatientInfo(const PatientInfo& info);
     const PatientInfo& info() const { return mInfo; }
     void set2DChecked(bool on);
@@ -37,26 +37,26 @@ private:
     bool isOverNonDraggableChild(const QPoint& pos) const;
     void updateMaximizeIcon();
     void updateOverlayGeometry();
+    void buildnondefaulttitlebar(const QString titlename);
+    void initDragFilters();
 
-    QPoint mDragPos;
-    bool   mDragging = false;
-    QLabel* mIcon = nullptr;
-    QLabel* mAppTitle = nullptr;
 
-    QToolButton* mBtn2D = nullptr;
-    QToolButton* mBtn3D = nullptr;
-    QButtonGroup* mViewGroup = nullptr;
-
-    QToolButton* mPatientBtn = nullptr;
-    QToolButton* mBtnMax = nullptr;
-    QToolButton* mBtnClose = nullptr;
     PatientInfo mInfo;
-    QToolButton* mBtnSave3DR = nullptr;
-
     QWidget* mLeft = nullptr;
     QWidget* mRight = nullptr;
-
     QWidget* mCenterOverlay = nullptr;
+    QLabel* mIcon = nullptr;
+    QLabel* mAppTitle = nullptr;
+    QToolButton* mBtnSave3DR = nullptr;
+    QToolButton* mBtn2D = nullptr;
+    QToolButton* mBtn3D = nullptr;
+    QToolButton* mBtnMax = nullptr;
+    QToolButton* mBtnClose = nullptr;
+    QToolButton* mPatientBtn = nullptr;
+    QButtonGroup* mViewGroup = nullptr;
+
+    bool          mDragging = false;
+    QPoint        mDragPos;
 };
 
 #endif

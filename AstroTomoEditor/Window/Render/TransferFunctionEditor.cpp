@@ -18,10 +18,8 @@
 #include <vtkColorTransferFunction.h>
 #include <vtkPiecewiseFunction.h>
 
+#include "../../Services/DicomRange.h"
 // ===== холст: гистограмма + кривая с точками ===============================
-
-static constexpr double kGuardLeft = -1.0;
-static constexpr double kGuardRight = 256.0;
 
 static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
 {
@@ -111,8 +109,8 @@ protected:
 
             QPainterPath area;
             area.moveTo(r.left(), r.bottom());
-            for (int i = 0; i < 256; ++i) {
-                const qreal x = r.left() + (i / 255.0) * r.width();
+            for (int i = HistMin; i <= HistMax; ++i) {
+                const qreal x = r.left() + (i / static_cast<double>(HistScale)) * r.width();
                 const double nv = val(i < sLin.size() ? sLin[i] : 0.0) / denom;
                 const qreal y = r.bottom() - (r.height() * std::min(1.0, nv));
                 area.lineTo(x, y);
@@ -126,7 +124,7 @@ protected:
         if (pts_.size() >= 2) {
             QPainterPath path;
             auto toPt = [&](const TfPoint& tp) {
-                const qreal t = tp.x / 255.0;
+                const qreal t = tp.x / static_cast<double>(HistScale);
                 const qreal x = r.left() + t * r.width();
                 const qreal y = r.bottom() - tp.a * r.height();
                 return QPointF(x, y);
@@ -152,15 +150,15 @@ protected:
         const int hit = pickPoint(e->pos());
         if (e->button() == Qt::LeftButton) {
             if (hit >= 0) {
-                sel_ = hit; dragging_ = true; dragOff_ = project(e->pos()) - QPointF(pts_[sel_].x, pts_[sel_].a * 255.0);
+                sel_ = hit; dragging_ = true; dragOff_ = project(e->pos()) - QPointF(pts_[sel_].x, pts_[sel_].a * static_cast<double>(HistScale));
                 emit selectionChanged(sel_);
                 update();
             }
             else if (rect().adjusted(8, 8, -8, -8).contains(e->pos())) {
                 const QPointF pa = project(e->pos());
                 TfPoint np;
-                np.x = std::clamp<double>(pa.x(), 0, 255);
-                np.a = std::clamp<double>(pa.y() / 255.0, 0, 1);
+                np.x = std::clamp<double>(pa.x(), HistMin, HistMax);
+                np.a = std::clamp<double>(pa.y() / static_cast<double>(HistScale), 0, 1);
                 np.color = Qt::white;
 
                 pts_.push_back(np);
@@ -171,7 +169,7 @@ protected:
                 double bestD2 = std::numeric_limits<double>::infinity();
                 for (int k = 0; k < pts_.size(); ++k) {
                     const double dx = pts_[k].x - np.x;
-                    const double dy = (pts_[k].a - np.a) * 255.0;
+                    const double dy = (pts_[k].a - np.a) * static_cast<double>(HistScale);
                     const double d2 = dx * dx + dy * dy;
                     if (d2 < bestD2) { bestD2 = d2; nearestIdx = k; }
                 }
@@ -194,12 +192,12 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override {
         if (!dragging_ || sel_ < 0) return;
         QPointF pa = project(e->pos()) - dragOff_;
-        const double newX = std::clamp<double>(pa.x(), 0, 255);
-        const double newA = std::clamp<double>(pa.y() / 255.0, 0, 1);
+        const double newX = std::clamp<double>(pa.x(), HistMin, HistMax);
+        const double newA = std::clamp<double>(pa.y() / static_cast<double>(HistScale), 0, 1);
 
         double x = newX;
-        if (sel_ == 0)        x = 0.0;     // левый узел зафиксирован по X
-        if (sel_ == pts_.size() - 1) x = 255.0;  // правый узел зафиксирован по X
+        if (sel_ == 0)        x = static_cast<double>(HistMin);     // левый узел зафиксирован по X
+        if (sel_ == pts_.size() - 1) x = static_cast<double>(HistMax);  // правый узел зафиксирован по X
 
         pts_[sel_].x = x;
         pts_[sel_].a = newA;
@@ -211,7 +209,7 @@ protected:
         double bestD2 = std::numeric_limits<double>::infinity();
         for (int k = 0; k < pts_.size(); ++k) {
             const double dx = pts_[k].x - newX;
-            const double dy = (pts_[k].a - newA) * 255.0;
+            const double dy = (pts_[k].a - newA) * static_cast<double>(HistScale);
             const double d2 = dx * dx + dy * dy;
             if (d2 < bestD2) { bestD2 = d2; nearestIdx = k; }
         }
@@ -226,7 +224,7 @@ private:
     int pickPoint(const QPoint& mpos) const {
         const QRectF r = rect().adjusted(8, 8, -8, -8);
         auto toPt = [&](const TfPoint& tp) {
-            const qreal x = r.left() + (tp.x / 255.0) * r.width();
+            const qreal x = r.left() + (tp.x / static_cast<double>(HistScale)) * r.width();
             const qreal y = r.bottom() - tp.a * r.height();
             return QPointF(x, y);
             };
@@ -239,7 +237,7 @@ private:
         const QRectF r = rect().adjusted(8, 8, -8, -8);
         const qreal t = std::clamp((mp.x() - r.left()) / r.width(), 0.0, 1.0);
         const qreal u = 1.0 - std::clamp((mp.y() - r.top()) / r.height(), 0.0, 1.0);
-        return QPointF(t * 255.0, u * 255.0);
+        return QPointF(t * static_cast<double>(HistScale), u * static_cast<double>(HistScale));
     }
 
     void recomputeHistMax_() {
@@ -303,25 +301,6 @@ static QVector<quint64> buildHistogram256Fast(vtkImageData* img,
     if (ignoreZeros)
         h[0] = 0;
 
-    //const int step = 1; // без субсэмплинга
-
-    //// тройной цикл с byte-increments
-    //const uint8_t* pz = p0;
-    //for (int k = 0; k < nz; k += step) {
-    //    const uint8_t* py = pz;
-    //    for (int j = 0; j < ny; j += step) {
-    //        const uint8_t* px = py;
-    //        for (int i = 0; i < nx; i += step) {
-    //            uint8_t v = *px;
-    //            int bin = std::clamp((int)v, (int)0, (int)255);
-    //            ++h[bin];
-    //            px += incX * step;   // смещение по X — в байтах
-    //        }
-    //        py += incY * step;       // смещение по Y — в байтах
-    //    }
-    //    pz += incZ * step;           // смещение по Z — в байтах
-    //}
-
     if (ignoreZeros)
        h[0] = 0;
     return h;
@@ -349,22 +328,17 @@ static QString sliderCss(const QColor& color)
 }
 
 TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* imgU8)
-    : QDialog(parent)
+    : DialogShell(parent, tr("Transfer Function"))
 {
-    setWindowTitle(tr("Transfer Function"));
     setModal(true);
 
-    const QSize base(760, 420); 
+    const QSize base(760, 420);
     resize(sizeHint().expandedTo(base));
 
-    //double rr[2]{ 0,255 };
-    //if (imgU8) imgU8->GetScalarRange(rr);
-    //mMin = rr[0];
-    //mMax = rr[1];
-
+    // гистограмма и диапазон
     mHist = buildHistogram256Fast(imgU8, /*step=*/2, /*ignoreZeros=*/true, /*eps=*/1e-12);
-    mMin = 0;
-    mMax = 255;
+    mMin = HistMin;
+    mMax = HistMax;
 
     // дефолтные точки
     mPts = {
@@ -374,55 +348,77 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
         {255, 0.90, QColor(255,255,255)}
     };
 
-    auto* v = new QVBoxLayout(this);
+    // ==== контейнер из DialogShell ====
+    QWidget* content = contentWidget();
+    content->setObjectName("TfContent");
 
-    mCanvas = new TfCanvas(this);
+    auto* v = new QVBoxLayout(content);
+    v->setContentsMargins(12, 10, 12, 10);
+    v->setSpacing(8);
+
+    // канвас
+    mCanvas = new TfCanvas(content);
     mCanvas->setHistogram(mHist);
     mCanvas->setPoints(mPts, /*sel*/1);
     v->addWidget(mCanvas, 1);
 
-    // RGB
+    // RGB-слайдеры
     auto makeSlider = [&](const char* name)->QSlider* {
-        auto* row = new QWidget(this);
+        auto* row = new QWidget(content);
         auto* h = new QHBoxLayout(row);
         h->setContentsMargins(0, 0, 0, 0);
+
         auto* lbl = new QLabel(name, row);
         auto* s = new QSlider(Qt::Horizontal, row);
-        s->setRange(0, 255); s->setSingleStep(1); s->setPageStep(8);
-        h->addWidget(lbl); h->addWidget(s, 1);
+        s->setRange(HistMin, HistMax);
+        s->setSingleStep(1);
+        s->setPageStep(8);
+
+        h->addWidget(lbl);
+        h->addWidget(s, 1);
         v->addWidget(row);
         return s;
         };
-    mR = makeSlider("R"); mG = makeSlider("G"); mB = makeSlider("B");
 
-    // раскраска треков
+    mR = makeSlider("R");
+    mG = makeSlider("G");
+    mB = makeSlider("B");
+
     mR->setStyleSheet(sliderCss(QColor(255, 0, 0)));
     mG->setStyleSheet(sliderCss(QColor(0, 255, 0)));
     mB->setStyleSheet(sliderCss(QColor(0, 0, 255)));
 
-
-    // плашка текущего цвета
-    mSwatch = new QLabel(this);
+    // плашка цвета
+    mSwatch = new QLabel(content);
     mSwatch->setFixedHeight(16);
     mSwatch->setStyleSheet("background:#808080; border:1px solid rgba(255,255,255,60);");
     v->addWidget(mSwatch);
 
-    auto bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    auto btnAuto = bb->addButton("Auto", QDialogButtonBox::ActionRole);
-    auto btnSave = bb->addButton("Save preset…", QDialogButtonBox::ActionRole);
+    // кнопки
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok, content);
+    auto* btnAuto = bb->addButton("Auto", QDialogButtonBox::ActionRole);
+    auto* btnSave = bb->addButton("Save preset…", QDialogButtonBox::ActionRole);
     v->addWidget(bb);
 
-    connect(mCanvas, &TfCanvas::changed, this, &TransferFunctionEditor::onCanvasChanged);
-    connect(mCanvas, &TfCanvas::selectionChanged, this, [this](int i) {
-        mSel = i;
-        if (i < 0 || i >= mPts.size()) return;  // ← защита от выхода за границы
+    // сигналы/слоты — всё как у тебя было
+    connect(mCanvas, &TfCanvas::changed,
+        this, &TransferFunctionEditor::onCanvasChanged);
 
-        const QColor c = mPts[i].color;
-        mR->blockSignals(true); mG->blockSignals(true); mB->blockSignals(true);
-        mR->setValue(c.red());  mG->setValue(c.green()); mB->setValue(c.blue());
-        mR->blockSignals(false); mG->blockSignals(false); mB->blockSignals(false);
-        mSwatch->setStyleSheet(QString("background:rgb(%1,%2,%3); border:1px solid rgba(255,255,255,60);")
-            .arg(c.red()).arg(c.green()).arg(c.blue()));
+    connect(mCanvas, &TfCanvas::selectionChanged,
+        this, [this](int i) {
+            mSel = i;
+            if (i < 0 || i >= mPts.size()) return;
+
+            const QColor c = mPts[i].color;
+            mR->blockSignals(true); mG->blockSignals(true); mB->blockSignals(true);
+            mR->setValue(c.red());
+            mG->setValue(c.green());
+            mB->setValue(c.blue());
+            mR->blockSignals(false); mG->blockSignals(false); mB->blockSignals(false);
+
+            mSwatch->setStyleSheet(
+                QString("background:rgb(%1,%2,%3); border:1px solid rgba(255,255,255,60);")
+                .arg(c.red()).arg(c.green()).arg(c.blue()));
         });
 
     connect(mR, &QSlider::valueChanged, this, &TransferFunctionEditor::onRgbChanged);
@@ -434,44 +430,75 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
         auto* c = makeCTF(mPts);
         auto* o = makeOTF(mPts);
         emit committed(c, o);
-        c->Delete(); o->Delete();
+        c->Delete();
+        o->Delete();
         accept();
         });
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    connect(btnAuto, &QPushButton::clicked, this, &TransferFunctionEditor::onAutoColors);
+    connect(btnAuto, &QPushButton::clicked,
+        this, &TransferFunctionEditor::onAutoColors);
 
-    connect(btnSave, &QPushButton::clicked, this, [this] {
-        bool ok = true;
-        QString name = QInputDialog::getText(this, tr("Save TF preset"),
-            tr("Name:"), QLineEdit::Normal,
-            "My Preset", &ok);
-        if (!ok || name.isEmpty()) return;
+    connect(btnSave, &QPushButton::clicked,
+        this, [this] {
+            bool ok = true;
+            QString name = QInputDialog::getText(this, tr("Save TF preset"),
+                tr("Name:"), QLineEdit::Normal,
+                "My Preset", &ok);
+            if (!ok || name.isEmpty()) return;
 
-        TF::CustomPreset P;
-        P.name = name;
-        P.opacityK = 1.0;
-        P.colorSpace = "Lab";
-        P.points.reserve(mPts.size());
-        for (const auto& t : mPts) {
-            TF::TFPoint q; q.x = t.x; q.a = t.a;
-            q.r = t.color.redF(); q.g = t.color.greenF(); q.b = t.color.blueF();
-            P.points.push_back(q);
-        }
-        if (!TF::SaveCustomPreset(P))
-            QMessageBox::warning(this, tr("Save preset"), tr("Failed to save preset file."));
-        else
-            emit presetSaved();
+            TF::CustomPreset P;
+            P.name = name;
+            P.opacityK = 1.0;
+            P.colorSpace = "Lab";
+            P.points.reserve(mPts.size());
+            for (const auto& t : mPts) {
+                TF::TFPoint q;
+                q.x = t.x; q.a = t.a;
+                q.r = t.color.redF();
+                q.g = t.color.greenF();
+                q.b = t.color.blueF();
+                P.points.push_back(q);
+            }
+            if (!TF::SaveCustomPreset(P))
+                QMessageBox::warning(this, tr("Save preset"), tr("Failed to save preset file."));
+            else
+                emit presetSaved();
         });
 
-
-    // инициализируем выбор
+    // начальный выбор
     if (mCanvas->points().size() > 1)
         emit mCanvas->selectionChanged(1);
     else if (!mCanvas->points().isEmpty())
         emit mCanvas->selectionChanged(0);
+
     rebuildPreview(true);
+
+    // лёгкий локальный стиль (если хочешь, можно убрать)
+    content->setStyleSheet(
+        "#TfContent { background: transparent; }"
+        "QPushButton {"
+        "  min-width:80px;"
+        "  padding:4px 14px;"
+        "  background:rgba(42,44,48,220);"
+        "  color:#f0f0f0;"
+        "  border-radius:6px;"
+        "  border:1px solid rgba(255,255,255,0.22);"
+        "}"
+        "QPushButton:hover {"
+        "  background:#32353a;"
+        "}"
+        "QPushButton:pressed {"
+        "  background:#3a3d44;"
+        "}"
+        "QPushButton:disabled {"
+        "  background:#25272b;"
+        "  color:#777777;"
+        "  border-color:rgba(255,255,255,0.10);"
+        "}"
+    );
 }
+
 
 void TransferFunctionEditor::onCanvasChanged()
 {
@@ -515,15 +542,15 @@ void TransferFunctionEditor::onAutoColors()
     // --- 3) устойчивые седловины (лево/право)
     auto leftMin = [&](int i) {
         int j = i - 1;
-        while (j > 1 && s[j - 1] >= s[j]) --j; // спуск
-        while (j > 1 && s[j - 1] <= s[j]) --j; // плато минимума
-        return std::max(1, j);
+        while (j > (HistMin + 1) && s[j - 1] >= s[j]) --j; // спуск
+        while (j > (HistMin + 1) && s[j - 1] <= s[j]) --j; // плато минимума
+        return std::max((int)(HistMin + 1), j);
         };
     auto rightMin = [&](int i) {
         int j = i + 1;
-        while (j < 254 && s[j + 1] >= s[j]) ++j;
-        while (j < 254 && s[j + 1] <= s[j]) ++j;
-        return std::min(254, j);
+        while (j < (HistMax - 1) && s[j + 1] >= s[j]) ++j;
+        while (j < (HistMax - 1) && s[j + 1] <= s[j]) ++j;
+        return std::min((int)(HistMax - 1), j);
         };
 
     // --- 4) prominence + ширина на половине prominence (FWHM-подобная)
@@ -603,7 +630,7 @@ void TransferFunctionEditor::onAutoColors()
         QColor(250, 150, 120), QColor(230,  90, 200)
     };
     auto push = [&](int x, double a, QColor c) {
-        x = std::clamp(x, 0, 255); a = std::clamp(a, 0.0, 1.0);
+        x = std::clamp(x, (int)HistMin, (int)HistMax); a = std::clamp(a, 0.0, 1.0);
         if (!pts.isEmpty() && pts.back().x == x) { pts.back().a = a; pts.back().color = c; }
         else pts.push_back(TfPoint{ (double)x, a, c });
         };
@@ -616,7 +643,7 @@ void TransferFunctionEditor::onAutoColors()
         push(pk.x, aHigh, col);
         push(pk.r, aLow, col);
     }
-    push(255, 0.0, QColor(255, 255, 255));
+    push(HistMax, 0.0, QColor(255, 255, 255));
 
     std::sort(pts.begin(), pts.end(), [](auto& A, auto& B) { return A.x < B.x; });
     QVector<TfPoint> uniq; uniq.reserve(pts.size());
@@ -643,7 +670,7 @@ void TransferFunctionEditor::rebuildPreview(bool emitPreview)
 
 void TransferFunctionEditor::refreshHistogram(vtkImageData* img)
 {
-    double minPhys = 0, maxPhys = 255;
+    double minPhys = static_cast<double>(HistMin), maxPhys = static_cast<double>(HistMax);
     mHist = buildHistogram256Fast(img, /*step=*/2, /*ignoreZeros=*/true, /*eps=*/1e-12);
     // Синхронизируем ось редактора с реальным диапазоном данных
     mMin = minPhys;
@@ -666,7 +693,7 @@ void TransferFunctionEditor::setFromVtk(vtkColorTransferFunction* ctf,
         for (int i = 0, n = ctf->GetSize(); i < n; ++i) {
             double node[6]; ctf->GetNodeValue(i, node); // x,r,g,b,mid,sharp
             TfPoint p;
-            p.x = std::clamp((node[0] - a) * 255.0 / d, 0.0, 255.0);
+            p.x = std::clamp((node[0] - a) * static_cast<double>(HistScale) / d, static_cast<double>(HistMin), static_cast<double>(HistMax));
             p.a = 0.0; // заполним из otf ниже
             p.color = QColor::fromRgbF(node[1], node[2], node[3]);
             pts.push_back(p);
@@ -683,7 +710,7 @@ void TransferFunctionEditor::setFromVtk(vtkColorTransferFunction* ctf,
             for (int i = 0, n = otf->GetSize(); i < n; ++i) {
                 double node[4]; otf->GetNodeValue(i, node); // x,val,mid,sharp
                 TfPoint p;
-                p.x = std::clamp((node[0] - a) * 255.0 / d, 0.0, 255.0);
+                p.x = std::clamp((node[0] - a) * static_cast<double>(HistScale) / d, static_cast<double>(HistMin), static_cast<double>(HistMax));
                 p.a = std::clamp(node[1], 0.0, 1.0);
                 p.color = Qt::white;
                 mPts.push_back(p);
@@ -696,7 +723,7 @@ void TransferFunctionEditor::setFromVtk(vtkColorTransferFunction* ctf,
             QVector<O> o; o.reserve(otf->GetSize());
             for (int i = 0, n = otf->GetSize(); i < n; ++i) {
                 double node[4]; otf->GetNodeValue(i, node);
-                o.push_back({ std::clamp((node[0] - a) * 255.0 / d, 0.0, 255.0),
+                o.push_back({ std::clamp((node[0] - a) * static_cast<double>(HistScale) / d, static_cast<double>(HistMin), static_cast<double>(HistMax)),
                               std::clamp(node[1],0.0,1.0) });
             }
             auto eval = [&](double x)->double {
@@ -730,7 +757,7 @@ vtkColorTransferFunction* TransferFunctionEditor::makeCTF(const QVector<TfPoint>
     if (pts.isEmpty()) return c;
 
     auto mapX = [&](double x)->double {
-        return mMin + (x / 255.0) * (mMax - mMin);
+        return mMin + (x / static_cast<double>(HistScale)) * (mMax - mMin);
         };
 
     // сторожевые
@@ -742,7 +769,7 @@ vtkColorTransferFunction* TransferFunctionEditor::makeCTF(const QVector<TfPoint>
     for (const auto& p : pts)
         c->AddRGBPoint(mapX(p.x), p.color.redF(), p.color.greenF(), p.color.blueF());
 
-    c->AddRGBPoint(mapX(255.0) + 1.0, // чуть правее диапазона
+    c->AddRGBPoint(mapX(static_cast<double>(HistMax)) + 1.0, // чуть правее диапазона
         pts.back().color.redF(),
         pts.back().color.greenF(),
         pts.back().color.blueF());
@@ -755,12 +782,12 @@ vtkPiecewiseFunction* TransferFunctionEditor::makeOTF(const QVector<TfPoint>& pt
     if (pts.isEmpty()) return o;
 
     auto mapX = [&](double x)->double {
-        return mMin + (x / 255.0) * (mMax - mMin);
+        return mMin + (x / static_cast<double>(HistScale)) * (mMax - mMin);
         };
 
     o->AddPoint(mapX(0.0) - 1.0, std::clamp(pts.front().a, 0.0, 1.0));
     for (const auto& p : pts)
         o->AddPoint(mapX(p.x), std::clamp(p.a, 0.0, 1.0));
-    o->AddPoint(mapX(255.0) + 1.0, std::clamp(pts.back().a, 0.0, 1.0));
+    o->AddPoint(mapX(static_cast<double>(HistMax)) + 1.0, std::clamp(pts.back().a, 0.0, 1.0));
     return o;
 }

@@ -3,6 +3,7 @@
 #define EXPLORERDIALOG_h
 
 #include "..\..\Services\Pool.h"
+#include "..\MainWindow\DialogShell.h"
 
 class QComboBox;                                                // Предварительные объявления (forward declarations) Qt-классов.
 class QTreeView;                                                // Они уменьшают связность/время сборки: нам нужна только ссылка/указатель,
@@ -13,7 +14,7 @@ class QSortFilterProxyModel;                                    // Тоже forw
 class ContentFilterProxy;
 class QCheckBox;
 
-class ExplorerDialog : public QDialog                           // Объявляем собственный диалог, который наследуется от QDialog.
+class ExplorerDialog : public DialogShell
 {
     Q_OBJECT                                                    // Макрос Qt MOC: включает мета-информацию (RTTI Qt), поддержку сигналов/слотов и dynamic cast внутри Qt.
 

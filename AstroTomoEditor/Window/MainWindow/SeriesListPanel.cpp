@@ -460,74 +460,6 @@ void SeriesListPanel::scanDicomDir(const QString& rootPath)
         Q_ARG(QString, dicomdirPath));
 }
 
-
-//static QImage makeThumbFrom3drMidSlice(const _3Dinfo& hdr, const QByteArray& vox, bool byteswap = false)
-//{
-//    const int nx = int(hdr.UIheader[0]);
-//    const int ny = int(hdr.UIheader[1]);
-//    const int nz = int(hdr.UIheader[2]);
-//    if (nx <= 0 || ny <= 0 || nz <= 0) return QImage();
-//
-//    const size_t sliceStride = size_t(nx) * size_t(ny);      // семплов на срез
-//    const size_t samplesAvail = size_t(vox.size()) / sizeof(uint16_t);
-//    if (samplesAvail < sliceStride) return QImage();         // даже одного среза нет
-//
-//    // сколько срезов реально помещается в буфере
-//    const int slicesAvail = int(samplesAvail / sliceStride);
-//    // серединный по заголовку
-//    const int zMidHdr = std::clamp(nz / 2, 0, nz - 1);
-//    // но ограничим реальной доступностью
-//    const int zIdx = std::clamp(zMidHdr, 0, std::max(0, slicesAvail - 1));
-//
-//    const uint16_t* base = reinterpret_cast<const uint16_t*>(vox.constData());
-//    const uint16_t* ptr = base + size_t(zIdx) * sliceStride;
-//
-//    // --- авто-контраст по всему срезу (учитываем нули как фон) ---
-//    uint16_t vmin = 65535, vmax = 0;
-//    for (size_t i = 0; i < sliceStride; ++i) {
-//        const uint16_t vv = byteswap ? bswap16(ptr[i]) : ptr[i];
-//        if (vv < vmin) vmin = vv;
-//        if (vv > vmax) vmax = vv;
-//    }
-//    if (vmin == vmax) { vmin = 0; vmax = 65535; }
-//
-//    // --- собираем 8-битный срез, инвертируя фон при необходимости ---
-//    QImage gray(nx, ny, QImage::Format_Grayscale8);
-//    for (int y = 0; y < ny; ++y) {
-//        uchar* dst = gray.scanLine(y);
-//        const uint16_t* src = ptr + size_t(y) * size_t(nx);
-//        for (int x = 0; x < nx; ++x) {
-//            uint16_t vv = byteswap ? bswap16(src[x]) : src[x];
-//            // линейное растяжение
-//            int v = (vmax > vmin) ? int((uint32_t(vv - vmin) * 255u) / uint32_t(vmax - vmin)) : 0;
-//            // фон (vv == 0) сделать черным
-//            if (vv == 0) v = 0;
-//            dst[x] = uchar(v);
-//        }
-//    }
-//
-//    // --- приводим к 128×128, с сохранением пропорций ---
-//    constexpr int kThumb = 128;
-//    QImage canvas(kThumb, kThumb, QImage::Format_ARGB32_Premultiplied);
-//    canvas.fill(QColor(22, 23, 26, 255));
-//
-//    const qreal sx = qreal(kThumb) / qreal(nx);
-//    const qreal sy = qreal(kThumb) / qreal(ny);
-//    const qreal s = std::min(sx, sy);
-//
-//    const int w = int(nx * s);
-//    const int h = int(ny * s);
-//    const int x0 = (kThumb - w) / 2;
-//    const int y0 = (kThumb - h) / 2;
-//
-//    QPainter p(&canvas);
-//    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-//    p.drawImage(QRect(x0, y0, w, h), gray);
-//    p.end();
-//
-//    return canvas;
-//}
-
 static QImage makeThumbImageFromVtkMidSlice(vtkImageData* img)
 {
     if (!img) return {};
@@ -694,7 +626,7 @@ QImage SeriesListPanel::makeThumbImageFromDicom(const QString& file)
     sh->ClampOverflowOn();
     sh->SetOutputScalarTypeToUnsignedChar();
     sh->SetShift(-low);
-    sh->SetScale(255.0 / (high - low));
+    sh->SetScale(static_cast<double>(HistScale) / (high - low));
     sh->Update();
 
     vtkImageData* u8 = sh->GetOutput();

@@ -40,6 +40,7 @@
 #include "Tools.h"
 
 
+
 ToolsRemoveConnected::ToolsRemoveConnected(QWidget* hostParent)
     : QObject(nullptr)
 {
@@ -62,6 +63,7 @@ void ToolsRemoveConnected::attach(QVTKOpenGLNativeWidget* vtk,
     m_renderer = renderer;
     m_image = image;
     m_volume = volume;
+
     rebuildVisibilityLUT();
     onViewResized();
 }
@@ -84,32 +86,65 @@ static void forwardMouseToWidget(QWidget* target, QMouseEvent* me)
     QCoreApplication::sendEvent(target, &copy);
 }
 
+void ToolsRemoveConnected::removeUnconnected(const std::vector<uint8_t>& selMask)
+{
+    if (!m_vol.u8().valid || !m_vol.raw())
+        return;
+    applyKeepMask(m_vol.raw(), selMask);
+}
+
 void ToolsRemoveConnected::ensureHoverPipeline()
 {
-    if (mHoverActor) return;
     if (!m_renderer || !m_image) return;
 
-    mHoverVOI = vtkSmartPointer<vtkExtractVOI>::New();
-    mHoverVOI->SetInputData(m_image);
-    mHoverVOI->SetSampleRate(1, 1, 1);
+    // старый куб
+    if (!mHoverActor) {
+        mHoverVOI = vtkSmartPointer<vtkExtractVOI>::New();
+        mHoverVOI->SetInputData(m_image);
+        mHoverVOI->SetSampleRate(1, 1, 1);
 
-    mHoverOutline = vtkSmartPointer<vtkOutlineFilter>::New();
-    mHoverOutline->SetInputConnection(mHoverVOI->GetOutputPort());
+        mHoverOutline = vtkSmartPointer<vtkOutlineFilter>::New();
+        mHoverOutline->SetInputConnection(mHoverVOI->GetOutputPort());
 
-    mHoverMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
-    mHoverMapper->SetInputConnection(mHoverOutline->GetOutputPort());
+        mHoverMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+        mHoverMapper->SetInputConnection(mHoverOutline->GetOutputPort());
 
-    mHoverActor = vtkSmartPointer<vtkActor>::New();
-    mHoverActor->SetMapper(mHoverMapper);
-    auto* pr = mHoverActor->GetProperty();
-    pr->SetColor(0.2, 1.0, 0.3);   // салатовый контур
-    pr->SetLineWidth(3.0);
-    pr->SetOpacity(1.0);
-    pr->EdgeVisibilityOn();
+        mHoverActor = vtkSmartPointer<vtkActor>::New();
+        mHoverActor->SetMapper(mHoverMapper);
+        auto* pr = mHoverActor->GetProperty();
+        pr->SetColor(0.2, 1.0, 0.3);
+        pr->SetLineWidth(3.0);
+        pr->SetOpacity(1.0);
+        pr->EdgeVisibilityOn();
 
-    m_renderer->AddActor(mHoverActor);
-    setHoverVisible(false);
+        m_renderer->AddActor(mHoverActor);
+        mHoverActor->SetVisibility(0);
+        mHoverActor->SetPickable(0);
+    }
+
+    // новая сфера
+    if (!mBrushActor) {
+        mBrushSphere = vtkSmartPointer<vtkSphereSource>::New();
+        mBrushSphere->SetThetaResolution(24);
+        mBrushSphere->SetPhiResolution(24);
+
+        mBrushMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+        mBrushMapper->SetInputConnection(mBrushSphere->GetOutputPort());
+
+        mBrushActor = vtkSmartPointer<vtkActor>::New();
+        mBrushActor->SetMapper(mBrushMapper);
+        auto* pr = mBrushActor->GetProperty();
+        pr->SetColor(1.0, 0.3, 0.3);
+        pr->SetLineWidth(1.5);
+        pr->SetRepresentationToWireframe();
+        pr->SetOpacity(1.0);
+
+        m_renderer->AddActor(mBrushActor);
+        mBrushActor->SetVisibility(0);
+        mBrushActor->SetPickable(0);
+    }
 }
+
 
 void ToolsRemoveConnected::setHoverVisible(bool on)
 {
@@ -206,6 +241,32 @@ bool ToolsRemoveConnected::eventFilter(QObject* obj, QEvent* ev)
     if (obj != m_overlay || m_state != State::WaitingClick)
         return QObject::eventFilter(obj, ev);
 
+    if (ev->type() == QEvent::Wheel &&
+        (m_mode == Action::VoxelEraser || m_mode == Action::VoxelRecovery))
+    {
+        auto* we = static_cast<QWheelEvent*>(ev);
+        const int delta = we->angleDelta().y();
+        if (delta != 0)
+        {
+            int steps = delta / 120;  // один щелчок колеса
+            if (steps == 0)
+                steps = (delta > 0 ? 1 : -1);
+
+            int r = (m_hoverRadiusVoxels > 0 ? m_hoverRadiusVoxels : 1);
+            r += steps;
+            if (r < 1)  r = 1;
+            if (r > 99) r = 99;       // под твой Range(1..99)
+
+            m_hoverRadiusVoxels = r;
+
+            // перерисовать hover-сферу под новой толщиной
+            if (m_hasHover)
+                updateHover(m_lastMouse);
+
+            return true; // колесо целиком съели, без навигации
+        }
+    }
+
     if (ev->type() == QEvent::MouseButtonPress) {
         auto* me = static_cast<QMouseEvent*>(ev);
         const QPoint  screenPt = me->globalPosition().toPoint();
@@ -300,9 +361,15 @@ bool ToolsRemoveConnected::eventFilter(QObject* obj, QEvent* ev)
 
 bool ToolsRemoveConnected::handle(Action a)
 {
-    if (a == Action::RemoveUnconnected) { start(a); return true; }
-    if (a == Action::RemoveSelected) { start(a);  return true; }
-    if (a == Action::RemoveConnected) { start(a);  return true; }
+    if (a == Action::RemoveUnconnected ||
+        a == Action::RemoveSelected ||
+        a == Action::RemoveConnected ||
+        a == Action::VoxelEraser ||
+        a == Action::VoxelRecovery)
+    {
+        start(a);
+        return true;
+    }
     return false;
 }
 
@@ -330,9 +397,16 @@ void ToolsRemoveConnected::cancel()
         mHoverActor->SetPickable(0);
         mHoverActor->Modified();
     }
-    if (m_renderer && mHoverActor) {
-        m_renderer->RemoveActor(mHoverActor);
+    if (mBrushActor) { 
+        mBrushActor->SetVisibility(0); 
+        mBrushActor->SetPickable(0); 
+        mBrushActor->Modified();
     }
+    if (m_renderer && mHoverActor) m_renderer->RemoveActor(mHoverActor);
+    if (m_renderer && mBrushActor) m_renderer->RemoveActor(mBrushActor);
+    mBrushSphere = nullptr;
+    mBrushMapper = nullptr;
+    mBrushActor = nullptr;
     mHoverMapper = nullptr;
     mHoverOutline = nullptr;
     mHoverVOI = nullptr;
@@ -350,6 +424,9 @@ void ToolsRemoveConnected::cancel()
     if (m_vtk && m_vtk->renderWindow())
         m_vtk->renderWindow()->Render();
 
+    m_image = nullptr;
+    m_volume = nullptr;
+
     if (m_onFinished) m_onFinished();
 }
 
@@ -361,38 +438,90 @@ void ToolsRemoveConnected::updateHover(const QPoint& pDevice)
     int ijk[3]{};
     if (screenToSeedIJK(pDevice, ijk))
     {
-        m_hoverIJK[0] = ijk[0]; m_hoverIJK[1] = ijk[1]; m_hoverIJK[2] = ijk[2];
+        m_hoverIJK[0] = ijk[0];
+        m_hoverIJK[1] = ijk[1];
+        m_hoverIJK[2] = ijk[2];
         m_hasHover = true;
+
         ensureHoverPipeline();
 
-        int ext[6]; m_image->GetExtent(ext);
-        const int R = std::max(0, m_hoverRadiusVoxels);
+        // общий радиус в вокселях
+        int Rvox = 0;
+        if (m_mode == Action::VoxelEraser || m_mode == Action::VoxelRecovery)
+            Rvox = std::max(1, m_hoverRadiusVoxels);
+        else
+            Rvox = 2;
 
-        const int i0 = std::max(ext[0], ijk[0] - R);
-        const int i1 = std::min(ext[1], ijk[0] + R);
-        const int j0 = std::max(ext[2], ijk[1] - R);
-        const int j1 = std::min(ext[3], ijk[1] + R);
-        const int k0 = std::max(ext[4], ijk[2] - R);
-        const int k1 = std::min(ext[5], ijk[2] + R);
+        // --- режим кисти: показываем сферу ---
+        if (m_mode == Action::VoxelEraser || m_mode == Action::VoxelRecovery)
+        {
+            if (mHoverActor) { mHoverActor->SetVisibility(0); }
 
-        if (mHoverVOI) {
-            mHoverVOI->SetVOI(i0, i1, j0, j1, k0, k1);
-            mHoverVOI->Modified();
+            if (mBrushActor && mBrushSphere)
+            {
+                double sp[3]; m_image->GetSpacing(sp);
+                const double minSp = std::min({ sp[0], sp[1], sp[2] });
+                const double radiusMm = Rvox * minSp;
+
+                double centerW[3];
+                ijkToWorld(ijk, centerW);
+
+                mBrushSphere->SetCenter(centerW);
+                mBrushSphere->SetRadius(radiusMm);
+                mBrushSphere->Modified();
+
+                auto* pr = mBrushActor->GetProperty();
+                if (m_mode == Action::VoxelEraser)
+                    pr->SetColor(1.0, 0.3, 0.3);
+                else
+                    pr->SetColor(0.3, 0.9, 1.0);
+
+                mBrushActor->SetVisibility(1);
+                mBrushActor->SetPickable(0);
+            }
         }
-        if (mHoverOutline) mHoverOutline->Modified();
-        if (mHoverMapper)  mHoverMapper->Modified();
+        else
+        {
+            // --- старые режимы: куб VOI ---
+            if (mBrushActor) mBrushActor->SetVisibility(0);
 
-        setHoverVisible(true);
+            int ext[6]; m_image->GetExtent(ext);
+            const int i0 = std::max(ext[0], ijk[0] - Rvox);
+            const int i1 = std::min(ext[1], ijk[0] + Rvox);
+            const int j0 = std::max(ext[2], ijk[1] - Rvox);
+            const int j1 = std::min(ext[3], ijk[1] + Rvox);
+            const int k0 = std::max(ext[4], ijk[2] - Rvox);
+            const int k1 = std::min(ext[5], ijk[2] + Rvox);
+
+            if (mHoverVOI) {
+                mHoverVOI->SetVOI(i0, i1, j0, j1, k0, k1);
+                mHoverVOI->Modified();
+            }
+            if (mHoverOutline) mHoverOutline->Modified();
+            if (mHoverMapper)  mHoverMapper->Modified();
+
+            if (mHoverActor)
+            {
+                auto* pr = mHoverActor->GetProperty();
+                pr->SetColor(0.2, 1.0, 0.3);
+                mHoverActor->SetVisibility(1);
+                mHoverActor->SetPickable(0);
+            }
+        }
+
         if (auto* rw = m_vtk->renderWindow()) rw->Render();
         if (m_overlay) m_overlay->setCursor(Qt::CrossCursor);
     }
-    else {
+    else
+    {
         m_hasHover = false;
-        setHoverVisible(false);
+        if (mHoverActor)  mHoverActor->SetVisibility(0);
+        if (mBrushActor)  mBrushActor->SetVisibility(0);
         if (auto* rw = m_vtk->renderWindow()) rw->Render();
         if (m_overlay) m_overlay->setCursor(Qt::ForbiddenCursor);
     }
 }
+
 
 void ToolsRemoveConnected::start(Action a)
 {
@@ -420,7 +549,6 @@ void ToolsRemoveConnected::start(Action a)
     m_overlay->setFocus(Qt::OtherFocusReason);
     m_overlay->show();
 
-    setHoverHighlightSizeVoxels(2);
     redraw();
 }
 
@@ -435,7 +563,6 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
 {
     if (!m_image || !m_renderer || !m_vtk) return;
 
-
     m_vol.clear();
     m_vol.copy(m_image);
 
@@ -443,7 +570,6 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
     onViewResized();
     makeBinaryMask(m_image);
 
-    // Получаем seed по лучу через bin
     int seed[3]{ 0,0,0 };
     if (!screenToSeedIJK(pDevice, seed))
     {
@@ -451,17 +577,28 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
         return;
     }
 
-    // Заливка по 6-соседству
-    std::vector<uint8_t> mark;
-    const int cnt = floodFill6(m_bin, seed, mark);
-    if (cnt <= 0)
+    // === кисти работают без floodFill ===
+    if (m_mode == Action::VoxelEraser)
     {
-        QApplication::beep();
-        return;
+        applyVoxelErase(seed);
     }
-
-    switch (m_mode)
+    else if (m_mode == Action::VoxelRecovery)
     {
+        applyVoxelRecover(seed);
+    }
+    else
+    {
+        // == старая логика для Remove* ==
+        std::vector<uint8_t> mark;
+        const int cnt = floodFill6(m_bin, seed, mark);
+        if (cnt <= 0)
+        {
+            QApplication::beep();
+            return;
+        }
+
+        switch (m_mode)
+        {
         case Action::RemoveUnconnected:
             applyKeepOnlySelected(mark);
             break;
@@ -471,65 +608,288 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
         case Action::RemoveConnected:
             RemoveConnectedRegions(mark, seed);
             break;
+        default:
+            break;
+        }
     }
 
-
-    if (m_vol.raw()) 
+    if (m_vol.raw())
         m_vol.raw()->Modified();
     if (m_onImageReplaced)
         m_onImageReplaced(m_vol.raw());
 
-    // 8) Перерисовка
     if (m_vtk && m_vtk->renderWindow())
         m_vtk->renderWindow()->Render();
 
-    // 9) Завершение инструмента
-    cancel();
+    if (m_mode != Action::VoxelEraser && m_mode != Action::VoxelRecovery)
+        cancel();
 }
 
-void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& mark,
-    const int seedIn[3]) const
+
+static inline size_t linearIdx(int i, int j, int k, const int ext[6], int nx, int ny) {
+    return size_t(k - ext[4]) * (nx * ny) + size_t(j - ext[2]) * nx + size_t(i - ext[0]);
+}
+
+void ToolsRemoveConnected::ClearOriginalSnapshot()
 {
-    //if (!image || image->GetScalarType() != VTK_UNSIGNED_CHAR ||
-    //    image->GetNumberOfScalarComponents() != 1) return;
+    if (m_hasOrig)
+    {
+        m_orig.clear();
+        m_hasOrig = false;
+    }
+}
 
-    //// 0) корректируем seed (если пусто — смещаем к ближайшему непустому соседу)
-    //int seed[3]{ seedIn[0],seedIn[1],seedIn[2] };
 
-    //int nearIJK[3];
-    //if (!findNearestNonEmptyConnectedVoxel(image, seed, nearIJK)) return;
-    //seed[0] = nearIJK[0]; seed[1] = nearIJK[1]; seed[2] = nearIJK[2];
+void ToolsRemoveConnected::EnsureOriginalSnapshot(vtkImageData* _image)
+{
+    if (m_hasOrig)
+        return;
+    if (!_image)
+        return;
 
-    //// 1) строим маску выбранной компоненты
-    //std::vector<uint8_t> selMask;
-    //int selCount = 0;
-    //if (!buildSelectedComponentMask(image, seed, selMask, selCount) || selCount <= 0) return;
+    m_orig.clear();
+    m_orig.copy(_image);
+    m_hasOrig = true;
+}
 
-    //// 2) удаляем несвязанные области
-    //removeUnconnected(image, selMask);
+void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
+{
+    vtkImageData* im = m_vol.raw();
+    if (!im) return;
 
-    //// 3) умное снятие кожуры
-    //int ext[6]; image->GetExtent(ext);
-    //std::vector<uint8_t> cur = selMask;
+    int ext[6]; im->GetExtent(ext);
 
-    //const double dropFrac = 0.05; // 5% падение — стоп
-    //const int    maxIters = 16;
-    //const int didPeelIters = smartPeel(cur, selMask, ext, seed, dropFrac, maxIters);
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
 
-    //// 4) восстановление
-    //if (didPeelIters > 0)
-    //    recoveryDilate(cur, selMask, ext, didPeelIters);
+    int R = m_hoverRadiusVoxels > 0 ? m_hoverRadiusVoxels : 1;
+    int R2 = R * R;
 
-    //// 5) применяем итоговую маску к изображению
-    //applyKeepMask(image, cur);
+    const int i0 = std::max(ext[0], seed[0] - R);
+    const int i1 = std::min(ext[1], seed[0] + R);
+    const int j0 = std::max(ext[2], seed[1] - R);
+    const int j1 = std::min(ext[3], seed[1] + R);
+    const int k0 = std::max(ext[4], seed[2] - R);
+    const int k1 = std::min(ext[5], seed[2] + R);
+
+    auto* p0 = static_cast<unsigned char*>(
+        im->GetScalarPointer(ext[0], ext[2], ext[4]));
+    vtkIdType incX, incY, incZ;
+    im->GetIncrements(incX, incY, incZ);
+
+    for (int k = k0; k <= k1; ++k)
+        for (int j = j0; j <= j1; ++j)
+            for (int i = i0; i <= i1; ++i)
+            {
+                if (!inExt(i, j, k)) continue;
+
+                const int di = i - seed[0];
+                const int dj = j - seed[1];
+                const int dk = k - seed[2];
+                if (di * di + dj * dj + dk * dk > R2)
+                    continue;
+
+                unsigned char* p = p0
+                    + (i - ext[0]) * incX
+                    + (j - ext[2]) * incY
+                    + (k - ext[4]) * incZ;
+
+                const unsigned char v = *p;
+                if (!v) continue;
+                if (!isVisible(double(v))) continue;
+
+                *p = 0u;
+            }
+}
+
+
+void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
+{
+    vtkImageData* curIm = m_vol.raw();
+    vtkImageData* origIm = m_orig.raw();
+    if (!curIm || !origIm) return;
+
+    int ext[6]; curIm->GetExtent(ext);
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    int R = m_hoverRadiusVoxels > 0 ? m_hoverRadiusVoxels : 1;
+    int R2 = R * R;
+
+    const int i0 = std::max(ext[0], seed[0] - R);
+    const int i1 = std::min(ext[1], seed[0] + R);
+    const int j0 = std::max(ext[2], seed[1] - R);
+    const int j1 = std::min(ext[3], seed[1] + R);
+    const int k0 = std::max(ext[4], seed[2] - R);
+    const int k1 = std::min(ext[5], seed[2] + R);
+
+    auto* baseCur = static_cast<unsigned char*>(
+        curIm->GetScalarPointer(ext[0], ext[2], ext[4]));
+    auto* baseOrig = static_cast<unsigned char*>(
+        origIm->GetScalarPointer(ext[0], ext[2], ext[4]));
+
+    vtkIdType incXC, incYC, incZC;
+    vtkIdType incXO, incYO, incZO;
+    curIm->GetIncrements(incXC, incYC, incZC);
+    origIm->GetIncrements(incXO, incYO, incZO);
+
+    for (int k = k0; k <= k1; ++k)
+        for (int j = j0; j <= j1; ++j)
+            for (int i = i0; i <= i1; ++i)
+            {
+                if (!inExt(i, j, k)) continue;
+
+                const int di = i - seed[0];
+                const int dj = j - seed[1];
+                const int dk = k - seed[2];
+                if (di * di + dj * dj + dk * dk > R2)
+                    continue;
+
+                unsigned char* pCur = baseCur
+                    + (i - ext[0]) * incXC
+                    + (j - ext[2]) * incYC
+                    + (k - ext[4]) * incZC;
+
+                const unsigned char* pOrig = baseOrig
+                    + (i - ext[0]) * incXO
+                    + (j - ext[2]) * incYO
+                    + (k - ext[4]) * incZO;
+
+                const unsigned char ov = *pOrig;
+                if (!ov) continue;
+                if (!isVisible(double(ov))) continue; // восстанавливаем только видимое
+
+                *pCur = ov;
+            }
+}
+
+
+void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& mark,
+    const int seedIn[3])
+{
+    // 1) проверяем объём
+    const auto& S = m_vol.u8();
+    if (!S.valid || !S.p0 || !m_vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t total = static_cast<size_t>(nx) * ny * nz;
+
+    // размер mark должен соответствовать объёму
+    if (mark.size() < total)
+        return;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    if (!inExt(seedIn[0], seedIn[1], seedIn[2]))
+        return;
+
+    int seed[3]{ seedIn[0], seedIn[1], seedIn[2] };
+    const size_t seedIdx = linearIdx(seed[0], seed[1], seed[2], ext, nx, ny);
+    if (seedIdx >= total || mark[seedIdx] == 0)
+        return; // seed не попал в выбранную компоненту
+
+    // 2) геодезический радиус вокруг seed в вокселях
+    //    задаём в мм, превращаем в воксели по минимальному шагу
+    double sp[3]{ 1.0, 1.0, 1.0 };
+    if (m_image)
+        m_image->GetSpacing(sp);
+    const double minSp = std::min({ sp[0], sp[1], sp[2] });
+
+    const double radiusMM = 70.0;          // можно подкрутить на вкус
+    const int maxSteps = std::max(1, int(radiusMM / std::max(minSp, 1e-6) + 0.5));
+
+    // 3) BFS от seed по 6-соседству внутри mark с ограничением по dist
+    std::vector<uint8_t> core(total, 0);   // что оставить в компоненте
+    std::vector<uint8_t> visited(total, 0);
+
+    struct Node { int i, j, k, d; };
+    std::queue<Node> q;
+
+    q.push({ seed[0], seed[1], seed[2], 0 });
+    visited[seedIdx] = 1;
+    core[seedIdx] = 1;
+
+    static const int N6[6][3] = {
+        {+1,0,0},{-1,0,0},
+        {0,+1,0},{0,-1,0},
+        {0,0,+1},{0,0,-1}
+    };
+
+    while (!q.empty())
+    {
+        Node v = q.front(); q.pop();
+        if (v.d >= maxSteps)
+            continue;
+
+        for (const auto& d : N6)
+        {
+            const int ni = v.i + d[0];
+            const int nj = v.j + d[1];
+            const int nk = v.k + d[2];
+            if (!inExt(ni, nj, nk))
+                continue;
+
+            const size_t w = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (w >= total)
+                continue;
+
+            if (!mark[w])          // вне исходной компоненты
+                continue;
+            if (visited[w])        // уже были
+                continue;
+
+            visited[w] = 1;
+            core[w] = 1;
+            q.push({ ni, nj, nk, v.d + 1 });
+        }
+    }
+
+    // 4) Вычёркиваем из тома всё, что в выбранной компоненте, но не в core
+    for (size_t n = 0; n < total; ++n)
+    {
+        if (mark[n] && !core[n])
+            m_vol.at(n) = 0u;
+    }
 }
 
 // ---- ядро ----
-void ToolsRemoveConnected::makeBinaryMask(vtkImageData* m_image)
+void ToolsRemoveConnected::makeBinaryMask(vtkImageData* image)
 {
-    m_bin.set(m_image, [&](uint8_t v) {
-        return v != 0 && isVisible(double(v));
-        });
+    if (!image) {
+        m_bin.clear();
+        return;
+    }
+
+    const bool brushMode =
+        (m_mode == Action::VoxelEraser || m_mode == Action::VoxelRecovery);
+
+    if (brushMode) 
+    {
+        m_bin.set(image, [](uint8_t v) {
+            return v != 0;
+            });
+    }
+    else 
+    {
+        m_bin.set(image, [&](uint8_t v) {
+            return v != 0 && isVisible(double(v));
+            });
+    }
 }
 
 // Ищет ближайшего непустого соседа вокруг seed на image (>0).
@@ -610,6 +970,42 @@ void ToolsRemoveConnected::displayToWorld(double xd, double yd, double z01, doub
     out[0] = w[0] / W;
     out[1] = w[1] / W;
     out[2] = w[2] / W;
+}
+
+void ToolsRemoveConnected::ijkToWorld(const int ijk[3], double world[3]) const
+{
+    if (!m_image) {
+        world[0] = world[1] = world[2] = 0.0;
+        return;
+    }
+
+    vtkNew<vtkMatrix3x3> M;
+    if (auto* dm = m_image->GetDirectionMatrix()) M->DeepCopy(dm);
+    else M->Identity();
+
+    double org[3]; m_image->GetOrigin(org);
+    double sp[3];  m_image->GetSpacing(sp);
+
+    // index -> physical
+    double r[3] = {
+        ijk[0] * sp[0],
+        ijk[1] * sp[1],
+        ijk[2] * sp[2]
+    };
+
+    // world = origin + D * r
+    world[0] = org[0]
+        + M->GetElement(0, 0) * r[0]
+        + M->GetElement(0, 1) * r[1]
+        + M->GetElement(0, 2) * r[2];
+    world[1] = org[1]
+        + M->GetElement(1, 0) * r[0]
+        + M->GetElement(1, 1) * r[1]
+        + M->GetElement(1, 2) * r[2];
+    world[2] = org[2]
+        + M->GetElement(2, 0) * r[0]
+        + M->GetElement(2, 1) * r[1]
+        + M->GetElement(2, 2) * r[2];
 }
 
 bool ToolsRemoveConnected::worldToIJK(const double world[3], int ijk[3]) const
@@ -1059,9 +1455,7 @@ void ToolsRemoveConnected::applyRemoveSelected(const std::vector<uint8_t>& selMa
     }
 }
 
-static inline size_t linearIdx(int i, int j, int k, const int ext[6], int nx, int ny) {
-    return size_t(k - ext[4]) * (nx * ny) + size_t(j - ext[2]) * nx + size_t(i - ext[0]);
-}
+
 
 int ToolsRemoveConnected::peelOnce(const std::vector<uint8_t>& inMask,
     std::vector<uint8_t>& outMask,
@@ -1098,29 +1492,78 @@ int ToolsRemoveConnected::keepOnlyConnectedFromSeed(std::vector<uint8_t>& mask,
     const int ext[6],
     const int seed[3]) const
 {
-    //const int nx = ext[1] - ext[0] + 1, ny = ext[3] - ext[2] + 1, nz = ext[5] - ext[4] + 1;
+    const int nx = ext[1] - ext[0] + 1;
+    const int ny = ext[3] - ext[2] + 1;
+    const int nz = ext[5] - ext[4] + 1;
 
-    //// Временный vtkImageData из mask
-    //vtkNew<vtkImageData> tmp;
-    //tmp->SetExtent(ext[0], ext[1], ext[2], ext[3], ext[4], ext[5]);
-    //tmp->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
 
-    //auto* base = static_cast<unsigned char*>(tmp->GetScalarPointer(ext[0], ext[2], ext[4]));
-    //vtkIdType ix, iy, iz; tmp->GetIncrements(ix, iy, iz);
+    if (!inExt(seed[0], seed[1], seed[2])) {
+        std::fill(mask.begin(), mask.end(), 0);
+        return 0;
+    }
 
-    //for (int k = ext[4]; k <= ext[5]; ++k)
-    //    for (int j = ext[2]; j <= ext[3]; ++j)
-    //        for (int i = ext[0]; i <= ext[1]; ++i) {
-    //            unsigned char* p = base + (i - ext[0]) * ix + (j - ext[2]) * iy + (k - ext[4]) * iz;
-    //            *p = mask[linearIdx(i, j, k, ext, nx, ny)] ? 1u : 0u;
-    //        }
+    const size_t total = mask.size();
+    if (total == 0)
+        return 0;
 
-    //std::vector<uint8_t> sel;
-    //const int cnt = floodFill6(tmp, seed, sel);
-    //if (cnt <= 0) { std::fill(mask.begin(), mask.end(), 0); return 0; }
-    //mask.swap(sel);
-    const int cnt = 0;
-    return cnt;
+    const size_t seedIdx = linearIdx(seed[0], seed[1], seed[2], ext, nx, ny);
+    if (seedIdx >= total || mask[seedIdx] == 0) {
+        // seed попал в пустую ячейку данной маски
+        std::fill(mask.begin(), mask.end(), 0);
+        return 0;
+    }
+
+    std::vector<uint8_t> out(total, 0);
+
+    struct V { int i, j, k; };
+    std::queue<V> q;
+    q.push({ seed[0], seed[1], seed[2] });
+    out[seedIdx] = 1;
+
+    static const int N6[6][3] = {
+        {+1,0,0},{-1,0,0},
+        {0,+1,0},{0,-1,0},
+        {0,0,+1},{0,0,-1}
+    };
+
+    int visited = 0;
+
+    while (!q.empty()) {
+        V v = q.front(); q.pop();
+        ++visited;
+
+        for (const auto& d : N6) {
+            const int ni = v.i + d[0];
+            const int nj = v.j + d[1];
+            const int nk = v.k + d[2];
+            if (!inExt(ni, nj, nk))
+                continue;
+
+            const size_t w = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (w >= total)
+                continue;
+
+            if (!mask[w])       // вне исходной маски
+                continue;
+            if (out[w])         // уже посещён
+                continue;
+
+            out[w] = 1;
+            q.push({ ni, nj, nk });
+        }
+    }
+
+    if (visited > 0)
+        mask.swap(out);
+    else
+        std::fill(mask.begin(), mask.end(), 0);
+
+    return visited;
 }
 
 int ToolsRemoveConnected::smartPeel(std::vector<uint8_t>& mask,
@@ -1174,7 +1617,6 @@ void ToolsRemoveConnected::applyKeepMask(vtkImageData* image,
                 }
             }
 }
-
 
 void ToolsRemoveConnected::recoveryDilate(std::vector<uint8_t>& mask,
     const std::vector<uint8_t>& selMask,

@@ -148,7 +148,7 @@ private:
     QVector<vtkSmartPointer<vtkImageData>> mRedoStack;
     int  mHistoryLimit = 20;
     vtkSmartPointer<vtkImageData> cloneImage(vtkImageData* src);
-    void commitNewImage(vtkImageData* im); // пушит в undo и устанавливает новый
+    void commitNewImage(vtkImageData* im);
     void setMapperInput(vtkImageData* im);
     void updateUndoRedoUi();
     void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);
@@ -171,11 +171,11 @@ private:
     QToolButton* mBtnElectrod{ nullptr };
 
     bool   mHistMaskActive{ false };
-    double mHistMaskLo{ 0.0 };
-    double mHistMaskHi{ 255.0 };
+    double mHistMaskLo{ static_cast<double>(HistMin) };
+    double mHistMaskHi{ static_cast<double>(HistMax) };
 
-    double DataMin = 0.0;
-    double DataMax = 255.0;
+    double DataMin = static_cast<double>(HistMin);
+    double DataMax = static_cast<double>(HistMax);
 
     int mCustomCtIndex = -1;
     int mCustomMrIndex = -1;

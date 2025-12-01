@@ -29,6 +29,8 @@
     <ClCompile Include="Services\Save3DR.cpp" />
     <ClCompile Include="Services\VolumeFix3DR.cpp" />
     <ClCompile Include="Window\Explorer\ExplorerDialog.cpp" />
+    <ClCompile Include="Window\MainWindow\DialogShell.cpp" />
+    <ClCompile Include="Window\MainWindow\PatientDialog.cpp" />
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
     <ClCompile Include="Window\MainWindow\MainWindow.cpp" />
     <ClCompile Include="Window\MainWindow\PlanarView.cpp" />
@@ -63,6 +65,9 @@
     <ClInclude Include="Services\Save3DR.h" />
     <ClInclude Include="Services\VolumeFix3DR.h" />
     <QtMoc Include="Window\Render\HistogramDialog.h" />
+    <ClInclude Include="Window\MainWindow\DialogShell.h" />
+    <QtMoc Include="Window\MainWindow\PatientDialog.h" />
+    <ClInclude Include="Window\Render\HoverDelegate.h" />
     <ClInclude Include="Window\Render\Tools.h" />
     <QtMoc Include="Window\Render\ToolsScissors.h" />
     <QtMoc Include="Window\Render\ToolsRemoveConnected.h" />

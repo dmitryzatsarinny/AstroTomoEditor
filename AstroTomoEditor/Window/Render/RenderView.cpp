@@ -500,6 +500,8 @@ BuildMaskedOTF(vtkPiecewiseFunction* base, double lo, double hi)
 void RenderView::onShiftChanged(int val)
 {
     mShiftValue = val;
+    if (mRemoveConn)
+        mRemoveConn->setHoverHighlightSizeVoxels(mShiftValue);
 }
 
 void RenderView::openHistogram()
@@ -672,7 +674,7 @@ void RenderView::setToolUiActive(bool on, Action a)
     if (on) 
     {
         mCurrentTool = a;
-        mBtnTools->setText(tr("Edit: %1").arg(Tools::ToDisplayName(a)));
+        mBtnTools->setText(tr("%1").arg(Tools::ToDisplayName(a)));
         mBtnTools->setChecked(true);
     }
     else 
@@ -717,7 +719,7 @@ bool RenderView::ToolModeChanged(Action a)
         mScissors->handle(a);
         return true;
     }
-    if (mRemoveConn && (a == Action::RemoveUnconnected || a == Action::RemoveSelected || a == Action::RemoveConnected))
+    if (mRemoveConn && (a == Action::RemoveUnconnected || a == Action::RemoveSelected || a == Action::RemoveConnected || a == Action::VoxelEraser || a == Action::VoxelRecovery))
     {
         setToolUiActive(true, a);
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
@@ -1156,6 +1158,24 @@ void RenderView::hideOverlays()
     if (mRightOverlay) { mRightOverlay->hide(); }
     if (mTopOverlay) { mTopOverlay->hide(); }
 
+    if (mToolActive)
+    {
+        if (mScissors)    mScissors->cancel();
+        if (mRemoveConn) 
+        {
+            mRemoveConn->cancel();
+            mRemoveConn->ClearOriginalSnapshot();
+        }
+        setToolUiActive(false, mCurrentTool);
+    }
+
+    if (mHistDlg)    mHistDlg->close();
+
+
+    
+
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+
     mOverlaysShown = false;
 }
 
@@ -1370,24 +1390,23 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     mapper->SetUseJittering(true);                // убирает полосы, визуально «мягче»
 
     auto ctf = vtkSmartPointer<vtkColorTransferFunction>::New();
-    ctf->AddRGBPoint(0, 0, 0, 0);
-    ctf->AddRGBPoint(255, 1, 1, 1);
+    ctf->AddRGBPoint(HistMin, 0, 0, 0);
+    ctf->AddRGBPoint(HistMax, 1, 1, 1);
     ctf->SetColorSpaceToLab();
 
     auto otf = vtkSmartPointer<vtkPiecewiseFunction>::New();
-    otf->AddPoint(0, 0.00);
-    otf->AddPoint(255, 0.80);
+    otf->AddPoint(HistMin, 0.00);
+    otf->AddPoint(HistMax, 0.80);
 
     auto prop = vtkSmartPointer<vtkVolumeProperty>::New();
     prop->SetIndependentComponents(true);
     prop->SetColor(0, ctf);
     prop->SetScalarOpacity(0, otf);
-    prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
-    //prop->ShadeOn();
-    prop->SetAmbient(0.55);
-    prop->SetDiffuse(0.25);
-    prop->SetSpecular(0.10);
-    prop->SetSpecularPower(10.0);
+    prop->ShadeOn();
+    prop->SetAmbient(0.05);
+    prop->SetDiffuse(0.9);
+    prop->SetSpecular(0.1);
+    prop->SetInterpolationTypeToLinear();
 
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
@@ -1469,6 +1488,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
             {
             setToolUiActive(false, mCurrentTool);
             });
+        mRemoveConn->EnsureOriginalSnapshot(mImage);
     }
     mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
 

@@ -5,6 +5,7 @@
 #include <functional>
 #include <vtkSmartPointer.h>
 #include <vtkImageData.h>
+#include "../../Services/DicomRange.h"
 
 struct U8Span {
     bool      valid{ false };
@@ -249,7 +250,7 @@ public:
                 auto* dY = dZ + (y + ext[2]) * dy;
                 for (int x = 0; x < nx; ++x) {
                     const uint8_t v = sY[x * sx];
-                    dY[x * dx] = pred(v) ? 255u : 0u;
+                    dY[x * dx] = pred(v) ? HistMax : HistMin;
                 }
             }
         }

@@ -49,6 +49,8 @@ namespace Tools
         case Action::RemoveUnconnected:return QObject::tr("Remove unconnected");
         case Action::RemoveConnected: return QObject::tr("Remove connected");
         case Action::RemoveSelected: return QObject::tr("Remove selected");
+        case Action::VoxelEraser: return QObject::tr("VoxelEraser");
+        case Action::VoxelRecovery: return QObject::tr("VoxelRecovery");
         }
         return QObject::tr("Edit");
     }

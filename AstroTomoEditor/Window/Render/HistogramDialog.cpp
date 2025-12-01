@@ -3,6 +3,7 @@
 #include <vtkPointData.h>
 #include <vtkDataArray.h>
 
+#include <QStackedLayout>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -53,27 +54,6 @@ static int leftInflectionByCurvature(const QVector<double>& s,
     return best;
 }
 
-// правая граница: μ,σ по правому хвосту [lo..255] в HU
-static void meanSigmaHU_rightTail_full(const QVector<quint64>& h, int lo,
-    double axisMin, double axisMax,
-    double& mu, double& sigma)
-{
-    lo = std::clamp(lo, 0, 255);
-    const int hi = 255;
-    const double K = (axisMax - axisMin) / 255.0;
-
-    long double W = 0, S1 = 0, S2 = 0;
-    for (int i = lo; i <= hi; ++i) {
-        const long double w = (long double)h[i];
-        const long double x = (long double)(axisMin + K * i);
-        W += w; S1 += w * x; S2 += w * x * x;
-    }
-    if (W <= 0) { mu = axisMin + K * ((lo + hi) * 0.5); sigma = 0.0; return; }
-    mu = (double)(S1 / W);
-    const double var = (double)(S2 / W - (S1 / W) * (S1 / W));
-    sigma = var > 0 ? std::sqrt(var) : 0.0;
-}
-
 // === robust peak utils ======================================================
 struct PeakInfo {
     int idx = -1;
@@ -116,30 +96,7 @@ static PeakInfo analyzePeak(const QVector<double>& s, int p) {
     return R;
 }
 
-static int findContrastPeakAfter(const QVector<double>& s, int startBin,
-    int minCenterBin, double minPromFrac, int minWidthBins) // CHANGED
-{
-    if (s.size() < 5) return -1;
-    const double gmax = *std::max_element(s.begin(), s.end());
-    const double promLevels[2] = { minPromFrac, std::max(0.5 * minPromFrac, 0.01) };
-
-    for (double promFrac : promLevels) {
-        for (int i = std::max(1, startBin); i < s.size() - 1; ++i) {
-            if (i < minCenterBin) continue;                           // CHANGED: апекс пика должен быть правее 260 HU
-            if (!isLocalPeak(s, i)) continue;
-            const PeakInfo P = analyzePeak(s, i);
-            if (P.prominence >= gmax * promFrac && P.fwhmBins >= std::max(1, minWidthBins))
-                return i;
-        }
-    }
-    // fallback: максимум в правой части, но тоже ≥ minCenterBin
-    int argmax = -1; double vmax = -1;
-    for (int i = std::max(minCenterBin, startBin); i < s.size(); ++i)
-        if (s[i] > vmax) { vmax = s[i]; argmax = i; }
-    return argmax;
-}
-
-// простое «боксовое» сглаживание
+/// простое «боксовое» сглаживание
 static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
 {
     if (h.isEmpty()) return {};
@@ -162,11 +119,9 @@ static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
 }
 
 HistogramDialog::HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* image)
-    : QDialog(parent), mImage(image)
+    : DialogShell(parent, tr("Histogram")), mImage(image)
 {
-    setWindowTitle(tr("Histogram"));
     Dicom = DI;
-    setModal(false);
     resize(860, 460);
     buildUi();
 }
@@ -181,42 +136,86 @@ void HistogramDialog::setFixedAxis(bool enabled, double a, double b)
 
 void HistogramDialog::buildUi()
 {
-    auto* v = new QVBoxLayout(this);
-    v->setContentsMargins(12, 12, 12, 12);
+    QWidget* content = contentWidget();
+    content->setObjectName("HistogramContent");
 
-    mCanvas = new QWidget(this);
+    auto* v = new QVBoxLayout(content);
+    v->setContentsMargins(12, 10, 12, 10);
+    v->setSpacing(8);
+
+    // === холст гистограммы ===
+    mCanvas = new QWidget(content);
     mCanvas->setMinimumHeight(320);
+    mCanvas->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     mCanvas->installEventFilter(this);
     v->addWidget(mCanvas, 1);
 
-    auto* row = new QHBoxLayout();
-    row->addStretch();
-    mBtnAuto = new QPushButton(tr("Auto Range"), this);
-    row->addWidget(mBtnAuto);
-    connect(mBtnAuto, &QPushButton::clicked, this, &HistogramDialog::autoRange);
-    v->addLayout(row);
+    // === кнопка прямо на canvas ===
+    mBtnAuto = new QPushButton(tr("Auto Range"), mCanvas);
+    mBtnAuto->setFixedSize(90, 28);   // аккуратный, стабильный размер
+    mBtnAuto->raise();
+
+    connect(mBtnAuto, &QPushButton::clicked,
+        this, &HistogramDialog::autoRange);
+
+    content->setStyleSheet(
+        "#HistogramContent { background: transparent; }"
+        "QPushButton {"
+        "  min-width:80px;"
+        "  padding:4px 14px;"
+        "  background:rgba(42,44,48,220);"
+        "  color:#f0f0f0;"
+        "  border-radius:6px;"
+        "  border:1px solid rgba(255,255,255,0.22);"
+        "}"
+        "QPushButton:hover {"
+        "  background:#32353a;"
+        "}"
+        "QPushButton:pressed {"
+        "  background:#3a3d44;"
+        "}"
+        "QPushButton:disabled {"
+        "  background:#25272b;"
+        "  color:#777777;"
+        "  border-color:rgba(255,255,255,0.10);"
+        "}"
+    );
 }
+
 
 void HistogramDialog::refreshFromImage(vtkImageData* image)
 {
     mImage = image;
     buildHistogram();
 
-    if (mLo == 0 && mHi == 255) emit rangeChanged(mLo, mHi);
-    else                        setRange(mLo, mHi, /*emit*/true);
+    if (mLo == (int)HistMin && mHi == (int)HistMax)
+        emit rangeChanged(mLo, mHi);
+    else
+        setRange(mLo, mHi, /*emit*/true);
 
     if (mCanvas) mCanvas->update();
 }
 
 void HistogramDialog::buildHistogram()
 {
-    // гарантируем 256 бинов и обнуляем
-    mH.assign(256, 0);
+    // гарантируем HistScale бинов и обнуляем
+    mH.assign(HistScale, 0);
 
-    if (!mImage) 
-    { 
-        mSmooth = smoothBox(mH, 9); 
-        return; 
+    if (!mImage)
+    {
+        mSmooth = smoothBox(mH, 9);
+        return;
+    }
+
+    if (!mAxisFixed) {
+        double range[2]{};
+        mImage->GetScalarRange(range);
+        mAxisMin = range[0];
+        mAxisMax = range[1];
+        if (mAxisMin == mAxisMax) {
+            mAxisMin -= 1.0;
+            mAxisMax += 1.0;
+        }
     }
 
     int ext[6];
@@ -242,55 +241,88 @@ void HistogramDialog::buildHistogram()
 
             for (int x = 0; x < nx; x += SubStep) {
                 const uint8_t v = pY[x * incX];
-                mH[v]++;
+                if (v >= HistMin && v <= HistMax)
+                    mH[v]++;
             }
         }
     }
 
-    mH[0] = 0;
+    if (!mH.isEmpty())
+        mH[(int)HistMin] = 0;   // глушим "0", если нужно
+
     mSmooth = smoothBox(mH, 9);
 }
 
 bool HistogramDialog::eventFilter(QObject* o, QEvent* e)
 {
-    if (o != mCanvas) return QDialog::eventFilter(o, e);
+    if (o != mCanvas)
+        return DialogShell::eventFilter(o, e);   // или QDialog::eventFilter
+
+    if (e->type() == QEvent::Resize || e->type() == QEvent::Show) {
+
+        if (mBtnAuto) {
+            const int margin = 6;   // минимальный, красиво близко к углу
+            const QSize btnSz = mBtnAuto->size();
+            const QSize canvasSz = mCanvas->size();
+
+            int x = canvasSz.width() - btnSz.width() - margin;
+            int y = canvasSz.height() - btnSz.height() - margin;
+
+            mBtnAuto->move(x, y);
+            mBtnAuto->raise();
+        }
+    }
 
     const QRectF r = mCanvas->rect().adjusted(60, 18, -24, -48);
 
     if (e->type() == QEvent::Paint) {
-        paintCanvas(); return true;
+        paintCanvas();
+        return true;
     }
 
     if (e->type() == QEvent::MouseButtonPress) {
         auto* me = static_cast<QMouseEvent*>(e);
-        const double t = std::clamp((me->position().x() - r.left()) / std::max(1.0, r.width()), 0.0, 1.0);
+        const double t = std::clamp(
+            (me->position().x() - r.left()) / std::max(1.0, r.width()),
+            0.0, 1.0);
         const int d = xToData(t);
 
-        if (me->button() == Qt::LeftButton) { mDrag = Drag::Left;  setRange(d, mHi, true); }
-        if (me->button() == Qt::RightButton) { mDrag = Drag::Right; setRange(mLo, d, true); }
-        if (me->button() == Qt::MiddleButton) { mDrag = Drag::Pan;   mPanStartD = d; }
+        if (me->button() == Qt::LeftButton) {
+            mDrag = Drag::Left;
+            setRange(d, mHi, true);
+        }
+        if (me->button() == Qt::RightButton) {
+            mDrag = Drag::Right;
+            setRange(mLo, d, true);
+        }
+        if (me->button() == Qt::MiddleButton) {
+            mDrag = Drag::Pan;
+            mPanStartD = d;
+        }
         mCanvas->update();
         return true;
     }
 
-    if (e->type() == QEvent::MouseMove) 
-    {
-        if (mDrag == Drag::None) 
+    if (e->type() == QEvent::MouseMove) {
+        if (mDrag == Drag::None)
             return false;
 
         auto* me = static_cast<QMouseEvent*>(e);
-        const double t = std::clamp((me->position().x() - r.left()) / std::max(1.0, r.width()), 0.0, 1.0);
+        const double t = std::clamp(
+            (me->position().x() - r.left()) / std::max(1.0, r.width()),
+            0.0, 1.0);
         const int d = xToData(t);
 
-        if (mDrag == Drag::Left)  
+        if (mDrag == Drag::Left)
             setRange(d, mHi, true);
-        if (mDrag == Drag::Right) 
+        if (mDrag == Drag::Right)
             setRange(mLo, d, true);
-        if (mDrag == Drag::Pan) 
-        {
+        if (mDrag == Drag::Pan) {
             const int dv = d - mPanStartD;
             const int w = mHi - mLo;
-            int lo = std::clamp(mLo + dv, 0, 255 - w);
+            const int loMin = (int)HistMin;
+            const int loMax = (int)HistMax - w;
+            int lo = std::clamp(mLo + dv, loMin, loMax);
             int hi = lo + w;
             setRange(lo, hi, true);
             mPanStartD = d;
@@ -304,7 +336,7 @@ bool HistogramDialog::eventFilter(QObject* o, QEvent* e)
         return true;
     }
 
-    return QDialog::eventFilter(o, e);
+    return DialogShell::eventFilter(o, e); // или QDialog::eventFilter(o, e);
 }
 
 void HistogramDialog::done(int r)
@@ -316,7 +348,7 @@ void HistogramDialog::done(int r)
 void HistogramDialog::setRangeAxis(double loAxis, double hiAxis, bool emitSig)
 {
     if (loAxis > hiAxis) std::swap(loAxis, hiAxis);
-    // переводим физику оси (например, HU -1000..1000) в бины 0..255
+    // переводим физику оси (например, HU -1000..1000) в бины HistMin..HistMax
     const int loBin = dataFromAxis(loAxis);
     const int hiBin = dataFromAxis(hiAxis);
     setRange(loBin, hiBin, emitSig); // дальше обычный путь
@@ -325,46 +357,359 @@ void HistogramDialog::setRangeAxis(double loAxis, double hiAxis, bool emitSig)
 void HistogramDialog::setRange(int loBin, int hiBin, bool emitSig)
 {
     if (loBin > hiBin) std::swap(loBin, hiBin);
-    mLo = std::clamp(loBin, 0, 255);
-    mHi = std::clamp(hiBin, 0, 255);
-    if (emitSig) 
+    mLo = std::clamp(loBin, (int)HistMin, (int)HistMax);
+    mHi = std::clamp(hiBin, (int)HistMin, (int)HistMax);
+    if (emitSig)
         emit rangeChanged(mLo, mHi);
-    if (mCanvas) 
+    if (mCanvas)
         mCanvas->update();
+}
+
+// самая глубокая "впадина" в диапазоне [L..R] как просто минимум s[i]
+static int deepestValleyInRange(const QVector<double>& s, int L, int R)
+{
+    L = std::max(L, 1);
+    R = std::min(R, (int)s.size() - 2);
+    if (R <= L) return L;
+
+    int best = L;
+    double bestVal = s[L];
+    for (int i = L + 1; i <= R; ++i) {
+        if (s[i] < bestVal) {
+            bestVal = s[i];
+            best = i;
+        }
+    }
+    return best;
+}
+
+
+
+// оценка "гауссоподобия" пика в окне [L..R]
+static double gaussianFitErrorBins(const QVector<double>& s,
+    int L, int R,
+    double& muBin, double& sigmaBin)
+{
+    const int N = s.size();
+    if (N <= 0) {
+        muBin = 0.0;
+        sigmaBin = 0.0;
+        return std::numeric_limits<double>::infinity();
+    }
+
+    L = std::clamp(L, 0, N - 1);
+    R = std::clamp(R, 0, N - 1);
+    if (R <= L + 1) {
+        muBin = 0.0;
+        sigmaBin = 0.0;
+        return std::numeric_limits<double>::infinity();
+    }
+
+    long double W = 0.0L;
+    long double S1 = 0.0L;
+    long double S2 = 0.0L;
+
+    // считаем моменты по x = i (индекс бина)
+    for (int i = L; i <= R; ++i) {
+        const long double y = (long double)std::max(0.0, s[i]);
+        const long double x = (long double)i;
+        W += y;
+        S1 += y * x;
+        S2 += y * x * x;
+    }
+
+    if (W <= 0.0L) {
+        muBin = 0.0;
+        sigmaBin = 0.0;
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const long double m = S1 / W;
+    const long double m2 = S2 / W;
+    const long double var = m2 - m * m;
+    if (var <= 0.0L) {
+        muBin = 0.0;
+        sigmaBin = 0.0;
+        return std::numeric_limits<double>::infinity();
+    }
+
+    muBin = (double)m;
+    sigmaBin = std::sqrt((double)var);
+
+    // подгоняем A по площади: W ≈ A * σ * sqrt(2π)
+    const double sigma = sigmaBin;
+    if (sigma <= 0.0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    const double A = (double)W / (sigma * std::sqrt(2.0 * M_PI));
+
+    // ошибка аппроксимации в нормированных единицах
+    long double num = 0.0L;
+    long double den = 0.0L;
+
+    for (int i = L; i <= R; ++i) {
+        const double x = (double)i;
+        const double y = std::max(0.0, s[i]);
+        const double g = A * std::exp(-(x - muBin) * (x - muBin) / (2.0 * sigma * sigma));
+        const double d = y - g;
+        num += d * d;
+        den += y * y;
+    }
+
+    if (den <= 0.0L)
+        return std::numeric_limits<double>::infinity();
+
+    return (double)(num / den); // чем меньше, тем гауссоподобнее
+}
+
+static GaussianPeak findMostGaussianPeakBins(const QVector<double>& s,
+    int binLo, int binHi)
+{
+    GaussianPeak best;
+    const int N = s.size();
+    if (N < 5) return best;
+
+    binLo = std::clamp(binLo, 1, N - 2);
+    binHi = std::clamp(binHi, 1, N - 2);
+    if (binLo >= binHi) return best;
+
+    auto itLo = s.begin() + binLo;
+    auto itHi = s.begin() + binHi + 1;
+    const double gmax = *std::max_element(itLo, itHi);
+    if (gmax <= 0.0) return best;
+
+    // три набора порогов от "строгих" к "мягким"
+    const double promFracs[3] = { 0.002, 0.001, 0.0 };
+    const int    widthMins[3] = { 2,     1,     1 };
+
+    for (int pass = 0; pass < 3 && best.peakBin < 0; ++pass) {
+        const double promThr = gmax * promFracs[pass];
+        const int    minWidth = widthMins[pass];
+
+        for (int i = binLo + 1; i < binHi; ++i) {
+            if (!isLocalPeak(s, i))
+                continue;
+
+            PeakInfo P = analyzePeak(s, i);
+            if (P.prominence < promThr)
+                continue;
+            if (P.fwhmBins < minWidth)
+                continue;
+
+            int L = P.leftValley;
+            int R = P.rightValley;
+            if (L < binLo) L = binLo;
+            if (R > binHi) R = binHi;
+
+            double muBin = 0.0, sigmaBin = 0.0;
+            double err = gaussianFitErrorBins(s, L, R, muBin, sigmaBin);
+            if (!std::isfinite(err))
+                continue;
+
+            if (best.peakBin < 0 || err < best.error) {
+                best.error = err;
+                best.peakBin = P.idx;
+                best.muBin = muBin;
+                best.sigmaBin = sigmaBin;
+            }
+        }
+    }
+
+    // крайний фолбэк: просто максимум в окне
+    if (best.peakBin < 0) {
+        int argmax = binLo;
+        double vmax = s[binLo];
+        for (int i = binLo + 1; i <= binHi; ++i) {
+            if (s[i] > vmax) { vmax = s[i]; argmax = i; }
+        }
+        if (vmax > 0.0) {
+            best.peakBin = argmax;
+            best.muBin = argmax;     // центр по индексу
+            best.sigmaBin = 3.0;     // какая-то разумная ширина по умолчанию
+            best.error = 1.0;
+        }
+    }
+
+    return best;
+}
+
+int findLeftValleySimple(const QVector<double>& s, int peakBin, int limit)
+{
+    int best = peakBin;
+    double prev = s[peakBin];
+
+    for (int i = peakBin - 1; i >= limit; --i)
+    {
+        if (s[i] < prev) {
+            best = i;
+            prev = s[i];
+        }
+        else {
+            // как только пошёл подъём — это и есть впадина
+            break;
+        }
+    }
+    return best;
+}
+
+GaussianPeak HistogramDialog::FindSecondPeak(const QVector<double>& s)
+{
+    GaussianPeak mSecondPeak;
+
+    if (s.size() != (int)HistScale)
+        return mSecondPeak;
+
+    // --- 1. Находим пик около 0 (центр гистограммы) -------------------------
+    const int binA = (int)HistScale / 2 - (int)HistScale / 64;
+    const int binB = (int)HistScale / 2 + (int)HistScale / 64;
+
+    if (binA >= binB)
+        return mSecondPeak;
+
+    GaussianPeak zero = findMostGaussianPeakBins(s, binA, binB);
+    if (zero.peakBin < 0 || zero.sigmaBin <= 0.0)
+        return mSecondPeak;      // не нашли нулевой пик
+
+    // --- 2. Ищем ПЕРВЫЙ гауссоподобный пик справа от zero.peakBin ----------
+    const int N = s.size();
+    const int minGap = (int)HistScale / 64;   // небольшой отступ от нулевого пика
+    const int startBin = std::min(zero.peakBin + minGap, N - 2);
+
+    const int halfWin = (int)HistScale / 64;   // окно для подгонки гауссианы
+    const double maxErr = 1.5;                // порог на "гауссоподобность"
+    const double minSigma = 1.0;              // минимальная ширина пика (в биннах)
+
+    for (int i = startBin; i < N - 1; ++i)
+    {
+        // простой тест на локальный максимум
+        if (!(s[i] > s[i - 1] && s[i] >= s[i + 1]))
+            continue;
+
+        int wL = std::max(0, i - halfWin);
+        int wR = std::min(N - 1, i + halfWin);
+
+        GaussianPeak gp = findMostGaussianPeakBins(s, wL, wR);
+
+        // нас интересует ПЕРВЫЙ подходящий пик:
+        if (gp.peakBin == i && gp.sigmaBin >= minSigma && gp.error <= maxErr)
+        {
+            mSecondPeak = gp;
+            return mSecondPeak;
+        }
+    }
+
+    // справа ничего гауссоподобного не нашли
+    return mSecondPeak;
 }
 
 void HistogramDialog::autoRange()
 {
+    if (mH.isEmpty() || mSmooth.isEmpty()) {
+        setRange((int)HistMin, (int)HistMax, true);
+        return;
+    }
+
+    if (Dicom.TypeOfRecord != CT && Dicom.TypeOfRecord != CT3DR) {
+        setRange((int)HistMin, (int)HistMax, true);
+        return;
+    }
+
     QVector<double> s = mSmooth;
-    if (s.isEmpty()) { setRange(0, 255, true); return; }
-    if (mIgnoreZeros && !s.isEmpty()) s[0] = 0.0;
+    if (mIgnoreZeros && !s.isEmpty())
+        s[(int)HistMin] = 0.0;
 
-    const int bin200 = dataFromAxis(200.0);
-    const int minCenterBin = dataFromAxis(260.0);
+    const int N = s.size();
+    if (N < 5) {
+        setRange((int)HistMin, (int)HistMax, true);
+        return;
+    }
 
-    // 1) находим контрастный пик правее 260 HU (твоя робастная функция)
-    const int peak = findContrastPeakAfter(s, bin200, minCenterBin, 0.035, 4);
-    if (peak < 0) { setRange(bin200, 255, true); return; }
+    const double gmax = *std::max_element(s.begin(), s.end());
+    if (gmax <= 0.0) {
+        setRange((int)HistMin, (int)HistMax, true);
+        return;
+    }
 
-    // 2) перегиб = максимум кривизны в окне [200HU .. peak]
-    QVector<double> d1, d2; firstSecondDeriv(s, d1, d2);
-    const int leftInflect = std::clamp(
-        leftInflectionByCurvature(s, d1, d2, bin200, peak - 1, peak), 0, 255);
+    GaussianPeak findSecondPeak = FindSecondPeak(s);
 
-    // 3) μ,σ по правому хвосту от этого перегиба до конца гистограммы
-    double muHU = 0, sigmaHU = 0;
-    meanSigmaHU_rightTail_full(mH, leftInflect, mAxisMin, mAxisMax, muHU, sigmaHU);
+    int A = 200;
+    if (findSecondPeak.peakBin != -1)
+        A = (int)axisFromData(findSecondPeak.peakBin);
 
-    // 4) финальные границы: [перегиб ; μ + 2σ] (климпим по оси HU)
-    const int loBin = leftInflect;
-    int hiBin = dataFromAxis(std::min(muHU + 2.0 * sigmaHU, mAxisMax));
-    hiBin = std::clamp(hiBin, 0, 255);
+    const int B = 800;
 
-    if (hiBin <= loBin) hiBin = std::min(loBin + 12, 255);
+    // рабочий диапазон поиска пика: A..B HU
+    const int binA = std::clamp(dataFromAxis(A), (int)HistMin, (int)HistMax);
+    const int binB = std::clamp(dataFromAxis(B), (int)HistMin, (int)HistMax);
 
-    setRange(loBin, hiBin, true);
+    if (binA >= binB) {
+        setRange((int)HistMin, (int)HistMax, true);
+        return;
+    }
+
+    GaussianPeak gp = findMostGaussianPeakBins(s, binA, binB);
+    qDebug() << "peakBin" << gp.peakBin << "muBin" << gp.muBin << "sigmaBin" << gp.sigmaBin << "error" << gp.error;
+    if (gp.peakBin < 0 || gp.sigmaBin <= 0.0)
+    {
+        setRange(binA, binB, true);
+        return;
+    }
+
+    for (int i = binA - 1; i < binB + 1; ++i) {
+        qDebug() << " i " << i << " axis " << axisFromData(i) << " s " << s[i];
+    }
+
+    // === 2. Левая граница: как раньше (впадина или перегиб) ===
+    PeakInfo P = analyzePeak(s, gp.peakBin);
+    int loBin = -1;
+
+    if (binA >= gp.peakBin)
+    {
+        loBin = binA;
+    }
+    else
+    {
+        // 1) простая впадина
+        int valleySimple = findLeftValleySimple(s, gp.peakBin, binA);
+        if (valleySimple >= binA && valleySimple < gp.peakBin)
+        {
+            loBin = valleySimple;
+        }
+        else if (P.leftValley >= binA && P.leftValley < gp.peakBin)
+        {
+            // 2) впадина из анализа пика
+            loBin = P.leftValley;
+        }
+        else
+        {
+            // 3) fallback: перегиб по кривизне, ОГРАНИЧЕННЫЙ справа/слева
+            QVector<double> d1, d2;
+            firstSecondDeriv(s, d1, d2);
+
+            int winL = gp.peakBin - 40;
+            int winR = gp.peakBin - 1;
+
+            // жёстко ограничиваем диапазон поиска
+            winL = std::max(winL, binA);
+            winR = std::clamp(winR, binA, gp.peakBin - 1);
+
+            int inflect = leftInflectionByCurvature(s, d1, d2, winL, winR, gp.peakBin);
+
+            // страхуемся: результат тоже должен быть >= binA
+            loBin = std::clamp(inflect, binA, gp.peakBin - 1);
+        }
+    }
+
+    qDebug() << " Left i " << loBin << " axis " << axisFromData(loBin) << " s " << s[loBin];
+
+    // === 3. Правая граница: центр + 2.8 σ (в биннах) ===
+    int RightBySigma = int(std::round(gp.peakBin + 2.8 * gp.sigmaBin));
+    RightBySigma = std::clamp(RightBySigma, binB, (int)HistMax);
+
+    qDebug() << " Right i " << RightBySigma << " axis " << axisFromData(RightBySigma) << " s " << s[RightBySigma];
+
+    setRange(loBin, RightBySigma, true);
 }
-
 
 
 static double percentileCap(const QVector<quint64>& h, double q /*0..1*/)
@@ -401,7 +746,8 @@ void HistogramDialog::paintCanvas()
 
     // --- нормализация (как было) ---
     QVector<quint64> hForNorm = mH;
-    if (mIgnoreZeros && !hForNorm.isEmpty()) hForNorm[0] = 0;
+    if (mIgnoreZeros && !hForNorm.isEmpty())
+        hForNorm[(int)HistMin] = 0;
     const double cap = percentileCap(hForNorm, 0.995);
     const double denom = (cap > 0.0) ? cap : 1.0;
     auto val = [&](int i)->double {
@@ -462,7 +808,7 @@ void HistogramDialog::paintCanvas()
 
     // полная область
     pathAll.moveTo(r.left(), r.bottom());
-    for (int i = 0; i < 256; ++i) addPoint(i, pathAll);
+    for (int i = (int)HistMin; i <= (int)HistMax; ++i) addPoint(i, pathAll);
     pathAll.lineTo(r.right(), r.bottom()); pathAll.closeSubpath();
 
     // только между mLo..mHi
@@ -472,8 +818,8 @@ void HistogramDialog::paintCanvas()
     pathSel.closeSubpath();
 
     // линия контура (по всем точкам)
-    pathLine.moveTo(r.left(), r.bottom() - r.height() * val(0));
-    for (int i = 1; i < 256; ++i) {
+    pathLine.moveTo(r.left(), r.bottom() - r.height() * val((int)HistMin));
+    for (int i = (int)HistMin + 1; i <= (int)HistMax; ++i) {
         const double x = r.left() + dataToX(i) * r.width();
         const double y = r.bottom() - r.height() * val(i);
         pathLine.lineTo(x, y);

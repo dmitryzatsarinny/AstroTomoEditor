@@ -6,7 +6,17 @@
 
 namespace {
 
-    inline void fixRange(double& a, double& b) { if (a == b) { a = 0; b = 255; } if (a > b) std::swap(a, b); }
+    inline void fixRange(double& a, double& b)
+    {
+        // если min/max не задано или совпало — подставляем диапазон гистограммы
+        if (a == b) {
+            a = static_cast<double>(HistMin);
+            b = static_cast<double>(HistMax);
+        }
+        if (a > b)
+            std::swap(a, b);
+    }
+
     inline double Lerp(double a, double b, double t) { return a + (b - a) * t; }
 
     template<typename F>
@@ -15,7 +25,7 @@ namespace {
     {
         auto c = vtkSmartPointer<vtkColorTransferFunction>::New();
         c->RemoveAllPoints();
-        add(c.GetPointer(), min, max);   // <-- передаём raw*
+        add(c.GetPointer(), min, max);
         return c;
     }
 
@@ -25,10 +35,9 @@ namespace {
     {
         auto o = vtkSmartPointer<vtkPiecewiseFunction>::New();
         o->RemoveAllPoints();
-        add(o.GetPointer(), min, max);   // <-- передаём raw*
+        add(o.GetPointer(), min, max);
         return o;
     }
-
 
 } // namespace
 
@@ -314,8 +323,16 @@ QString TF::PresetsRoot() {
     return QCoreApplication::applicationDirPath() + "/Presets";
 }
 
-static inline double mapX(double x01_255, double a, double b) {
-    return a + (std::clamp(x01_255, 0.0, 255.0) / 255.0) * (b - a);
+static inline double mapX(double xHist, double a, double b)
+{
+    const double xClamped = std::clamp(
+        xHist,
+        static_cast<double>(HistMin),
+        static_cast<double>(HistMax)
+    );
+    const double span = std::max(1.0, static_cast<double>(HistMax - HistMin));
+    const double t = (xClamped - static_cast<double>(HistMin)) / span;
+    return a + t * (b - a);
 }
 
 void TF::ApplyPoints(vtkVolumeProperty* prop,
@@ -324,25 +341,37 @@ void TF::ApplyPoints(vtkVolumeProperty* prop,
     const QString& colorSpace)
 {
     if (!prop || pts.isEmpty()) return;
+    fixRange(min, max);
+
     auto c = vtkSmartPointer<vtkColorTransferFunction>::New();
     auto o = vtkSmartPointer<vtkPiecewiseFunction>::New();
 
-    // сторожевые
-    const auto& p0 = pts.front(), & p1 = pts.back();
-    c->AddRGBPoint(mapX(0.0, min, max), p0.r, p0.g, p0.b);
-    o->AddPoint(mapX(0.0, min, max), std::clamp(p0.a, 0.0, 1.0));
+    const auto& p0 = pts.front();
+    const auto& p1 = pts.back();
+
+    // сторожевые точки теперь тоже в домене HistMin..HistMax
+    c->AddRGBPoint(mapX(static_cast<double>(HistMin), min, max),
+        p0.r, p0.g, p0.b);
+    o->AddPoint(mapX(static_cast<double>(HistMin), min, max),
+        std::clamp(p0.a, 0.0, 1.0));
 
     for (const auto& p : pts) {
         const double X = mapX(p.x, min, max);
         c->AddRGBPoint(X, p.r, p.g, p.b);
         o->AddPoint(X, std::clamp(p.a, 0.0, 1.0));
     }
-    c->AddRGBPoint(mapX(255.0, min, max), p1.r, p1.g, p1.b);
-    o->AddPoint(mapX(255.0, min, max), std::clamp(p1.a, 0.0, 1.0));
 
-    if (colorSpace.compare("Lab", Qt::CaseInsensitive) == 0) c->SetColorSpaceToLab();
-    else if (colorSpace.compare("HSV", Qt::CaseInsensitive) == 0) c->SetColorSpaceToHSV();
-    else c->SetColorSpaceToRGB();
+    c->AddRGBPoint(mapX(static_cast<double>(HistMax), min, max),
+        p1.r, p1.g, p1.b);
+    o->AddPoint(mapX(static_cast<double>(HistMax), min, max),
+        std::clamp(p1.a, 0.0, 1.0));
+
+    if (colorSpace.compare("Lab", Qt::CaseInsensitive) == 0)
+        c->SetColorSpaceToLab();
+    else if (colorSpace.compare("HSV", Qt::CaseInsensitive) == 0)
+        c->SetColorSpaceToHSV();
+    else
+        c->SetColorSpaceToRGB();
 
     prop->SetIndependentComponents(true);
     prop->SetColor(0, c);

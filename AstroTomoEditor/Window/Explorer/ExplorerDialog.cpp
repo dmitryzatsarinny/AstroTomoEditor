@@ -2,51 +2,148 @@
 #include "..\..\Services\ContentFilterProxy.h"
 #include "..\..\Services\DicomSniffer.h"
 #include <QCheckBox>
-
+#include <QScrollBar>
+#include "..\MainWindow\TitleBar.h"
+#include <QStyledItemDelegate>
 static inline QString normPath(const QString& p)
 {
     return QDir::cleanPath(QDir::toNativeSeparators(p));
 }
 
+namespace {
+    class FixedDownComboBox : public QComboBox {
+    public:
+        using QComboBox::QComboBox;
+
+    protected:
+        void showPopup() override {
+            QComboBox::showPopup();
+
+            QAbstractItemView* v = view();
+            if (!v) return;
+
+            QWidget* popup = v->window();
+            if (!popup) popup = v;
+
+            // высота строки
+            int rowH = v->sizeHintForRow(0);
+            if (rowH <= 0)
+                rowH = v->fontMetrics().height() + 6;
+
+            const int visibleCount = qMax(1, count());
+            const int totalH = rowH * visibleCount;
+            const int totalW = width();
+
+            // точка ПОД комбобоксом
+            const QPoint globalPos = mapToGlobal(QPoint(0, height()));
+
+            // ставим контейнер попапа
+            popup->setGeometry(QRect(globalPos, QSize(totalW, totalH)));
+            if (auto* lay = popup->layout())
+                lay->setContentsMargins(0, 0, 0, 0);
+
+            // растягиваем список на весь popup
+            v->setGeometry(popup->rect());
+            v->setMinimumHeight(totalH);
+            v->setMaximumHeight(totalH);
+
+            // рубим скроллбары
+            v->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            v->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            if (auto* sb = v->verticalScrollBar()) {
+                sb->setVisible(false);
+                sb->setEnabled(false);
+                sb->setMaximum(0);
+            }
+            if (auto* sb = v->horizontalScrollBar()) {
+                sb->setVisible(false);
+                sb->setEnabled(false);
+                sb->setMaximum(0);
+            }
+
+            v->setMouseTracking(true);
+
+            // ЯРКОЕ выделение через палитру
+            QPalette pal = v->palette();
+            pal.setColor(QPalette::Base, QColor("#1f2023"));          // фон списка
+            pal.setColor(QPalette::Text, QColor("#f0f0f0"));          // текст
+            pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
+            pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
+            v->setPalette(pal);
+        }
+    };
+
+    class FlatTreeView : public QTreeView
+    {
+    public:
+        using QTreeView::QTreeView;
+
+    protected:
+        void drawRow(QPainter* painter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override
+        {
+            QStyleOptionViewItem opt(option);
+            // убираем фокус со строки, чтобы не было «особой» ячейки
+            opt.state &= ~QStyle::State_HasFocus;
+            QTreeView::drawRow(painter, opt, index);
+        }
+    };
+
+    class NoFocusDelegate : public QStyledItemDelegate
+    {
+    public:
+        using QStyledItemDelegate::QStyledItemDelegate;
+
+        void paint(QPainter* painter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override
+        {
+            QStyleOptionViewItem opt(option);
+            // убираем фокус с отдельной ячейки
+            opt.state &= ~QStyle::State_HasFocus;
+            QStyledItemDelegate::paint(painter, opt, index);
+        }
+    };
+}
+
 ExplorerDialog::ExplorerDialog(QWidget* parent)
-    : QDialog(parent)                                       // Базовый конструктор QDialog; parent задаёт владение.
+    : DialogShell(parent, tr("Astrocard DICOM Explorer"))   // ← вот так
 {
-    setWindowTitle(tr("Astrocard DICOM Explorer"));         // Заголовок окна (через tr() — пригодно для перевода).
-    resize(900, 600);                                       // Стартовый размер диалога.
+    resize(900, 600);
 
-    QIcon appIcon(":/icons/Resources/dicom_heart.ico");
-    setWindowIcon(appIcon);
-    
-    auto* mainLay = new QVBoxLayout(this);                  // Главный вертикальный лэйаут; parent = this.
+    // ====== КОНТЕЙНЕР КОНТЕНТА ======
+    QWidget* content = contentWidget();     // ← Берем пустой контейнер из DialogShell
+    content->setObjectName("ExplorerContent");
 
-    // Верхняя панель: список дисков + текущий путь
-    auto* top = new QHBoxLayout();                          // Горизонтальный лэйаут для комбобоксов.
-    m_driveCombo = new QComboBox(this);                     // Комбо со списком дисков.
-    m_pathCombo = new QComboBox(this);                      // Комбо с историей путей/вводом пути.
-    m_pathCombo->setEditable(true);                         // Разрешаем ручной ввод пути (lineEdit внутри).
-    m_typeCombo = new QComboBox(this);                      // Комбо со списком типов.
-    m_magicCheck = new QCheckBox(tr("Deep Checking"), this); // Опция глубокой проверки.
+    auto* mainLay = new QVBoxLayout(content);
+    mainLay->setContentsMargins(12, 10, 12, 10);
+    mainLay->setSpacing(8);
+
+    // верхняя панель
+    auto* top = new QHBoxLayout();
+    m_driveCombo = new FixedDownComboBox(content);
+    m_pathCombo = new QComboBox(content);
+    m_pathCombo->setEditable(true);
+    m_typeCombo = new FixedDownComboBox(content);
+    m_magicCheck = new QCheckBox(tr("Deep Checking"), content);
     m_magicCheck->setToolTip(tr("Check files without DICOM extension by signature."));
     m_magicCheck->setChecked(false);
 
     m_typeCombo->addItem(tr("DICOM"), int(ContentFilterProxy::DicomFiles));
     m_typeCombo->addItem(tr("3D Volume (*.3dr)"), int(ContentFilterProxy::Volume3D));
 
-    top->addWidget(m_driveCombo, 0);                        // Добавить комбо дисков (столбец ширины по контенту).
-    top->addWidget(m_pathCombo, 1);                         // Путь занимает оставшееся место (stretch = 1).
-    top->addWidget(m_typeCombo, 0);                         // Добавить комбо типов (столбец ширины по контенту).
-    top->addWidget(m_magicCheck, 0);                        // Чекбокс глубокой проверки
-    mainLay->addLayout(top);                                // Вставить верхнюю панель в главный лэйаут.
+    top->addWidget(m_driveCombo, 0);
+    top->addWidget(m_pathCombo, 1);
+    top->addWidget(m_typeCombo, 0);
+    top->addWidget(m_magicCheck, 0);
+    mainLay->addLayout(top);
 
-    // Модель файловой системы
-    m_model = new QFileSystemModel(this);                   // Создаём модель; parent = this для автоудаления.
-    m_model->setFilter(                                     // Какие элементы показывать:
-        QDir::AllDirs                                       //  - папки,
-        | QDir::NoDot                                       //  - без "." и "..",
-        | QDir::Files);                                     //  - и файлы.
-    m_model->setRootPath(QDir::rootPath());                 // Устанавливаем корневой путь (подгрузка начнётся оттуда).
+    // модель / прокси
+    m_model = new QFileSystemModel(this);
+    m_model->setFilter(QDir::AllDirs | QDir::NoDot | QDir::Files);
+    m_model->setRootPath(QDir::rootPath());
 
-    // Прокси-фильтр поверх файловой модели
     m_proxy = new ContentFilterProxy(this);
     m_proxy->setSourceModel(m_model);
     m_proxy->setDynamicSortFilter(true);
@@ -58,118 +155,223 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
             m_proxy->setCheckDicomMagic(on);
         });
 
-
-    // Представление — как в Проводнике: таблица с колонками
-    m_view = new QTreeView(this);
+    // дерево
+    m_view = new FlatTreeView(content);
     m_view->setModel(m_proxy);
     m_view->setRootIndex(m_proxy->mapFromSource(m_model->index(QDir::rootPath())));
+    m_view->setSortingEnabled(true);
+    m_view->sortByColumn(0, Qt::AscendingOrder);
+    m_view->setSelectionMode(QAbstractItemView::SingleSelection);
+    m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_view->setAlternatingRowColors(true);
+    m_view->setEditTriggers(QAbstractItemView::NoEditTriggers);
 
-    m_view->setSortingEnabled(true);          // Включаем сортировку по клику на заголовок.
-    m_view->sortByColumn(0, Qt::AscendingOrder); // Первичная сортировка по имени.
-    m_view->setSelectionMode(                 // Разрешаем выбирать только один элемент.
-        QAbstractItemView::SingleSelection);
-    m_view->setSelectionBehavior(             // Выбор целой строки (а не отдельной ячейки).
-        QAbstractItemView::SelectRows);
-    m_view->setAlternatingRowColors(true);    // Чередующиеся цвета строк (визуально удобней).
-    m_view->setEditTriggers(                  // Запрещаем редактирование (двойной клик не редактирует).
-        QAbstractItemView::NoEditTriggers);
-    m_view->header()->setStretchLastSection(false); // Последняя колонка не растягивается автоматически.
-    m_view->header()->setSectionResizeMode(
-        0, QHeaderView::Stretch);             // Колонка 0 ("Имя") тянется, заполняя ширину.
-    m_view->header()->setSectionResizeMode(
-        1, QHeaderView::ResizeToContents);    // "Дата" по содержимому.
-    m_view->header()->setSectionResizeMode(
-        2, QHeaderView::ResizeToContents);    // "Тип" по содержимому.
-    m_view->header()->setSectionResizeMode(
-        3, QHeaderView::ResizeToContents);    // "Размер" по содержимому.
+    m_view->setItemDelegate(new NoFocusDelegate(m_view));
+    m_view->setAllColumnsShowFocus(false);
 
-    mainLay->addWidget(m_view, 1);            // Добавляем вид в основной лэйаут (stretch = 1).
+    m_view->header()->setStretchLastSection(false);
+    m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_view->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_view->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
 
-    // Кнопки
-    m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    m_buttons->button(QDialogButtonBox::Ok)->setText(tr("OK"));     // Локализуем надписи.
+    mainLay->addWidget(m_view, 1);
+
+    // ===== НИЖНЯЯ ЛИНИЯ: статус слева, кнопки справа =====
+    m_buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, content);
+    m_buttons->button(QDialogButtonBox::Ok)->setText(tr("OK"));
     m_buttons->button(QDialogButtonBox::Cancel)->setText(tr("Cancel"));
-    mainLay->addWidget(m_buttons);            // Вставляем блок кнопок в низ диалога.
 
-    // ----- НИЖНИЙ "status bar" -----
-    mStatusBar = new QWidget(this);
+    mStatusBar = new QWidget(content);
     mStatusBar->setObjectName("ExplorerStatusBar");
     auto* barLy = new QHBoxLayout(mStatusBar);
-    barLy->setContentsMargins(8, 4, 8, 4);
+    barLy->setContentsMargins(0, 2, 0, 0);
     barLy->setSpacing(8);
 
-    mStatusText = new QLabel(tr("Loading..."), mStatusBar);
+    mStatusText = new QLabel(tr("Ready"), mStatusBar);
     mBusy = new QProgressBar(mStatusBar);
-    mBusy->setRange(0, 0);              // «неопределённый» прогресс (анимация)
+    mBusy->setRange(0, 0);
     mBusy->setTextVisible(false);
-    mBusy->setFixedHeight(8);
+    mBusy->setFixedHeight(4);
+    mBusy->setVisible(false);
 
-    barLy->addWidget(mStatusText, /*stretch*/0);
-    barLy->addWidget(mBusy,       /*stretch*/1);
+    barLy->addWidget(mStatusText, 0);
+    barLy->addWidget(mBusy, 0);
+    barLy->addStretch();
+    barLy->addWidget(m_buttons, 0);
 
-    mStatusBar->show();
+    mainLay->addWidget(mStatusBar, 0);
+
+    // ===== ЛОГИКА =====
     mStatusText->clear();
-
-    if (auto* mainLy = qobject_cast<QVBoxLayout*>(layout())) 
-    {
-        int i = mainLy->indexOf(m_buttons);
-        if (i < 0) 
-            i = mainLy->count();
-        mainLy->insertWidget(i, mStatusBar);
-    }
-    else 
-    {
-        auto* v = new QVBoxLayout(this);
-        v->addWidget(mStatusBar);
-        setLayout(v);
-    }
 
     mOpenTimeout = new QTimer(this);
     mOpenTimeout->setSingleShot(true);
     connect(mOpenTimeout, &QTimer::timeout, this, [this] {
-        setStatus(LoadState::Ready, tr("Ready")); // fail-safe
+        setStatus(LoadState::Ready, tr("Ready"));
         });
 
-    // Наполняем диски и выставляем стартовый путь
-    populateDrives();                         // Собираем список логических дисков и заполняем m_driveCombo.
+    populateDrives();
 #ifdef Q_OS_WIN
-    navigateTo("C:/");                        // На Windows — переходим в C:/
+    navigateTo("C:/");
 #else
-    navigateTo(QDir::homePath());             // На *nix — в домашнюю директорию пользователя.
+    navigateTo(QDir::homePath());
 #endif
 
     connect(m_model, &QFileSystemModel::directoryLoaded,
-        this, &ExplorerDialog::onDirectoryLoaded);     // Смена диска -> перейти к корню этого диска.
+        this, &ExplorerDialog::onDirectoryLoaded);
 
     connect(m_model, &QFileSystemModel::rowsInserted, this,
         [this](const QModelIndex& parent, int, int) {
             const QString p = normPath(m_model->filePath(parent));
+            Q_UNUSED(p);
         });
 
     connect(m_driveCombo, &QComboBox::currentIndexChanged,
-        this, &ExplorerDialog::onDriveChanged);     // Смена диска -> перейти к корню этого диска.
-
+        this, &ExplorerDialog::onDriveChanged);
     connect(m_pathCombo, &QComboBox::activated,
-        this, &ExplorerDialog::onPathActivated); // Выбор элемента из истории путей.
-
+        this, &ExplorerDialog::onPathActivated);
     connect(m_pathCombo->lineEdit(), &QLineEdit::editingFinished,
-        this, &ExplorerDialog::onPathEdited);    // Нажали Enter в поле пути.
-
+        this, &ExplorerDialog::onPathEdited);
     connect(m_view, &QTreeView::doubleClicked,
-        this, &ExplorerDialog::onDoubleClicked); // Двойной клик: войти в папку или принять файл.
-
+        this, &ExplorerDialog::onDoubleClicked);
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged,
-        this, &ExplorerDialog::onSelectionChanged); // Любое изменение выбора.
-
+        this, &ExplorerDialog::onSelectionChanged);
     connect(m_buttons, &QDialogButtonBox::accepted,
-        this, &ExplorerDialog::accept);        // Ok -> accept() (exec() вернёт Accepted).
+        this, &ExplorerDialog::accept);
     connect(m_buttons, &QDialogButtonBox::rejected,
-        this, &ExplorerDialog::reject);        // Cancel -> reject().
-
+        this, &ExplorerDialog::reject);
     connect(m_typeCombo, &QComboBox::currentIndexChanged,
         this, &ExplorerDialog::onTypeChanged);
 
-    updateOkState();                         // Включить/выключить Ok в соответствии с текущим выбором.
+    updateOkState();
+
+    // ===== СТИЛИ: список, скролл, комбобоксы, чекбокс, кнопки =====
+    content->setStyleSheet(
+        // фон зоны
+        "#ExplorerContent {"
+        "  background:transparent;"
+        "}"
+
+        // комбобоксы
+        "QComboBox {"
+        "  background:#26282c;"
+        "  color:#f0f0f0;"
+        "  border:1px solid rgba(255,255,255,0.25);"
+        "  border-radius:4px;"
+        "  padding:2px 22px 2px 6px;"
+        "}"
+        "QComboBox:hover {"
+        "  background:#2c2f34;"
+        "}"
+        "QComboBox::drop-down {"
+        "  border:none;"
+        "  width:18px;"
+        "}"
+        "QComboBox::down-arrow {"
+        "  image:none;"
+        "}"
+
+        // список
+        "QTreeView {"
+        "  background:transparent;"
+        "  border:none;"
+        "  color:#e6e6e6;"
+        "  alternate-background-color:rgba(255,255,255,0.05);"
+        "  selection-background-color:rgba(255,255,255,0.20);"
+        "  selection-color:#ffffff;"
+        "  show-decoration-selected:1;"
+        "}"
+        "QTreeView::item {"
+        "  height:22px;"
+        "  padding:1px 4px;"
+        "}"
+        "QTreeView::item:hover {"
+        "  background:rgba(255,255,255,0.10);"
+        "}"
+        "QTreeView::item:selected:active {"
+        "  background:rgba(255,255,255,0.20);"
+        "}"
+        "QTreeView::item:selected:!active {"
+        "  background:rgba(255,255,255,0.20);"
+        "}"
+        "QTreeView::item:focus {"
+        "  outline:none;"
+        "}"
+
+        // заголовок
+        "QHeaderView::section {"
+        "  background:#25262a;"
+        "  color:#f0f0f0;"
+        "  padding:4px 6px;"
+        "  border:none;"
+        "  border-bottom:1px solid rgba(255,255,255,0.12);"
+        "}"
+
+        // скроллбар
+        "QScrollBar:vertical {"
+        "  background:transparent;"
+        "  width:10px;"
+        "  margin:2px 0 2px 0;"
+        "}"
+        "QScrollBar::handle:vertical {"
+        "  background:rgba(255,255,255,0.30);"
+        "  min-height:30px;"
+        "  border-radius:4px;"
+        "}"
+        "QScrollBar::add-line:vertical,"
+        "QScrollBar::sub-line:vertical {"
+        "  height:0;"
+        "  border:none;"
+        "  background:transparent;"
+        "}"
+        "QScrollBar::add-page:vertical,"
+        "QScrollBar::sub-page:vertical {"
+        "  background:transparent;"
+        "}"
+
+
+        // чекбокс
+        "QCheckBox {"
+        "  color:#e6e6e6;"
+        "}"
+        "QCheckBox::indicator {"
+        "  width:14px;"
+        "  height:14px;"
+        "}"
+        "QCheckBox::indicator:unchecked {"
+        "  border:1px solid rgba(255,255,255,0.5);"
+        "  background:transparent;"
+        "  border-radius:5px;"
+        "}"
+        "QCheckBox::indicator:checked {"
+        "  background:rgba(255,255,255,0.6);"
+        "  border:1px solid rgba(255,255,255,0.8);"
+        "  border-radius:5px;"
+        "}"
+
+        // кнопки OK/Cancel
+        "QDialogButtonBox QPushButton {"
+        "  min-width:80px;"
+        "  padding:4px 14px;"
+        "  background:#2a2c30;"
+        "  color:#f0f0f0;"
+        "  border-radius:6px;"
+        "  border:1px solid rgba(255,255,255,0.22);"
+        "}"
+        "QDialogButtonBox QPushButton:hover {"
+        "  background:#32353a;"
+        "}"
+        "QDialogButtonBox QPushButton:pressed {"
+        "  background:#3a3d44;"
+        "}"
+        "QDialogButtonBox QPushButton:disabled {"
+        "  background:#25272b;"
+        "  color:#777777;"
+        "  border-color:rgba(255,255,255,0.10);"
+        "}"
+    );
+
 }
 
 ExplorerDialog::~ExplorerDialog() = default;

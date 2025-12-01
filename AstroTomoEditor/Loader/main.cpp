@@ -4,6 +4,7 @@
 
 #include <QSurfaceFormat>
 #include <QVTKOpenGLNativeWidget.h>
+#include <QStyleFactory>
 
 static void ConfigureDllSearch()
 {
@@ -19,7 +20,6 @@ int main(int argc, char* argv[])
     ConfigureDllSearch();
 
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-
     //vtkNew<vtkFileOutputWindow> fow;
     //fow->SetFileName("vtk.log");
     //vtkOutputWindow::SetInstance(fow);
@@ -27,6 +27,54 @@ int main(int argc, char* argv[])
 
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication app(argc, argv);
+
+    app.setStyle(QStyleFactory::create("Fusion"));
+
+    // --- если есть аргумент пути ---
+    QString argPath;
+    if (argc > 1) {
+        argPath = QString::fromLocal8Bit(argv[1]);
+        QFileInfo fi(argPath);
+
+        if (fi.exists()) {
+            ExplorerDialog::SelectionKind kind = ExplorerDialog::SelectionKind::None;
+
+            // 3DR файл
+            if (fi.isFile() && fi.suffix().compare("3dr", Qt::CaseInsensitive) == 0) {
+                kind = ExplorerDialog::SelectionKind::File3DR;
+            }
+            // DICOMDIR
+            else if (fi.isFile() && fi.fileName().compare("DICOMDIR", Qt::CaseInsensitive) == 0) {
+                kind = ExplorerDialog::SelectionKind::DicomDir;
+            }
+            // Папка — проверим, DICOM ли она
+            else if (fi.isDir()) {
+                QDir d(argPath);
+                const QStringList files = d.entryList(QDir::Files);
+
+                bool hasDicom = false;
+                for (const QString& f : files) {
+                    if (f.endsWith(".dcm", Qt::CaseInsensitive) ||
+                        f.endsWith(".dicom", Qt::CaseInsensitive))
+                    {
+                        hasDicom = true;
+                        break;
+                    }
+                }
+
+                if (hasDicom)
+                    kind = ExplorerDialog::SelectionKind::DicomFolder;
+            }
+
+            // если тип определён — запускаем приложение без диалога
+            if (kind != ExplorerDialog::SelectionKind::None) {
+                MainWindow w(nullptr, argPath, kind);
+                w.show();
+                QTimer::singleShot(0, &w, &MainWindow::onOpenStudy);
+                return app.exec();
+            }
+        }
+    }
 
 
     ExplorerDialog dlg;

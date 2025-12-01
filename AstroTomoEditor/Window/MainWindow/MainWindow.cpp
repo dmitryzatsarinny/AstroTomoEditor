@@ -24,7 +24,7 @@ MainWindow::MainWindow(QWidget* parent,
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
     setAttribute(Qt::WA_TranslucentBackground);
 
-    setWindowIcon(QIcon(":/icons/Resources/dicom_heart.png"));
+    setWindowIcon(QIcon(":/icons/Resources/dicom_heart.ico"));
 
 #ifdef Q_OS_WIN
     if (auto* mb = menuBar()) mb->setNativeMenuBar(false);
@@ -64,7 +64,8 @@ void MainWindow::buildUi()
 
     // центральный сплиттер
     mSplit = new QSplitter(Qt::Horizontal, central);
-    mSplit->setHandleWidth(2);
+    mSplit->setObjectName("MainSplit");
+    mSplit->setHandleWidth(8);        // было 10
     mSplit->setChildrenCollapsible(false);
 
     // левая панель
@@ -223,42 +224,109 @@ void MainWindow::buildStyles()
         "  border-top-right-radius:10px;"
         "}\n";
 
+    ss += R"(
+        /* Общие настройки для элементов */
+        #SeriesPanel QListWidget {
+            background: rgba(255,255,255,0.02);
+            border-radius: 8px;
+            outline: none;
+            border: none;
+        }
+        
+        #SeriesPanel QListWidget::item {
+            background: rgba(255,255,255,0.03);
+            border-radius: 8px;
+            margin: 2px 2px;
+            padding: 6px;
+            color: #ddd;
+        }
+        
+        /* Когда курсор над элементом */
+        #SeriesPanel QListWidget::item:hover {
+            background: rgba(255,255,255,0.10);
+            border: 1px solid rgba(255,255,255,0.14);
+        }
+        
+        /* Активный / выделенный элемент */
+        #SeriesPanel QListWidget::item:selected {
+            background: rgba(255,255,255,0.15);
+            border: 2px solid rgba(255,255,255,0.25);
+        }
+        
+        /* Миниатюры в элементах */
+        #SeriesPanel QListWidget::icon {
+            margin: 4px;
+        }
+        
+        /* Текст */
+        #SeriesPanel QListWidget::item:selected:!active {
+            color: white;
+        }
+        
+        /* Вертикальный скролл компактный */
+        #SeriesPanel QScrollBar:vertical {
+            background: transparent;
+            width: 8px;
+            margin: 4px 0 4px 0;
+        }
+        
+        #SeriesPanel QScrollBar::handle:vertical {
+            background: rgba(255,255,255,0.18);
+            min-height: 24px;
+            border-radius: 4px;
+        }
+        
+        #SeriesPanel QScrollBar::handle:vertical:hover {
+            background: rgba(255,255,255,0.32);
+        }
+        
+        #SeriesPanel QScrollBar::add-line:vertical,
+        #SeriesPanel QScrollBar::sub-line:vertical {
+            height: 0;
+        }
+        )";
+
+
+    ss += R"(
+            
+                /* Аккуратный хэндл сплиттера — тонкая полоска по центру */
+                #MainSplit::handle:horizontal {
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:0,
+                        stop:0   rgba(0,0,0,0),
+                        stop:0.46 rgba(255,255,255,0.09),
+                        stop:0.54 rgba(255,255,255,0.09),
+                        stop:1   rgba(0,0,0,0)
+                    );
+                    width: 8px;
+                }
+            
+                #MainSplit::handle:horizontal:hover {
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:0,
+                        stop:0   rgba(0,0,0,0),
+                        stop:0.46 rgba(255,255,255,0.18),
+                        stop:0.54 rgba(255,255,255,0.18),
+                        stop:1   rgba(0,0,0,0)
+                    );
+                }
+            
+                #MainSplit::handle:horizontal:pressed {
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:0,
+                        stop:0   rgba(0,0,0,0),
+                        stop:0.46 rgba(255,255,255,0.26),
+                        stop:0.54 rgba(255,255,255,0.26),
+                        stop:1   rgba(0,0,0,0)
+                    );
+                }
+            )";
+
+
+
     // Если окно развёрнуто — без радиусов
     ss += "#CentralCard[maxed=\"true\"] { border-radius:0; }"
         "#TitleBar[maxed=\"true\"] { border-top-left-radius:0; border-top-right-radius:0; }\n";
-
-    // Вся карточка: как и раньше, общий контур и скругление
-    ss += "#PatientDialogCard{"
-        " background:#1f2023;"
-        " border:1px solid rgba(255,255,255,0.14);"
-        " border-radius:10px;"
-        "}\n";
-
-    // Шапка с собственным контуром (как у #CentralCard) и нижней разделительной линией.
-    // Небольшие отрицательные отступы «вклеивают» контур шапки в общий контур карточки,
-    // так что визуально это одна линия по верху и бокам.
-    ss += "#PD_TitleBar{"
-        " background:#1e1f22;"
-        " border: none;"         /* общий контур шапки */
-        " border-bottom:1px solid rgba(255,255,255,0.12);"  /* тонкая линия отделяет шапку от тела */
-        " border-top-left-radius:9px;"
-        " border-top-right-radius:9px;"
-        " margin:1px 1px 0 1px;"                         /* приклеиваем к контуру карточки */
-        " padding:6px 6px 6 10px;"
-        "}\n";
-
-    ss += "#PD_Title{ color:#e6e6e6; font-size:14px; font-weight:600; }\n";
-
-    // Кнопка закрытия — та же логика, что в главном окне: прозрачная и «сереет» при hover
-    ss += "#PD_Close{"
-        " border:none; padding:2px; border-radius:6px;"
-        " background:transparent; color:#e6e6e6;"
-        "}"
-        "#PD_Close:hover{ background:rgba(255,255,255,0.10); }"
-        "#PD_Close:pressed{ background:rgba(255,255,255,0.16); }\n";
-
-    // Тело без внутренних рамок
-    ss += "#PD_Body{ background:transparent; border:none; }\n";
 
     qApp->setStyleSheet(ss);
 }
@@ -450,6 +518,7 @@ void MainWindow::onOpenStudy()
 {
     if (mTitle) { mTitle->set2DChecked(true); mTitle->set3DChecked(false); }
 
+    mPlanar->sethidescroll();
     mProgBox->setVisible(true);
     mProgress->setRange(0, 0);
     mStatusText->setText(tr("Searching DICOM files…"));
@@ -548,6 +617,8 @@ void MainWindow::onSeriesActivated(const QString& /*seriesUID*/, const QVector<Q
     if (mPlanar->IsLoading())
         return;
 
+    mPlanar->sethidescroll();
+
     if (mRenderView)
         mRenderView->hideOverlays();
 
@@ -559,122 +630,10 @@ void MainWindow::onSeriesActivated(const QString& /*seriesUID*/, const QVector<Q
 
 void MainWindow::ensurePatientDialog()
 {
-    if (mPatientDlg) return;
+    if (mPatientDlg)
+        return;
 
-    // Фрейм без рамки и с альфа-каналом
-    QWidget* dlg = new QWidget(this, Qt::FramelessWindowHint | Qt::Tool);
-    dlg->setObjectName("PatientDialogFrame");
-    dlg->setAttribute(Qt::WA_TranslucentBackground);
-    dlg->setFixedSize(420, 210);
-    mPatientDlg = dlg;
-
-    // Внешний отступ от края окна до карточки
-    auto* outer = new QVBoxLayout(dlg);
-    outer->setContentsMargins(8, 8, 8, 8);
-    outer->setSpacing(0);
-
-    // Внутренняя «карточка»
-    QWidget* card = new QWidget(dlg);
-    card->setObjectName("PatientDialogCard");
-    outer->addWidget(card);
-
-    auto* v = new QVBoxLayout(card);
-    v->setContentsMargins(0, 0, 0, 0);
-    v->setSpacing(0);
-
-    // Заголовок
-    auto* title = new QWidget(card);
-    title->setObjectName("PD_TitleBar");
-    title->setMouseTracking(true);
-    title->installEventFilter(dlg);
-    dlg->installEventFilter(dlg); 
-
-    card->setAttribute(Qt::WA_StyledBackground, true);
-    title->setAttribute(Qt::WA_StyledBackground, true);
-
-    class PDDragFilter : public QObject {
-        QWidget* w_;
-    public:
-        explicit PDDragFilter(QWidget* w) : QObject(w), w_(w) {}
-    protected:
-        bool eventFilter(QObject* obj, QEvent* e) override {
-            static bool dragging = false;
-            static QPoint startPos;
-            if (e->type() == QEvent::MouseButtonPress) {
-                auto* me = static_cast<QMouseEvent*>(e);
-                if (me->button() == Qt::LeftButton) {
-                    dragging = true;
-                    startPos = me->globalPosition().toPoint() - w_->frameGeometry().topLeft();
-                    return true;
-                }
-            }
-            else if (e->type() == QEvent::MouseMove) {
-                if (dragging) {
-                    auto* me = static_cast<QMouseEvent*>(e);
-                    w_->move(me->globalPosition().toPoint() - startPos);
-                    return true;
-                }
-            }
-            else if (e->type() == QEvent::MouseButtonRelease) {
-                dragging = false;
-            }
-            return QObject::eventFilter(obj, e);
-        }
-    };
-
-    title->installEventFilter(new PDDragFilter(dlg));
-
-    // локальные замыкания-хранилища
-    static QPoint s_dragPos;
-    static bool   s_dragging = false;
-
-    auto* th = new QHBoxLayout(title);
-    th->setContentsMargins(10, 6, 6, 6);
-    th->setSpacing(6);
-    auto* tlabel = new QLabel(tr("Patient Data"), title);
-    tlabel->setObjectName("PD_Title");
-    th->addWidget(tlabel);
-    th->addStretch();
-
-    dlg->connect(title, &QWidget::customContextMenuRequested, [] {}); // чтобы у компоновщика был объект
-
-    dlg->QObject::connect(dlg, &QObject::destroyed, dlg, [] { s_dragging = false; });
-
-    dlg->QObject::connect(title, &QWidget::windowTitleChanged, dlg, [] {}); // заглушка — чтобы у moc были слоты
-
-    auto* closeBtn = new QToolButton(title);
-    closeBtn->setObjectName("PD_Close");
-    closeBtn->setText("✕");                 // или тот же QIcon, что в TitleBar
-    closeBtn->setCursor(Qt::PointingHandCursor);
-    closeBtn->setFixedSize(22, 22);         // аккуратный размер
-    closeBtn->setToolTip(tr("Close"));
-
-    th->addWidget(closeBtn);
-
-    connect(closeBtn, &QToolButton::clicked, dlg, &QWidget::close);
-
-    v->addWidget(title, 0);
-
-    // Контент
-    QWidget* body = new QWidget(card);
-    body->setObjectName("PD_Body");
-    auto* form = new QFormLayout(body);
-    form->setContentsMargins(16, 10, 16, 14);
-    form->setSpacing(8);
-
-    mPD_Name = new QLabel(body);
-    mPD_Id = new QLabel(body);
-    mPD_Sex = new QLabel(body);
-    mPD_Birth = new QLabel(body);
-
-    form->addRow(tr("Name:"), mPD_Name);
-    form->addRow(tr("ID:"), mPD_Id);
-    form->addRow(tr("Sex:"), mPD_Sex);
-    form->addRow(tr("Birth:"), mPD_Birth);
-
-    v->addWidget(body, 1);
-
-    connect(dlg, &QObject::destroyed, this, [this] { mPatientDlg = nullptr; });
+    mPatientDlg = new PatientDialog(this);
 }
 
 void MainWindow::onShowVolume3D()
@@ -693,13 +652,13 @@ void MainWindow::onShowVolume3D()
         mViewerStack->addWidget(mRenderView);
     }
 
-    mTitle->setSaveVisible(true);
-
     mRenderView->setVolume(vtkVol, mPlanar->GetDicomInfo());
     mViewerStack->setCurrentWidget(mRenderView);
 
     if (mTitle) { mTitle->set3DChecked(true); mTitle->set2DChecked(false); }
     mStatusText->setText(tr("Ready Volume"));
+
+    mTitle->setSaveVisible(true);
 }
 
 void MainWindow::onShowPlanar2D()
@@ -728,16 +687,13 @@ void MainWindow::showPatientDetails()
 
     ensurePatientDialog();
 
-    mPD_Name->setText(mCurrentPatient.patientName);
-    mPD_Id->setText(mCurrentPatient.patientId);
-    mPD_Sex->setText(mCurrentPatient.sex);
-    mPD_Birth->setText(mCurrentPatient.birthDate);
+    mPatientDlg->setInfo(mCurrentPatient);
 
     mPatientDlg->show();
     mPatientDlg->raise();
     mPatientDlg->activateWindow();
 
-    // Центрируем
+    // Центрируем относительно главного окна
     const QRect r = geometry();
     const QSize s = mPatientDlg->size();
     mPatientDlg->move(r.center() - QPoint(s.width() / 2, s.height() / 2 + 40));

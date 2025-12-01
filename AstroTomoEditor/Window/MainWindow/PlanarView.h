@@ -35,6 +35,7 @@ public:
     void fitToWindow();
     void resetZoom();
     void rebuildPixmap();
+    
 
     QVector3D voxelSpacing() const { return { float(mSpX), float(mSpY), float(mSpZ) }; }
 
@@ -48,6 +49,8 @@ public:
     bool IsLoading() { return loading; }
     void StartLoading() { loading = true; }
     void StopLoading() { loading = false; }
+    void sethidescroll() { if (mScroll) mScroll->hide(); }
+
     struct ValidationReport {
         QVector<QString> good, bad;
         QString reason;

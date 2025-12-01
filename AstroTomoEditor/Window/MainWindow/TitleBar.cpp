@@ -3,8 +3,15 @@
 #include <QStyle>
 #include <QMouseEvent>
 
-TitleBar::TitleBar(QWidget* parent) : QWidget(parent)
+TitleBar::TitleBar(QWidget* parent, int typeofwindow, const QString titlename) : QWidget(parent)
 {
+    if (typeofwindow)
+    {
+        buildnondefaulttitlebar(titlename);
+        initDragFilters();
+        return;
+    }
+
     setFixedHeight(40);
     setObjectName("TitleBar");
 
@@ -24,7 +31,7 @@ TitleBar::TitleBar(QWidget* parent) : QWidget(parent)
         .scaled(30, 30, Qt::KeepAspectRatio, Qt::SmoothTransformation));
     l->addWidget(mIcon);
 
-    mAppTitle = new QLabel(tr("AstroDicomEditor"), mLeft);
+    mAppTitle = new QLabel(titlename, mLeft);
     mAppTitle->setStyleSheet("font-weight:600; font-size:20px;");
     mAppTitle->setContentsMargins(0, -3, 0, 0);
     l->addWidget(mAppTitle);
@@ -101,21 +108,36 @@ TitleBar::TitleBar(QWidget* parent) : QWidget(parent)
     r->addWidget(mBtn2D);
     r->addWidget(mBtn3D);
 
-    // системные кнопки
-    auto makeBtn = [&](QStyle::StandardPixmap sp) {
-        auto* b = new QToolButton(this);
-        b->setAutoRaise(true);
-        b->setIcon(style()->standardIcon(sp));
-        b->setFixedSize(52, 30);
+    auto makeBtn = [&](QWidget* parent) {
+        auto* b = new QToolButton(parent);
+        b->setAutoRaise(false);
+        b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
+
+        b->setFixedSize(39, 26);
+        b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+
+        b->setStyleSheet(
+            "QToolButton{"
+            "  color:#e6e6e6; background:transparent; border:none;"
+            "  padding:2px 10px; font-size:16px; border-radius:6px;"
+            "}"
+            "QToolButton:hover{"
+            "  background:rgba(255,255,255,0.10);"
+            "}"
+        );
         return b;
         };
 
-    mBtnMax = makeBtn(QStyle::SP_TitleBarMaxButton);
-    mBtnClose = makeBtn(QStyle::SP_TitleBarCloseButton);
-    mBtnMax->setCursor(Qt::PointingHandCursor);
-    mBtnClose->setCursor(Qt::PointingHandCursor);
+
+    mBtnMax = makeBtn(mRight);
+    mBtnMax->setIcon(QIcon(":/icons/Resources/fullscreen.svg"));
+    mBtnMax->setIconSize(QSize(15, 15));
     r->addWidget(mBtnMax);
+
+    mBtnClose = makeBtn(mRight);
+    mBtnClose->setIcon(QIcon(":/icons/Resources/close.svg"));
+    mBtnClose->setIconSize(QSize(15, 15));
     r->addWidget(mBtnClose);
 
     mRight->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
@@ -172,26 +194,127 @@ TitleBar::TitleBar(QWidget* parent) : QWidget(parent)
     connect(mBtnSave3DR, &QToolButton::clicked, this, &TitleBar::save3DRRequested);
 
     QTimer::singleShot(0, this, [this] { updateMaximizeIcon(); });
+
+    initDragFilters();
 }
+
+void TitleBar::initDragFilters()
+{
+    // сам заголовок
+    this->installEventFilter(this);
+
+    // все дочерние виджеты, кроме «кнопочных», тоже вешаем на фильтр
+    const auto kids = findChildren<QWidget*>();
+    for (QWidget* w : kids) {
+        if (w == mBtnClose || w == mBtnMax ||
+            w == mPatientBtn || w == mBtn2D ||
+            w == mBtn3D || w == mBtnSave3DR)
+        {
+            continue; // за них тянуть не надо
+        }
+        w->installEventFilter(this);
+    }
+}
+
+
+void TitleBar::buildnondefaulttitlebar(const QString titlename)
+{
+        setFixedHeight(30);
+        setObjectName("TitleBar");
+
+        auto* grid = new QGridLayout(this);
+        grid->setContentsMargins(10, 0, 10, 0);
+        grid->setHorizontalSpacing(8);
+
+        // LEFT
+        mLeft = new QWidget(this);
+        auto* l = new QHBoxLayout(mLeft);
+        l->setContentsMargins(0, 8, 6, 0);
+        l->setSpacing(8);
+
+        mIcon = new QLabel(mLeft);
+        mIcon->setPixmap(QPixmap(":/icons/Resources/dicom_heart.png")
+            .scaled(20, 20, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        l->addWidget(mIcon);
+
+        mAppTitle = new QLabel(titlename, mLeft);
+        mAppTitle->setStyleSheet("font-weight:600; font-size:14px;");
+        l->addWidget(mAppTitle);
+
+        mLeft->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+        grid->addWidget(mLeft, 0, 0);
+
+        // RIGHT
+        mRight = new QWidget(this);
+        auto* r = new QHBoxLayout(mRight);
+        r->setContentsMargins(0, 10, 0, 0);
+        r->setSpacing(0);
+
+        auto makeSmallBtn = [&](QWidget* parent) {
+            auto* b = new QToolButton(parent);
+            b->setAutoRaise(false);
+            b->setCursor(Qt::PointingHandCursor);
+            b->setFocusPolicy(Qt::NoFocus);
+            b->setFixedSize(30, 20);
+            b->setToolButtonStyle(Qt::ToolButtonIconOnly);
+            b->setStyleSheet(
+                "QToolButton{"
+                "  color:#e6e6e6; background:transparent; border:none;"
+                "  padding:2px 10px; font-size:16px; border-radius:6px;"
+                "}"
+                "QToolButton:hover{"
+                "  background:rgba(255,255,255,0.10); color:#ffffff;"
+                "}"
+            );
+            return b;
+            };
+
+        mBtnClose = makeSmallBtn(mRight);
+        mBtnClose->setIcon(QIcon(":/icons/Resources/close.svg"));
+        mBtnClose->setIconSize(QSize(15, 15));
+        r->addWidget(mBtnClose);
+
+        mRight->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+        grid->addWidget(mRight, 0, 4);
+
+        grid->setColumnStretch(0, 0);
+        grid->setColumnStretch(1, 1);
+        grid->setColumnStretch(2, 1);
+        grid->setColumnStretch(3, 1);
+        grid->setColumnStretch(4, 0);
+
+        // НИКАКОГО mCenterOverlay в этом варианте
+        mCenterOverlay = nullptr;
+
+        connect(mBtnClose, &QToolButton::clicked, this, [this] {
+            if (auto* w = window()) w->close();
+            });
+}
+
 
 void TitleBar::updateOverlayGeometry()
 {
-    if (!mCenterOverlay) return;
+    if (!mCenterOverlay)
+        return;
 
-    // текущие фактические ширины после раскладки
-    const int lw = mLeft ? mLeft->width() : 0;
-    const int rw = mRight ? mRight->width() : 0;
+    const QRect whole = rect();       // вся шапка в координатах TitleBar
+    int left = whole.left();
+    int right = whole.right();
 
+    if (mLeft && mLeft->isVisible())
+        left = mLeft->geometry().right();   // правая граница левого блока
+
+    if (mRight && mRight->isVisible())
+        right = mRight->geometry().left();  // левая граница правого блока
+
+    const int pad = 4;  // небольшой зазор от кнопок
+    left = qMin(right, left + pad);
+    right = qMax(left, right - pad);
+
+    const int w = qMax(0, right - left);
     const int h = height();
-    int x = lw;
-    int w = std::max(0, width() - lw - rw);
 
-    // маленькая «страховка», чтобы оверлей не прилипал к кнопкам
-    const int pad = 4;
-    x += pad;
-    w = std::max(0, w - 2 * pad);
-
-    mCenterOverlay->setGeometry(x, 0, w, h);
+    mCenterOverlay->setGeometry(left, 0, w, h);
 }
 
 void TitleBar::resizeEvent(QResizeEvent* e) {
@@ -204,36 +327,56 @@ void TitleBar::showEvent(QShowEvent* e) {
     QTimer::singleShot(0, this, [this] { updateOverlayGeometry(); });
 }
 
-// Фон оверлея: передаём те же действия перетаскивания окна
-bool TitleBar::eventFilter(QObject* obj, QEvent* ev) {
-    if (obj == mCenterOverlay) {
+bool TitleBar::eventFilter(QObject* obj, QEvent* ev)
+{
+    // интересуют только мышиные события
+    if (ev->type() == QEvent::MouseButtonPress ||
+        ev->type() == QEvent::MouseMove ||
+        ev->type() == QEvent::MouseButtonRelease)
+    {
+        auto* w = qobject_cast<QWidget*>(obj);
+
+        // если это одна из «запрещённых» кнопок — не трогаем, даём им жить своей жизнью
+        if (w == mBtnClose || w == mBtnMax ||
+            w == mPatientBtn || w == mBtn2D ||
+            w == mBtn3D || w == mBtnSave3DR)
+        {
+            return QWidget::eventFilter(obj, ev);
+        }
+
+        auto* me = static_cast<QMouseEvent*>(ev);
+        if (!window())
+            return QWidget::eventFilter(obj, ev);
+
         switch (ev->type()) {
-        case QEvent::MouseButtonPress: {
-            auto* me = static_cast<QMouseEvent*>(ev);
+        case QEvent::MouseButtonPress:
             if (me->button() == Qt::LeftButton && !window()->isMaximized()) {
                 mDragging = true;
                 mDragPos = me->globalPos() - window()->frameGeometry().topLeft();
-                return true;
+                return true;    // событие «съели»
             }
             break;
-        }
-        case QEvent::MouseMove: {
-            auto* me = static_cast<QMouseEvent*>(ev);
+
+        case QEvent::MouseMove:
             if (mDragging && (me->buttons() & Qt::LeftButton) && !window()->isMaximized()) {
                 window()->move(me->globalPos() - mDragPos);
                 return true;
             }
             break;
-        }
+
         case QEvent::MouseButtonRelease:
             mDragging = false;
             return true;
+
         default:
             break;
         }
     }
+
+    // всё остальное — по умолчанию
     return QWidget::eventFilter(obj, ev);
 }
+
 
 void TitleBar::set2DVisible(bool on) {
     mBtn2D->setVisible(on);
@@ -302,7 +445,7 @@ void TitleBar::mousePressEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton &&
         !isOverNonDraggableChild(e->pos()) &&
-        !window()->isMaximized())             // ← добавили
+        !window()->isMaximized())
     {
         mDragging = true;
         mDragPos = e->globalPos() - window()->frameGeometry().topLeft();
@@ -320,7 +463,7 @@ void TitleBar::mouseMoveEvent(QMouseEvent* e)
 
 void TitleBar::mouseDoubleClickEvent(QMouseEvent* e)
 {
-    if (e->button() == Qt::LeftButton && !isOverNonDraggableChild(e->pos())) {
+    if (e->button() == Qt::LeftButton && !isOverNonDraggableChild(e->pos()) && mBtnMax) {
         // двойной клик по заголовку — как в системе: переключить max/normal
         window()->isMaximized() ? window()->showNormal() : window()->showMaximized();
         updateMaximizeIcon();
@@ -340,6 +483,5 @@ void TitleBar::updateMaximizeIcon() {
     auto* w = window();
     if (!w || !style()) return;
     const bool maxed = w->isMaximized();
-    mBtnMax->setIcon(style()->standardIcon(
-        maxed ? QStyle::SP_TitleBarNormalButton : QStyle::SP_TitleBarMaxButton));
+    mBtnMax->setIcon(maxed ? QIcon(":/icons/Resources/fullscreen-exit.svg") : QIcon(":/icons/Resources/fullscreen.svg"));
 }

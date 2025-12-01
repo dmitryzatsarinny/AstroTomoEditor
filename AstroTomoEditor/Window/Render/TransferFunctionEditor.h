@@ -1,8 +1,9 @@
 ﻿#pragma once
-#include <QDialog>
+#include "..\MainWindow\DialogShell.h"
 #include <QVector>
 #include <QColor>
-#include <QPointer>
+#include <QPointer> 
+#include "../../Services/DicomRange.h"
 
 class QWidget;
 class QSlider;
@@ -22,7 +23,7 @@ struct TfPoint {
 
 class TfCanvas;  // виджет рисования (гистограмма+кривая)
 
-class TransferFunctionEditor : public QDialog
+class TransferFunctionEditor : public DialogShell
 {
     Q_OBJECT
 public:
@@ -60,6 +61,6 @@ private:
 
     QVector<TfPoint>  mPts;
     int               mSel{ -1 };
-    QVector<quint64>  mHist;   // 256 столбцов
-    double mMin{ 0 }, mMax{ 255 };
+    QVector<quint64>  mHist;   // HistScale столбцов
+    double mMin{ HistMin }, mMax{ HistMax };
 };

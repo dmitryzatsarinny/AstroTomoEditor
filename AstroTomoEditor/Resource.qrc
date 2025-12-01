@@ -6,5 +6,8 @@
         <file>Resources/redo-yes.svg</file>
         <file>Resources/undo-no.svg</file>
         <file>Resources/undo-yes.svg</file>
+        <file>Resources/close.svg</file>
+        <file>Resources/fullscreen.svg</file>
+        <file>Resources/fullscreen-exit.svg</file>
     </qresource>
 </RCC>

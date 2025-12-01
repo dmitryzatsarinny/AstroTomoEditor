@@ -11,6 +11,7 @@
 #include <QJsonArray>
 #include <QCoreApplication>
 #include <QMenu>
+#include <Services/DicomRange.h>
 
 class QWidget;
 class QMenu;
@@ -32,8 +33,15 @@ enum class TFPreset {
 
 namespace TF {
     QMenu* CreateMenu(QWidget* parent, std::function<void(TFPreset)> onChosen);
-    void   ApplyPreset(vtkVolumeProperty* prop, TFPreset preset, double min = 0.0, double max = 255.0);
-    void   InvertInPlace(vtkVolumeProperty* prop, double min = 0.0, double max = 255.0);
+
+    void ApplyPreset(vtkVolumeProperty* prop,
+        TFPreset preset,
+        double min = double(HistMin),
+        double max = double(HistMax));
+
+    void InvertInPlace(vtkVolumeProperty* prop,
+        double min = double(HistMin),
+        double max = double(HistMax));
 
     vtkSmartPointer<vtkColorTransferFunction> MakeCTF_Grayscale(double min, double max);
     vtkSmartPointer<vtkPiecewiseFunction>     MakeOTF_Grayscale(double min, double max);
@@ -53,24 +61,28 @@ namespace TF {
     vtkSmartPointer<vtkColorTransferFunction> MakeCTF_Hot(double min, double max);
     vtkSmartPointer<vtkPiecewiseFunction>     MakeOTF_Hot(double min, double max);
 
-    struct TFPoint { double x = 0, a = 0, r = 1, g = 1, b = 1; }; // x:0..255, a/r/g/b:0..1
+    struct TFPoint {
+        double x = double(HistMin); // 0..HistMax
+        double a = 0;
+        double r = 1, g = 1, b = 1;
+    };
 
     struct CustomPreset {
         QString  name;
-        QString  filePath; // полный путь к json
+        QString  filePath;
         double   opacityK = 1.0;
-        QString  colorSpace = "Lab"; // "Lab"|"RGB"|"HSV"
+        QString  colorSpace = "Lab";
         QVector<TFPoint> points;
     };
 
-    QString PresetsRoot();                       // <exe>/Presets
+    QString PresetsRoot();
 
-    bool SaveCustomPreset(const CustomPreset& P);            // write JSON
+    bool SaveCustomPreset(const CustomPreset& P);
     QVector<CustomPreset> LoadCustomPresets();
 
     void ApplyPoints(vtkVolumeProperty* prop,
         const QVector<TFPoint>& pts,
-        double min = 0.0, double max = 255.0,
-        const QString& colorSpace = "Lab");       // применить к prop
-
+        double min = double(HistMin),
+        double max = double(HistMax),
+        const QString& colorSpace = "Lab");
 }

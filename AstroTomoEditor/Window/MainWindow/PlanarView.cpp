@@ -132,8 +132,6 @@ static bool detectFirstPeakAfter(const QVector<quint64>& mH,
     return false;
 }
 
-
-
 PlanarView::PlanarView(QWidget* parent) : QWidget(parent)
 {
     initUi();
@@ -173,9 +171,57 @@ void PlanarView::initUi()
     mScroll->setRange(0, 0);
     mScroll->setPageStep(1);
     mScroll->setSingleStep(1);
-    mScroll->setFixedWidth(18);
     mScroll->setInvertedAppearance(false);
     mScroll->setInvertedControls(false);
+
+    // чуть уже
+    mScroll->setFixedWidth(18);
+
+    // полностью серый, без зелёного
+    mScroll->setStyleSheet(
+        "QSlider{ background:transparent; }"
+
+        // дорожка
+        "QSlider::groove:vertical{"
+        "   background:rgba(70,70,70,220);"
+        "   width:4px;"
+        "   margin:10px 0;"
+        "   border-radius:2px;"
+        "}"
+
+        // заполнение снизу до хэндла
+        "QSlider::sub-page:vertical{"
+        "   background:rgba(190,190,190,190);"
+        "   border-radius:2px;"
+        "}"
+
+        // сверху после хэндла
+        "QSlider::add-page:vertical{"
+        "   background:rgba(50,50,50,190);"
+        "   border-radius:2px;"
+        "}"
+
+        // сам ползунок
+        "QSlider::handle:vertical{"
+        "   background:rgba(210,210,210,230);"
+        "   border:1px solid rgba(255,255,255,60);"
+        "   border-radius:6px;"
+        "   height:26px;"
+        "   margin:-4px -4px;"   // уже, но не палка
+        "}"
+
+        "QSlider::handle:vertical:hover{"
+        "   background:rgba(235,235,235,240);"
+        "   border:1px solid rgba(255,255,255,120);"
+        "}"
+
+        "QSlider::handle:vertical:pressed{"
+        "   background:rgba(170,170,170,240);"
+        "   border:1px solid rgba(255,255,255,160);"
+        "}"
+    );
+
+    mScroll->hide();
 
     lay->addWidget(mView, 1);
     lay->addWidget(mScroll, 0, Qt::AlignRight);
@@ -183,6 +229,33 @@ void PlanarView::initUi()
     mDir.fill(0.0f);
     mDir(0, 0) = mDir(1, 1) = mDir(2, 2) = 1.0f; // единичная
     mOrg[0] = mOrg[1] = mOrg[2] = 0.0;
+}
+
+#include <vtkImageShrink3D.h>
+#include <cmath> 
+#include <algorithm> 
+
+vtkSmartPointer<vtkImageData> shrinkAlongAxis(vtkImageData* src, int axis, int factor)
+{
+    if (!src || factor <= 1)
+        return src;
+
+    auto shrink = vtkSmartPointer<vtkImageShrink3D>::New();
+    shrink->SetInputData(src);
+
+    int fx = 1, fy = 1, fz = 1;
+    if (axis == 0) fx = factor;
+    if (axis == 1) fy = factor;
+    if (axis == 2) fz = factor;
+
+    shrink->SetShrinkFactors(fx, fy, fz);
+    shrink->AveragingOn();      // усредняем, а не просто выбрасываем
+
+    shrink->Update();
+
+    auto out = vtkSmartPointer<vtkImageData>::New();
+    out->DeepCopy(shrink->GetOutput());  // отцепиться от pipeline
+    return out;
 }
 
 vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
@@ -197,10 +270,14 @@ vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
         if (im.width() != w || im.height() != h)
             return nullptr;
 
-    QVector<QImage> gray; gray.reserve(d);
-    for (const QImage& s : mSlices)
-        gray.push_back(s.format() == QImage::Format_Grayscale8
-            ? s : s.convertToFormat(QImage::Format_Grayscale8));
+    QVector<QImage> gray;
+    gray.reserve(d);
+    for (const QImage& s : mSlices) {
+        gray.push_back(
+            s.format() == QImage::Format_Grayscale8
+            ? s
+            : s.convertToFormat(QImage::Format_Grayscale8));
+    }
 
     auto vol = vtkSmartPointer<vtkImageData>::New();
     vol->SetDimensions(w, h, d);
@@ -212,8 +289,8 @@ vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
         for (int c = 0; c < 3; ++c)
             dir->SetElement(r, c, mDir(r, c));
 
-    vol->SetDirectionMatrix(dir);   // direction
-    vol->SetOrigin(mOrg);           // origin (LPS)
+    vol->SetDirectionMatrix(dir);
+    vol->SetOrigin(mOrg);
 
     for (int z = 0; z < d; ++z) {
         const uchar* src = gray[z].constBits();
@@ -224,6 +301,28 @@ vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
         }
     }
     vol->Modified();
+
+    // --- shrink по Z, если слайсы слишком тонкие ---
+    double sp[3]{};
+    vol->GetSpacing(sp);
+
+    constexpr double minSliceThickness = 0.9; // мм
+
+    if (sp[2] > 0.0 && sp[2] < minSliceThickness && d > 1) {
+        // во сколько раз нужно утолщить, чтобы >= 0.9 мм
+        int factor = static_cast<int>(std::ceil(minSliceThickness / sp[2]));
+        if (factor < 2) factor = 2;          // смысл есть только при factor >= 2
+
+        // не даём фактору убить объём до 1 среза
+        int maxFactor = std::max(2, d / 2);  // оставим хотя бы половину срезов
+        factor = std::min(factor, maxFactor);
+
+        if (factor > 1) {
+            // axis = 2 → Z
+            return shrinkAlongAxis(vol, /*axis=*/2, factor);
+        }
+    }
+
     return vol;
 }
 
@@ -771,6 +870,11 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     mScroll->setEnabled(mSlices.size() > 1);
     mScroll->setValue(int(mSlices.size() - 1));
     setSlice(mScroll->value());
+
+    if (mSlices.size() > 1)
+        mScroll->show();
+    else
+        mScroll->hide();
 }
 
 // ===== cache / display ======================================================
@@ -778,13 +882,13 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 static inline uchar wl8fast(double v, double min, double max, bool invMono1)
 {
     int window = max - min;
-    double x = (v - min) * 255.0 / window;
+    double x = (v - min) * static_cast<double>(HistScale) / window;
     int y = static_cast<int>(std::floor(x));
-    if (y < 1)
-        y = 0;
-    if (y > 255)
-        y = 255;
-    if (invMono1) y = 255 - y;
+    if (y < HistMin + 1)
+        y = HistMin;
+    if (y > HistMax)
+        y = HistMax;
+    if (invMono1) y = HistMax - y;
     return static_cast<uchar>(y);
 }
 
@@ -798,13 +902,13 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
         else if (v > max - window / 20)
             v = max - window / 20;
     }
-    double x = (v - min) * 255.0 / window;
+    double x = (v - min) * static_cast<double>(HistScale) / window;
     int y = static_cast<int>(std::floor(x));
-    if (y < 1)   
-        y = 0;
-    if (y > 255)
-        y = 255;
-    if (invMono1) y = 255 - y;
+    if (y < HistMin + 1)
+        y = HistMin;
+    if (y > HistMax)
+        y = HistMax;
+    if (invMono1) y = HistMax - y;
     return static_cast<uchar>(y);
 }
 
@@ -849,7 +953,7 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
 
     if (Dicom.TypeOfRecord == CT)
     {
-        QVector<quint64> mH(256, 0);
+        QVector<quint64> mH(HistScale, 0);
 
         // Приведём к double, чтобы не париться с типами
         vtkNew<vtkImageCast> cast;
@@ -889,10 +993,12 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
                     const double raw = *reinterpret_cast<const double*>(row0 + stepXb * xx);
                     const double vHU = raw * Dicom.slope - Dicom.intercept;
 
-                    double x = (vHU - minPhys) * 255.0 / window;
+                    double x = (vHU - minPhys) * static_cast<double>(HistScale) / window;
                     int y = static_cast<int>(std::floor(x));
-                    if (y < 1) y = 0;
-                    if (y > 255) y = 255;
+                    if (y < HistMin + 1)
+                        y = HistMin;
+                    if (y > HistMax)
+                        y = HistMax;
                     mH[y]++;
                 }
             }
@@ -901,9 +1007,9 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
 
         int peakHU = 0;
 
-        if (detectFirstPeakAfter(mH, 64, peakHU))
+        if (detectFirstPeakAfter(mH, HistScale / 4, peakHU))
         {
-            const double vHU = window / 2 - peakHU / 255.0 * window;
+            const double vHU = window / 2 - peakHU / static_cast<double>(HistScale) * window;
             int y = static_cast<int>(std::floor(vHU));
             int x = 0;
             Dicom.physicalMax -= (2 * y);

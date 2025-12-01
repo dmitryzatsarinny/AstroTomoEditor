@@ -1,5 +1,4 @@
-﻿// Save3DR.cpp (замена write(...) и служебного кода)
-#include "Save3DR.h"
+﻿#include "Save3DR.h"
 
 #include <QFileDialog>
 #include <QSaveFile>
@@ -17,7 +16,8 @@
 
 bool Save3DR::saveWithDialog(QWidget* parent, vtkImageData* img, const DicomInfo* dicom)
 {
-    if (!img) {
+    if (!img) 
+    {
         QMessageBox::warning(parent, QObject::tr("Сохранение 3DR"),
             QObject::tr("Нет загруженного объёма."));
         return false;
@@ -57,11 +57,14 @@ bool Save3DR::write(const QString& path, vtkImageData* img, const DicomInfo* dic
     int ext[6];
     imgnew->GetExtent(ext);
 
-    const int nx = ext[1] - ext[0] + 1;
-    const int ny = ext[3] - ext[2] + 1;
-    const int nz = ext[5] - ext[4] + 1;
+    int nx = ext[1] - ext[0] + 1;
+    int ny = ext[3] - ext[2] + 1;
+    int nz = ext[5] - ext[4] + 1;
 
     if (nx <= 0 || ny <= 0 || nz <= 0) { if (error) *error = "Invalid image dimensions"; return false; }
+
+    
+
 
     const qint64 voxels = qint64(nx) * ny * nz;
     if (voxels <= 0) { if (error) *error = "Empty volume"; return false; }
@@ -112,7 +115,8 @@ bool Save3DR::write(const QString& path, vtkImageData* img, const DicomInfo* dic
 
     // --- Запись на диск (LE) ---
     QSaveFile f(path);
-    if (!f.open(QIODevice::WriteOnly)) {
+    if (!f.open(QIODevice::WriteOnly)) 
+    {
         if (error) *error = QString("Cannot open for write: %1").arg(path);
         return false;
     }
@@ -134,4 +138,3 @@ bool Save3DR::write(const QString& path, vtkImageData* img, const DicomInfo* dic
     }
     return true;
 }
-
