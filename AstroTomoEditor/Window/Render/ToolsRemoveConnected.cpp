@@ -157,30 +157,49 @@ void ToolsRemoveConnected::setHoverVisible(bool on)
 void ToolsRemoveConnected::rebuildVisibilityLUT()
 {
     mVisibleLut.assign(mLutBins, 0);
-    if (!m_image || !m_volume) return;
+
+    if (!m_volume) return;
     auto* prop = m_volume->GetProperty();
     if (!prop) return;
-
-    auto* pwf = prop->GetScalarOpacity(0); // явный компонент
+    auto* pwf = prop->GetScalarOpacity(0);
     if (!pwf) return;
 
-    const double range = (mLutMax - mLutMin);
-    for (int i = 0; i < mLutBins; ++i) 
+    mLutMin = HistMin;
+    mLutMax = HistMax;
+
+    const double span = mLutMax - mLutMin;
+    if (span <= 0.0)
+        return;
+
+    for (int i = 0; i < mLutBins; ++i)
     {
-        if (i < mHistLo || i > mHistHi)
-            continue;
-        const double t = (mLutBins == 1) ? 0.0 : double(i) / double(mLutBins - 1);
-        const double s = mLutMin + t * range;
-        const double op = pwf->GetValue(s);
+        const double t = (mLutBins == 1)
+            ? 0.0
+            : double(i) / double(mLutBins - 1);
+
+        const double s = mLutMin + t * span;
+
+        double op = pwf->GetValue(s);
+
+        if (mHistHi > mHistLo) {
+            if (s < mHistLo || s > mHistHi)
+                op = 0.0;
+        }
+
         mVisibleLut[i] = (op > mVisibleEps) ? 1 : 0;
     }
 }
 
+
 inline bool ToolsRemoveConnected::isVisible(double s) const
 {
-    if (mVisibleLut.empty() || mLutBins <= 0) return true; // если LUT нет — не режем
+    if (mVisibleLut.empty() || mLutBins <= 0) return true;
+
     if (s <= mLutMin) return mVisibleLut.front() != 0;
-    if (s >= mLutMax) return mVisibleLut.back() != 0;
+
+    if (s >= mLutMax)
+        return true;
+
     const double t = (s - mLutMin) / (mLutMax - mLutMin);
     int idx = static_cast<int>(t * (mLutBins - 1) + 0.5);
     if (idx < 0) idx = 0; else if (idx >= mLutBins) idx = mLutBins - 1;
@@ -364,10 +383,17 @@ bool ToolsRemoveConnected::handle(Action a)
     if (a == Action::RemoveUnconnected ||
         a == Action::RemoveSelected ||
         a == Action::RemoveConnected ||
+        a == Action::SmartDeleting ||
         a == Action::VoxelEraser ||
         a == Action::VoxelRecovery)
     {
         start(a);
+        return true;
+    }
+    else if(a == Action::Minus ||
+        a == Action::Plus)
+    {
+        startnohover(a);
         return true;
     }
     return false;
@@ -552,6 +578,51 @@ void ToolsRemoveConnected::start(Action a)
     redraw();
 }
 
+void ToolsRemoveConnected::startnohover(Action a)
+{
+    if (!m_vtk || !m_renderer || !m_volume || !m_image) return;
+
+    // на всякий случай скрыть старый след
+    if (mHoverActor) { mHoverActor->SetVisibility(0); mHoverActor->Modified(); }
+
+    m_mode = a;
+    m_state = State::WaitingClick;
+
+    m_vol.clear();
+    m_vol.copy(m_image);
+    m_bin.clear();
+    makeBinaryMask(m_image);
+
+    switch (m_mode)
+    {
+    case Action::Plus:
+        PlusVoxels();
+        break;
+    case Action::Minus:
+        MinusVoxels();
+        break;
+    default:
+        break;
+    }
+
+    if (m_vol.raw())
+        m_vol.raw()->Modified();
+    if (m_onImageReplaced)
+        m_onImageReplaced(m_vol.raw());
+
+    if (m_vtk && m_vtk->renderWindow())
+        m_vtk->renderWindow()->Render();
+
+    const bool wasActive = (m_state != State::Off);
+    if (!wasActive) return;
+
+    m_state = State::Off;
+    m_bin.clear();
+    m_vol.clear();
+
+    if (m_onFinished) m_onFinished();
+}
+
 void ToolsRemoveConnected::redraw()
 {
     if (m_overlay) 
@@ -588,7 +659,6 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
     }
     else
     {
-        // == старая логика для Remove* ==
         std::vector<uint8_t> mark;
         const int cnt = floodFill6(m_bin, seed, mark);
         if (cnt <= 0)
@@ -608,6 +678,10 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
         case Action::RemoveConnected:
             RemoveConnectedRegions(mark, seed);
             break;
+        case Action::SmartDeleting:
+            RemoveConnectedRegions(mark, seed);
+            SmartDeleting(seed);
+            break;
         default:
             break;
         }
@@ -625,9 +699,36 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
         cancel();
 }
 
-
 static inline size_t linearIdx(int i, int j, int k, const int ext[6], int nx, int ny) {
     return size_t(k - ext[4]) * (nx * ny) + size_t(j - ext[2]) * nx + size_t(i - ext[0]);
+}
+
+static inline void ijkFromLinear(size_t idx,
+    const int ext[6],
+    int nx, int ny,
+    int& i, int& j, int& k)
+{
+    const size_t planeSize = static_cast<size_t>(nx) * ny;
+    const int kk = static_cast<int>(idx / planeSize);
+    const size_t rem = idx % planeSize;
+    const int jj = static_cast<int>(rem / nx);
+    const int ii = static_cast<int>(rem % nx);
+
+    i = ii + ext[0];
+    j = jj + ext[2];
+    k = kk + ext[4];
+}
+
+static size_t CountNonZero(const Volume& vol)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw()) return 0;
+    const size_t total = vol.u8().size();
+    size_t cnt = 0;
+    for (size_t idx = 0; idx < total; ++idx)
+        if (vol.at(idx) != 0u)
+            ++cnt;
+    return cnt;
 }
 
 void ToolsRemoveConnected::ClearOriginalSnapshot()
@@ -656,6 +757,8 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
 {
     vtkImageData* im = m_vol.raw();
     if (!im) return;
+
+
 
     int ext[6]; im->GetExtent(ext);
 
@@ -699,12 +802,15 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
 
                 const unsigned char v = *p;
                 if (!v) continue;
-                if (!isVisible(double(v))) continue;
+                
+                if (v > 240) qDebug() << "BIG V =" << int(v)
+                    << "at" << i << j << k;
+
+                if (!isVisible(double(v))) continue; // стираем только видимое
 
                 *p = 0u;
             }
 }
-
 
 void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
 {
@@ -770,14 +876,26 @@ void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
             }
 }
 
-
-void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& mark,
-    const int seedIn[3])
+// Восстанавливает не более maxExtraVoxels вокселей вокруг оболочки shell.
+// Восстанавливаем те, которые в volume == 0, а в refVolume != 0.
+// Один и тот же соседний воксель не проверяем больше одного раза.
+static void RecoverFromShellLimited(
+    Volume& volume,
+    const Volume& refVolume,
+    const std::vector<size_t>& shell,
+    size_t maxExtraVoxels)
 {
-    // 1) проверяем объём
-    const auto& S = m_vol.u8();
-    if (!S.valid || !S.p0 || !m_vol.raw())
+    const auto& S = volume.u8();
+    const auto& R = refVolume.u8();
+
+    if (!S.valid || !R.valid || !volume.raw() || !refVolume.raw())
         return;
+
+    if (S.nx != R.nx || S.ny != R.ny || S.nz != R.nz)
+        return;
+    for (int a = 0; a < 6; ++a)
+        if (S.ext[a] != R.ext[a])
+            return;
 
     const int* ext = S.ext;
     const int nx = S.nx;
@@ -785,8 +903,7 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
     const int nz = S.nz;
     const size_t total = static_cast<size_t>(nx) * ny * nz;
 
-    // размер mark должен соответствовать объёму
-    if (mark.size() < total)
+    if (maxExtraVoxels == 0)
         return;
 
     auto inExt = [&](int i, int j, int k) -> bool {
@@ -795,32 +912,421 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
             k >= ext[4] && k <= ext[5]);
         };
 
-    if (!inExt(seedIn[0], seedIn[1], seedIn[2]))
+    static const int N6[6][3] = {
+        {+1, 0, 0},
+        {-1, 0, 0},
+        {0, +1, 0},
+        {0, -1, 0},
+        {0, 0, +1},
+        {0, 0, -1}
+    };
+
+    auto ijkFromIdx = [&](size_t idx, int& i, int& j, int& k) {
+        const size_t plane = static_cast<size_t>(nx) * ny;
+        const size_t relK = idx / plane;
+        const size_t rem = idx % plane;
+        const size_t relJ = rem / nx;
+        const size_t relI = rem % nx;
+
+        i = ext[0] + static_cast<int>(relI);
+        j = ext[2] + static_cast<int>(relJ);
+        k = ext[4] + static_cast<int>(relK);
+        };
+
+
+    size_t restored = 0;
+    bool stop = false;
+
+    // visited — этот воксель уже рассматривали как кандидата-соседа
+    std::vector<uint8_t> visited(total, 0);
+    // inQueue — этот воксель уже стоит в очереди фронта роста
+    std::vector<uint8_t> inQueue(total, 0);
+
+    std::queue<size_t> q;
+
+    // стартовый фронт — сама оболочка (ненулевые воксели)
+    for (size_t idx : shell)
+    {
+        q.push(idx);
+        inQueue[idx] = 1;
+    }
+
+    while (!q.empty() && restored < maxExtraVoxels)
+    {
+        const size_t idxCenter = q.front();
+        q.pop();
+
+        int ci, cj, ck;
+        ijkFromIdx(idxCenter, ci, cj, ck);
+
+        for (const auto& d : N6)
+        {
+            const int ni = ci + d[0];
+            const int nj = cj + d[1];
+            const int nk = ck + d[2];
+            if (!inExt(ni, nj, nk))
+                continue;
+
+            const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (nIdx >= total)
+                continue;
+
+            // этот воксель-кандидат уже рассматривали — пропускаем
+            if (visited[nIdx])
+                continue;
+            visited[nIdx] = 1;
+
+            // интересен только фон, где в ref есть объект
+            if (volume.at(nIdx) == 0u && refVolume.at(nIdx) != 0u)
+            {
+                volume.at(nIdx) = refVolume.at(nIdx);
+                ++restored;
+
+                // новый воксель становится частью фронта роста
+                if (!inQueue[nIdx])
+                {
+                    q.push(nIdx);
+                    inQueue[nIdx] = 1;
+                }
+
+                if (restored >= maxExtraVoxels)
+                    break;
+            }
+        }
+    }
+}
+
+
+// Восстанавливает countOfPeels "слоёв" вокруг текущего объекта в volume,
+// используя refVolume как эталон (исходный том).
+// Требование: volume и refVolume должны иметь одинаковую геометрию U8.
+
+static void RecoveryPeel(Volume& volume,
+    const Volume& refVolume,
+    int countOfPeels)
+{
+    const auto& S = volume.u8();
+    const auto& R = refVolume.u8();
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t total = static_cast<size_t>(nx) * ny * nz;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    // 6-соседство
+    static const int N6[6][3] = {
+        {+1, 0, 0},
+        {-1, 0, 0},
+        {0, +1, 0},
+        {0, -1, 0},
+        {0, 0, +1},
+        {0, 0, -1}
+    };
+
+    // Делаем несколько итераций "наращивания"
+    for (int iter = 0; iter < countOfPeels; ++iter)
+    {
+        std::vector<uint8_t> toRestore(total, 0);
+
+        // 1. Находим, какие воксели надо вернуть на этом шаге
+        for (int k = ext[4]; k <= ext[5]; ++k)
+        {
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                for (int i = ext[0]; i <= ext[1]; ++i)
+                {
+                    const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+
+                    // Берём только текущий объект: от нулевых вокселей смысла смотреть соседей нет
+                    if (volume.at(idx) == 0u)
+                        continue;
+
+                    // Смотрим соседей этого ненулевого вокселя
+                    for (const auto& d : N6)
+                    {
+                        const int ni = i + d[0];
+                        const int nj = j + d[1];
+                        const int nk = k + d[2];
+                        if (!inExt(ni, nj, nk))
+                            continue;
+
+                        const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+
+                        // Если в текущем томе там 0, а в эталонном - не 0, помечаем к восстановлению
+                        if (volume.at(nIdx) == 0u && refVolume.at(nIdx) != 0u)
+                        {
+                            toRestore[nIdx] = 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Применяем восстановление: добавляем один слой
+        bool anyRestored = false;
+        for (size_t n = 0; n < total; ++n)
+        {
+            if (toRestore[n])
+            {
+                volume.at(n) = refVolume.at(n);
+                anyRestored = true;
+            }
+        }
+
+        // Если на этой итерации ничего не восстановили - дальше расти нечему
+        if (!anyRestored)
+            return;
+    }
+}
+
+static void FilterShellWithGrowableNeighbor(
+    const Volume& volume,
+    const Volume& refVolume,
+    std::vector<size_t>& shell)
+{
+    const auto& S = volume.u8();
+    const auto& R = refVolume.u8();
+
+    if (!S.valid || !R.valid || !volume.raw() || !refVolume.raw())
         return;
 
-    int seed[3]{ seedIn[0], seedIn[1], seedIn[2] };
-    const size_t seedIdx = linearIdx(seed[0], seed[1], seed[2], ext, nx, ny);
-    if (seedIdx >= total || mark[seedIdx] == 0)
-        return; // seed не попал в выбранную компоненту
+    // проверяем совместимость геометрии
+    if (S.nx != R.nx || S.ny != R.ny || S.nz != R.nz)
+        return;
+    for (int a = 0; a < 6; ++a)
+        if (S.ext[a] != R.ext[a])
+            return;
 
-    // 2) геодезический радиус вокруг seed в вокселях
-    //    задаём в мм, превращаем в воксели по минимальному шагу
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t total = static_cast<size_t>(nx) * ny * nz;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    static const int N6[6][3] = {
+        {+1, 0, 0},
+        {-1, 0, 0},
+        {0, +1, 0},
+        {0, -1, 0},
+        {0, 0, +1},
+        {0, 0, -1}
+    };
+
+    auto ijkFromIdx = [&](size_t idx, int& i, int& j, int& k) {
+        const size_t plane = static_cast<size_t>(nx) * ny;
+        const size_t relK = idx / plane;
+        const size_t rem = idx % plane;
+        const size_t relJ = rem / nx;
+        const size_t relI = rem % nx;
+
+        i = ext[0] + static_cast<int>(relI);
+        j = ext[2] + static_cast<int>(relJ);
+        k = ext[4] + static_cast<int>(relK);
+        };
+
+    std::vector<size_t> newShell;
+    newShell.reserve(shell.size());
+
+    for (size_t idx : shell)
+    {
+        if (idx >= total)
+            continue;
+
+        // если сам воксель уже нулевой в volume – нам он не нужен
+        if (volume.at(idx) == 0u)
+            continue;
+
+        int i, j, k;
+        ijkFromIdx(idx, i, j, k);
+
+        bool hasGrowableNeighbor = false;
+
+        for (const auto& d : N6)
+        {
+            const int ni = i + d[0];
+            const int nj = j + d[1];
+            const int nk = k + d[2];
+            if (!inExt(ni, nj, nk))
+                continue;
+
+            const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (nIdx >= total)
+                continue;
+
+            // сосед сейчас пустой, а в эталоне есть объект
+            if (volume.at(nIdx) == 0u && refVolume.at(nIdx) != 0u)
+            {
+                hasGrowableNeighbor = true;
+                break;
+            }
+        }
+
+        if (hasGrowableNeighbor)
+            newShell.push_back(idx);
+    }
+
+    shell.swap(newShell);
+}
+
+
+void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& mark,
+    const int seedIn[3])
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+    if (mark.size() < total) return;
+
+    for (size_t n = 0; n < total; ++n)
+    {
+        if (!mark[n])
+            m_vol.at(n) = 0u;
+    }
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    std::vector<size_t> shell;
+    CollectShellVoxels(volNew, shell);
+
+    std::vector<uint8_t> isShell(total, 0);
+    for (size_t w : shell)
+        if (w < total)
+            isShell[w] = 1;
+
+    for (size_t n = 0; n < total; ++n)
+        if (isShell[n])
+            volNew.at(n) = 0u;
+
+   
+    int newSeed[3] = { seedIn[0], seedIn[1], seedIn[2] };
+    if (!findNearestNonEmptyConnectedVoxel(volNew.raw(), seedIn, newSeed))
+        return;
+
+    std::vector<uint8_t> newmark;
+    const int cnt = floodFill6(volNew, newSeed, newmark);
+    if (cnt <= 0)
+        return;
+
+    for (size_t n = 0; n < total; ++n)
+        if (!newmark[n])
+            volNew.at(n) = 0u;
+
+
+
+
+    RecoveryPeel(volNew, m_vol, 1);
+
+    m_vol = volNew;
+}
+
+
+
+void ToolsRemoveConnected::SmartDeleting(const int seedIn[3])
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    const double ClearPersent = 0.20;
+    double DistMm = ClearingVolume(volNew, seedIn, ClearPersent);
+
+    size_t numofnonzerovox = CountNonZero(volNew);
+
+    std::vector<size_t> shell;
+    CollectShellVoxels(volNew, shell);
+
+    FilterShellWithGrowableNeighbor(volNew, m_vol, shell);
+    
+    const size_t maxExtra = numofnonzerovox * ( 0.5 - ClearPersent);
+    RecoverFromShellLimited(volNew, m_vol, shell, maxExtra);
+    m_vol = volNew;
+}
+
+// ---- ядро ----
+void ToolsRemoveConnected::makeBinaryMask(vtkImageData* m_image)
+{
+    m_bin.set(m_image, [&](uint8_t v) 
+        {
+            return v != 0 && isVisible(double(v));
+        });
+}
+
+double ToolsRemoveConnected::ClearingVolume(Volume& vol,
+    const int seedIn[3],
+    double percent)
+{
+    // подстрахуемся, если кто-то передал ерунду
+    if (percent <= 0.0) percent = 0.25;
+    if (percent > 1.0)  percent = 1.0;
+
+    const auto& S = vol.u8();
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t total = static_cast<size_t>(nx) * ny * nz;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    const size_t seedIdx = linearIdx(seedIn[0], seedIn[1], seedIn[2], ext, nx, ny);
+
+    // --- 2) считаем физический радиус в мм по percent от размера тома ---
+
     double sp[3]{ 1.0, 1.0, 1.0 };
     if (m_image)
         m_image->GetSpacing(sp);
+    else if (vol.raw())
+        vol.raw()->GetSpacing(sp);
+
     const double minSp = std::min({ sp[0], sp[1], sp[2] });
 
-    const double radiusMM = 70.0;          // можно подкрутить на вкус
-    const int maxSteps = std::max(1, int(radiusMM / std::max(minSp, 1e-6) + 0.5));
+    auto distMM = [&](double i, double j, double k) {
+        return std::sqrt(i * i + j * j + k * k);
+        };
 
-    // 3) BFS от seed по 6-соседству внутри mark с ограничением по dist
-    std::vector<uint8_t> core(total, 0);   // что оставить в компоненте
+    // физические размеры по осям в мм
+    const double sizeXmm = sp[0] * (ext[1] - ext[0] + 1);
+    const double sizeYmm = sp[1] * (ext[3] - ext[2] + 1);
+    const double sizeZmm = sp[2] * (ext[5] - ext[4] + 1);
+    const double minDimMm = distMM(sizeXmm, sizeYmm, sizeZmm);
+
+    // радиус = percent * минимальная физическая длина
+    const double radiusMM = percent * minDimMm;
+
+    // шаги BFS по самому мелкому spacing
+    const int maxSteps =
+        std::max(1, int(radiusMM / std::max(minSp, 1e-6) + 0.5));
+
+    // --- 3) BFS от seed по НЕнулевым вокселям vol, ограниченный maxSteps ---
+
+    std::vector<uint8_t> core(total, 0);
     std::vector<uint8_t> visited(total, 0);
 
     struct Node { int i, j, k, d; };
     std::queue<Node> q;
 
-    q.push({ seed[0], seed[1], seed[2], 0 });
+    q.push({ seedIn[0], seedIn[1], seedIn[2], 0 });
     visited[seedIdx] = 1;
     core[seedIdx] = 1;
 
@@ -841,6 +1347,7 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
             const int ni = v.i + d[0];
             const int nj = v.j + d[1];
             const int nk = v.k + d[2];
+
             if (!inExt(ni, nj, nk))
                 continue;
 
@@ -848,9 +1355,9 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
             if (w >= total)
                 continue;
 
-            if (!mark[w])          // вне исходной компоненты
-                continue;
-            if (visited[w])        // уже были
+            if (vol.at(w) == 0u)
+                continue;   // фон
+            if (visited[w])
                 continue;
 
             visited[w] = 1;
@@ -859,38 +1366,81 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
         }
     }
 
-    // 4) Вычёркиваем из тома всё, что в выбранной компоненте, но не в core
+    // --- 4) Очищаем всё, что не попало в ядро core ---
+
     for (size_t n = 0; n < total; ++n)
     {
-        if (mark[n] && !core[n])
-            m_vol.at(n) = 0u;
+        if (vol.at(n) != 0u && !core[n])
+            vol.at(n) = 0u;
     }
+
+    return radiusMM;
 }
 
-// ---- ядро ----
-void ToolsRemoveConnected::makeBinaryMask(vtkImageData* image)
+
+
+void ToolsRemoveConnected::CollectShellVoxels(const Volume& vol,
+    std::vector<size_t>& shell) const
 {
-    if (!image) {
-        m_bin.clear();
+    shell.clear();
+
+    const auto& S = vol.u8();
+    if (!S.valid || !S.p0)
         return;
-    }
 
-    const bool brushMode =
-        (m_mode == Action::VoxelEraser || m_mode == Action::VoxelRecovery);
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
 
-    if (brushMode) 
-    {
-        m_bin.set(image, [](uint8_t v) {
-            return v != 0;
-            });
-    }
-    else 
-    {
-        m_bin.set(image, [&](uint8_t v) {
-            return v != 0 && isVisible(double(v));
-            });
-    }
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    static const int N6[6][3] = {
+        {+1, 0, 0}, {-1, 0, 0},
+        {0, +1, 0}, {0, -1, 0},
+        {0, 0, +1}, {0, 0, -1}
+    };
+
+    const size_t total = S.size();
+    shell.reserve(total / 10);    // чисто чтобы меньше реаллокаций было
+
+    for (int k = 0; k < nz; ++k)
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i)
+            {
+                const size_t w = S.idxRel(i, j, k);
+                if (vol.at(w) == 0u)
+                    continue; // фон, не интересует
+
+                bool boundary = false;
+                for (const auto& d : N6)
+                {
+                    const int ni = i + d[0];
+                    const int nj = j + d[1];
+                    const int nk = k + d[2];
+
+                    // сосед вне объёма -> граница
+                    if (ni < 0 || ni >= nx ||
+                        nj < 0 || nj >= ny ||
+                        nk < 0 || nk >= nz)
+                    {
+                        boundary = true;
+                        break;
+                    }
+
+                    const size_t wn = S.idxRel(ni, nj, nk);
+                    if (vol.at(wn) == 0u) {
+                        boundary = true;
+                        break;
+                    }
+                }
+
+                if (boundary)
+                    shell.push_back(w);
+            }
 }
+
+
 
 // Ищет ближайшего непустого соседа вокруг seed на image (>0).
 // Порядок: 6-соседей → 18-соседей → 26-соседей. Ранний выход.
@@ -1178,161 +1728,6 @@ bool ToolsRemoveConnected::screenToSeedIJK(const QPoint& pDevice, int ijk[3]) co
     return false;
 }
 
-
-//#include <vtkMatrix3x3.h>
-//
-//bool ToolsRemoveConnected::worldToIJK(const double world[3], int ijk[3]) const
-//{
-//    if (!m_image) return false;
-//
-//    // Direction (D), origin, spacing
-//    vtkNew<vtkMatrix3x3> M;
-//    if (auto* dm = m_image->GetDirectionMatrix()) M->DeepCopy(dm);
-//    else M->Identity();
-//
-//    double org[3]; m_image->GetOrigin(org);
-//    double sp[3]; m_image->GetSpacing(sp);
-//
-//    // D^T: world -> IJK (без учёта смещения/масштаба)
-//    const double DT00 = M->GetElement(0, 0), DT01 = M->GetElement(1, 0), DT02 = M->GetElement(2, 0);
-//    const double DT10 = M->GetElement(0, 1), DT11 = M->GetElement(1, 1), DT12 = M->GetElement(2, 1);
-//    const double DT20 = M->GetElement(0, 2), DT21 = M->GetElement(1, 2), DT22 = M->GetElement(2, 2);
-//
-//    const double rx = world[0] - org[0];
-//    const double ry = world[1] - org[1];
-//    const double rz = world[2] - org[2];
-//
-//    const double iF = (DT00 * rx + DT01 * ry + DT02 * rz) / sp[0];
-//    const double jF = (DT10 * rx + DT11 * ry + DT12 * rz) / sp[1];
-//    const double kF = (DT20 * rx + DT21 * ry + DT22 * rz) / sp[2];
-//
-//    ijk[0] = static_cast<int>(std::floor(iF));
-//    ijk[1] = static_cast<int>(std::floor(jF));
-//    ijk[2] = static_cast<int>(std::floor(kF));
-//
-//    // проверка на выход за экстенты тома
-//    const int* ext = input->u8().ext;
-//    ijk[0] = std::clamp(ijk[0], ext[0], ext[1]);
-//    ijk[1] = std::clamp(ijk[1], ext[2], ext[3]);
-//    ijk[2] = std::clamp(ijk[2], ext[4], ext[5]);
-//    return true;
-//}
-//
-//
-//bool ToolsRemoveConnected::screenToSeedIJK(const QPoint& pDevice, int ijk[3]) const
-//{
-//    if (!m_vtk || !m_renderer || !m_image)
-//        return false;
-//
-//    const auto& S = input->u8();
-//    const int* ext = S.ext;
-//
-//    auto* rw = m_vtk->renderWindow();
-//    if (!rw) return false;
-//
-//    const double dpr = m_vtk->devicePixelRatioF();
-//    const QPoint pGlobal = m_overlay ? m_overlay->mapToGlobal(pDevice)
-//        : m_vtk->mapToGlobal(pDevice);
-//    const QPoint pVtkLogical = m_vtk->mapFromGlobal(pGlobal);
-//
-//    int vpW = 0, vpH = 0;
-//    if (int* asz = rw->GetActualSize()) { vpW = asz[0]; vpH = asz[1]; }
-//
-//    const double xd = pVtkLogical.x() * dpr;
-//    const double yd = (vpH - 1) - pVtkLogical.y() * dpr;
-//
-//    // ---- экран → мир (near/far) ----
-//    double nearW[3], farW[3];
-//    displayToWorld(xd, yd, 0.0, nearW);
-//    displayToWorld(xd, yd, 1.0, farW);
-//
-//    // ---- мир → IJK (вещественные) ----
-//    vtkNew<vtkMatrix3x3> M;
-//    if (auto* dm = m_image->GetDirectionMatrix()) M->DeepCopy(dm);
-//    else M->Identity();
-//
-//    const double DT00 = M->GetElement(0, 0), DT01 = M->GetElement(1, 0), DT02 = M->GetElement(2, 0);
-//    const double DT10 = M->GetElement(0, 1), DT11 = M->GetElement(1, 1), DT12 = M->GetElement(2, 1);
-//    const double DT20 = M->GetElement(0, 2), DT21 = M->GetElement(1, 2), DT22 = M->GetElement(2, 2);
-//
-//    double org[3]; input->raw()->GetOrigin(org);
-//    double sp[3]; input->raw()->GetSpacing(sp);
-//
-//    auto w2ijk = [&](const double w[3], double o[3]) {
-//        const double rx = w[0] - org[0], ry = w[1] - org[1], rz = w[2] - org[2];
-//        o[0] = (DT00 * rx + DT01 * ry + DT02 * rz) / sp[0];
-//        o[1] = (DT10 * rx + DT11 * ry + DT12 * rz) / sp[1];
-//        o[2] = (DT20 * rx + DT21 * ry + DT22 * rz) / sp[2];
-//        };
-//
-//    double aF[3], bF[3];
-//    w2ijk(nearW, aF);
-//    w2ijk(farW, bF);
-//
-//    auto inExt = [&](int i, int j, int k)->bool {
-//        return (i >= ext[0] && i <= ext[1] &&
-//            j >= ext[2] && j <= ext[3] &&
-//            k >= ext[4] && k <= ext[5]);
-//        };
-//
-//    // ---- DDA по вокселям ----
-//    double sx = aF[0], sy = aF[1], sz = aF[2];
-//    double ex = bF[0], ey = bF[1], ez = bF[2];
-//    double dx = ex - sx, dy = ey - sy, dz = ez - sz;
-//
-//    const double tiny = 1e-12;
-//    if (std::abs(dx) < tiny) dx = (dx >= 0 ? tiny : -tiny);
-//    if (std::abs(dy) < tiny) dy = (dy >= 0 ? tiny : -tiny);
-//    if (std::abs(dz) < tiny) dz = (dz >= 0 ? tiny : -tiny);
-//
-//    int ix = static_cast<int>(std::floor(sx));
-//    int iy = static_cast<int>(std::floor(sy));
-//    int iz = static_cast<int>(std::floor(sz));
-//
-//    const int stepx = (dx > 0) ? +1 : -1;
-//    const int stepy = (dy > 0) ? +1 : -1;
-//    const int stepz = (dz > 0) ? +1 : -1;
-//
-//    auto nextBoundary = [&](double s, int step)->double {
-//        const double cell = std::floor(s);
-//        return (step > 0) ? (cell + 1.0) : cell;
-//        };
-//
-//    double txMax = (nextBoundary(sx, stepx) - sx) / dx;
-//    double tyMax = (nextBoundary(sy, stepy) - sy) / dy;
-//    double tzMax = (nextBoundary(sz, stepz) - sz) / dz;
-//
-//    const double txDelta = 1.0 / std::abs(dx);
-//    const double tyDelta = 1.0 / std::abs(dy);
-//    const double tzDelta = 1.0 / std::abs(dz);
-//
-//    // быстрый старт: если уже в видимой ячейке
-//    if (inExt(ix, iy, iz) && m_bin.at(ix, iy, iz) != 0) {
-//        ijk[0] = ix; ijk[1] = iy; ijk[2] = iz; return true;
-//    }
-//
-//    int maxIters = (ext[1] - ext[0] + 1) + (ext[3] - ext[2] + 1) + (ext[5] - ext[4] + 1);
-//    double t = 0.0;
-//
-//    while (t <= 1.0 && maxIters-- > 0) {
-//        if (txMax < tyMax) {
-//            if (txMax < tzMax) { ix += stepx; t = txMax; txMax += txDelta; }
-//            else { iz += stepz; t = tzMax; tzMax += tzDelta; }
-//        }
-//        else {
-//            if (tyMax < tzMax) { iy += stepy; t = tyMax; tyMax += tyDelta; }
-//            else { iz += stepz; t = tzMax; tzMax += tzDelta; }
-//        }
-//        if (!inExt(ix, iy, iz)) continue;
-//        if (m_bin.at(ix, iy, iz) != 0) 
-//        {
-//            ijk[0] = ix; ijk[1] = iy; ijk[2] = iz; return true;
-//        }
-//    }
-//    return false;
-//}
-
-
 int ToolsRemoveConnected::floodFill6(const Volume& bin,
     const int seed[3],
     std::vector<uint8_t>& mark) const
@@ -1405,6 +1800,395 @@ int ToolsRemoveConnected::floodFill6(const Volume& bin,
     return visited;
 }
 
+// Возвращает список индексов вокселей (linearIdx),
+// у которых среди N соседей (6 / 18 / 26) не менее frac * N нулевых.
+// Центральный воксель считается только если сам != 0.
+static void CollectVoxelsWithZeroNeighbors(
+    const Volume& volume,
+    int neighborhood,          // 6, 18 или 26
+    double fracZero,           // например 1.0 / 6.0
+    std::vector<size_t>& out)
+{
+    out.clear();
+
+    const auto& S = volume.u8();
+    if (!S.valid || !S.p0 || !volume.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t total = static_cast<size_t>(nx) * ny * nz;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    // доступ к значению вокселя (0/..255)
+    const unsigned char* base = reinterpret_cast<const unsigned char*>(S.p0);
+    const vtkIdType incx = S.incX;
+    const vtkIdType incy = S.incY;
+    const vtkIdType incz = S.incZ;
+
+    auto at = [&](int i, int j, int k) -> unsigned char {
+        const unsigned char* p = base
+            + (i - ext[0]) * incx
+            + (j - ext[2]) * incy
+            + (k - ext[4]) * incz;
+        return *p;
+        };
+
+    // задаём шаблоны соседей
+    static const int N6[][3] = {
+        {+1,0,0},{-1,0,0},
+        {0,+1,0},{0,-1,0},
+        {0,0,+1},{0,0,-1}
+    };
+
+    // faces + corners (6 + 12 = 18)
+    static const int N18[][3] = {
+        // 6 граней
+        {+1,0,0},{-1,0,0},
+        {0,+1,0},{0,-1,0},
+        {0,0,+1},{0,0,-1},
+        // 12 рёбер
+        {+1,+1,0},{+1,-1,0},{-1,+1,0},{-1,-1,0},
+        {+1,0,+1},{+1,0,-1},{-1,0,+1},{-1,0,-1},
+        {0,+1,+1},{0,+1,-1},{0,-1,+1},{0,-1,-1},
+    };
+
+    // все 26 соседей (faces + edges + corners)
+    static const int N26[][3] = {
+        // 6 граней
+        {+1,0,0},{-1,0,0},
+        {0,+1,0},{0,-1,0},
+        {0,0,+1},{0,0,-1},
+        // 12 рёбер
+        {+1,+1,0},{+1,-1,0},{-1,+1,0},{-1,-1,0},
+        {+1,0,+1},{+1,0,-1},{-1,0,+1},{-1,0,-1},
+        {0,+1,+1},{0,+1,-1},{0,-1,+1},{0,-1,-1},
+        // 8 углов
+        {+1,+1,+1},{+1,+1,-1},{+1,-1,+1},{+1,-1,-1},
+        {-1,+1,+1},{-1,+1,-1},{-1,-1,+1},{-1,-1,-1}
+    };
+
+    const int (*offs)[3] = nullptr;
+    int nCount = 0;
+
+    switch (neighborhood) {
+    case 6:
+        offs = N6;
+        nCount = static_cast<int>(std::size(N6));
+        break;
+    case 18:
+        offs = N18;
+        nCount = static_cast<int>(std::size(N18));
+        break;
+    case 26:
+        offs = N26;
+        nCount = static_cast<int>(std::size(N26));
+        break;
+    default:
+        return; // некорректный режим
+    }
+
+    // минимум нулевых соседей (округляем вверх)
+    const int minZero = std::max(1, int(std::ceil(fracZero * nCount)));
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const unsigned char v = at(i, j, k);
+                if (v == 0)
+                    continue; // интересуют только непустые воксели
+
+                int zeroNeigh = 0;
+
+                for (int t = 0; t < nCount; ++t) {
+                    const int ni = i + offs[t][0];
+                    const int nj = j + offs[t][1];
+                    const int nk = k + offs[t][2];
+
+                    // за пределами тома считаем как "ноль" — это тоже граница
+                    if (!inExt(ni, nj, nk)) {
+                        ++zeroNeigh;
+                    }
+                    else {
+                        if (at(ni, nj, nk) == 0)
+                            ++zeroNeigh;
+                    }
+
+                    // можно ранний выход
+                    if (zeroNeigh >= minZero)
+                        break;
+                }
+
+                if (zeroNeigh >= minZero) {
+                    const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                    if (idx < total)
+                        out.push_back(idx);
+                }
+            }
+}
+
+// Обнуляет границы объёма и затем делает 6-соседнюю эрозию.
+void ToolsRemoveConnected::ErodeBy6Neighbors(Volume& volume)
+{
+    const auto& S = volume.u8();
+    if (!S.valid || !volume.raw())
+        return;
+
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+
+    const size_t total = size_t(nx) * ny * nz;
+    const size_t slice = size_t(nx) * ny;
+
+    if (total == 0)
+        return;
+
+    // слой Z = 0 и Z = nz-1
+    for (int j = 0; j < ny; j++)
+        for (int i = 0; i < nx; i++)
+        {
+            volume.at(size_t(j) * nx + i) = 0u;
+            volume.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u;
+        }
+
+    // слой Y = 0 и Y = ny-1
+    for (int k = 0; k < nz; k++)
+        for (int i = 0; i < nx; i++)
+        {
+            volume.at(size_t(k) * slice + i) = 0u;
+            volume.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u;
+        }
+
+    // слой X = 0 и X = nx-1
+    for (int k = 0; k < nz; k++)
+        for (int j = 0; j < ny; j++)
+        {
+            volume.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;
+            volume.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;
+        }
+
+    std::vector<uint8_t> toZero(total, 0);
+
+    for (size_t idx = 0; idx < total; idx++)
+    {
+        if (volume.at(idx) == 0u)
+            continue;
+
+        // 6 индексов
+        const size_t n0 = idx - 1;
+        const size_t n1 = idx + 1;
+        const size_t n2 = idx - nx;
+        const size_t n3 = idx + nx;
+        const size_t n4 = idx - slice;
+        const size_t n5 = idx + slice;
+
+        if (volume.at(n0) == 0u ||
+            volume.at(n1) == 0u ||
+            volume.at(n2) == 0u ||
+            volume.at(n3) == 0u ||
+            volume.at(n4) == 0u ||
+            volume.at(n5) == 0u)
+            toZero[idx] = 1;
+    }
+
+    // === 3. Второй проход — обнуляем ===
+    for (size_t idx = 0; idx < total; idx++)
+        if (toZero[idx])
+            volume.at(idx) = 0u;
+}
+
+bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
+{
+    const auto& S = volume.u8();
+    if (!S.valid || !volume.raw())
+        return false;
+
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+
+    const size_t slice = size_t(nx) * ny;
+    const size_t total = slice * nz;
+    if (total == 0)
+        return false;
+
+    // 1. Обнуляем границы (X/Y/Z)
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i)
+        {
+            volume.at(size_t(j) * nx + i) = 0u;  // Z = 0
+            volume.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u; // Z = nz-1
+        }
+
+    for (int k = 0; k < nz; ++k)
+        for (int i = 0; i < nx; ++i)
+        {
+            volume.at(size_t(k) * slice + i) = 0u; // Y = 0
+            volume.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u; // Y = ny-1
+        }
+
+    for (int k = 0; k < nz; ++k)
+        for (int j = 0; j < ny; ++j)
+        {
+            volume.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;      // X = 0
+            volume.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
+        }
+
+    // 2. Отмечаем НУЛИ, которые рядом с ненулевыми (6-соседство)
+    std::vector<uint8_t> toFill(total, 0);
+
+    for (int k = 1; k < nz - 1; ++k)
+    {
+        const size_t zOff = size_t(k) * slice;
+        for (int j = 1; j < ny - 1; ++j)
+        {
+            const size_t yOff = zOff + size_t(j) * nx;
+            for (int i = 1; i < nx - 1; ++i)
+            {
+                const size_t idx = yOff + size_t(i);
+
+                if (volume.at(idx) != 0u)
+                    continue; // нас интересуют только нули
+
+                const size_t n0 = idx - 1;
+                const size_t n1 = idx + 1;
+                const size_t n2 = idx - nx;
+                const size_t n3 = idx + nx;
+                const size_t n4 = idx - slice;
+                const size_t n5 = idx + slice;
+
+                if (volume.at(n0) ||
+                    volume.at(n1) ||
+                    volume.at(n2) ||
+                    volume.at(n3) ||
+                    volume.at(n4) ||
+                    volume.at(n5))
+                {
+                    toFill[idx] = 1;
+                }
+            }
+        }
+    }
+
+    // 3. Чем заполняем — среднее между mHistLo и mHistHi
+    const double mid = 0.5 * (mHistLo + mHistHi);
+    double s = std::clamp(mid, mLutMin, mLutMax);
+
+    // если вдруг невидим — попробовать сдвинуться вверх/вниз в окне
+    if (!isVisible(s)) {
+        const int steps = 16;
+        const double step = (mHistHi - mHistLo) / double(steps + 1);
+        double x = s;
+        for (int k = 0; k < steps && !isVisible(x); ++k)
+            x += step;
+        if (!isVisible(x)) {
+            x = s;
+            for (int k = 0; k < steps && !isVisible(x); ++k)
+                x -= step;
+        }
+        s = x;
+    }
+    const uint8_t average = static_cast<uint8_t>(std::clamp(std::lround(s), 0L, 255L));
+
+    for (size_t idx = 0; idx < total; ++idx)
+    {
+        if (toFill[idx] && !volume.at(idx))
+        {
+            const size_t n0 = idx - 1;
+            const size_t n1 = idx + 1;
+            const size_t n2 = idx - nx;
+            const size_t n3 = idx + nx;
+            const size_t n4 = idx - slice;
+            const size_t n5 = idx + slice;
+            const size_t n6 = idx - nx - 1;
+            const size_t n7 = idx - nx + 1;
+            const size_t n8 = idx + nx - 1;
+            const size_t n9 = idx + nx + 1;
+
+            const size_t n10 = idx - slice - 1;
+            const size_t n11 = idx - slice + 1;
+            const size_t n12 = idx + slice - 1;
+            const size_t n13 = idx + slice + 1;
+
+            const size_t n14 = idx - slice - nx;
+            const size_t n15 = idx - slice + nx;
+            const size_t n16 = idx + slice - nx;
+            const size_t n17 = idx + slice + nx;
+
+            volume.at(n0) = average;
+            volume.at(n1) = average;
+            volume.at(n2) = average;
+            volume.at(n3) = average;
+            volume.at(n4) = average;
+            volume.at(n5) = average;
+            volume.at(n6) = average;
+            volume.at(n7) = average;
+            volume.at(n8) = average;
+            volume.at(n9) = average;
+            volume.at(n10) = average;
+            volume.at(n11) = average;
+            volume.at(n12) = average;
+            volume.at(n13) = average;
+            volume.at(n14) = average;
+            volume.at(n15) = average;
+            volume.at(n16) = average;
+            volume.at(n17) = average;
+        }   
+    }
+
+    return true;
+}
+
+void ToolsRemoveConnected::MinusVoxels()
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    for (size_t n = 0; n < total; ++n)
+        if (!m_bin.at(n))
+            volNew.at(n) = 0;
+
+    ErodeBy6Neighbors(volNew);
+
+    m_vol = volNew;
+}
+
+void ToolsRemoveConnected::PlusVoxels()
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    for (size_t n = 0; n < total; ++n)
+        if (!m_bin.at(n))
+            volNew.at(n) = 0;
+
+    if (!AddBy6Neighbors(volNew))
+        return;
+
+    for (size_t n = 0; n < total; ++n)
+        if (!m_bin.at(n) && volNew.at(n))
+            m_vol.at(n) = volNew.at(n);
+
+    m_vol = volNew;
+}
+
 
 void ToolsRemoveConnected::applyKeepOnlySelected(const std::vector<uint8_t>& mark)
 {
@@ -1418,27 +2202,6 @@ void ToolsRemoveConnected::applyKeepOnlySelected(const std::vector<uint8_t>& mar
         if (!mark[n])               // если маска 0 → обнуляем воксель
             m_vol.at(n) = 0u;
     }
-}
-
-
-bool ToolsRemoveConnected::buildSelectedComponentMask(vtkImageData* image,
-    const int seed[3],
-    std::vector<uint8_t>& outMask,
-    int& outCount) const
-{
-////    if (!image) return false;
-//
-////    m_bin = makeBinaryMask(image);
-// //   if (!bin) return false;
-//
-// //   int ext[6]; bin->GetExtent(ext);
-//    const int nx = ext[1] - ext[0] + 1, ny = ext[3] - ext[2] + 1, nz = ext[5] - ext[4] + 1;
-//    outMask.clear();
-//    outMask.reserve(size_t(nx) * ny * nz);
-//
-// //   outCount = floodFill6(bin, seed, outMask);
-//    return outCount > 0;
-    return true;
 }
 
 void ToolsRemoveConnected::applyRemoveSelected(const std::vector<uint8_t>& selMask)

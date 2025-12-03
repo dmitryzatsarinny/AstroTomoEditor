@@ -18,6 +18,14 @@ class vtkVolume;
 
 enum class Action; // из Tools.h
 
+struct ShellVoxelInfo
+{
+    size_t idx;      // линейный индекс в объёме
+    int i, j, k;     // локальные индексы 0..nx-1, 0..ny-1, 0..nz-1
+    double n[3];     // нормаль (единичный вектор)
+};
+
+
 // Клик по объекту => оставить (или удалить) только его связную компоненту.
 class ToolsRemoveConnected : public QObject
 {
@@ -68,6 +76,7 @@ protected:
 private:
     void onLeftClick(const QPoint& pDevice);
     void start(Action a);
+    void startnohover(Action a);
     void redraw();
 
     // ядро
@@ -80,17 +89,16 @@ private:
     void applyVoxelErase(const int seed[3]);
     void applyVoxelRecover(const int seed[3]);
     void RemoveConnectedRegions(const std::vector<uint8_t>& mark, const int seed[3]);
+    void SmartDeleting(const int seed[3]);
+    void MinusVoxels();
+    void PlusVoxels();
+    void ErodeBy6Neighbors(Volume& volume);
+    bool AddBy6Neighbors(Volume& volume);
 
     // world↔ijk
     bool worldToIJK(const double world[3], int ijk[3]) const;
     void displayToWorld(double xd, double yd, double z01, double out[3]) const;
-    
-
-    // Построить маску выбранной компоненты (1 = принадлежит компоненте seed)
-    bool buildSelectedComponentMask(vtkImageData* image,
-        const int     seed[3],
-        std::vector<uint8_t>& outMask,
-        int& outCount) const;
+   
 
     // Удалить несвязанные области (оставить только выбранную компоненту)
     void removeUnconnected(const std::vector<uint8_t>& selMask);
@@ -126,6 +134,16 @@ private:
     bool findNearestNonEmptyConnectedVoxel(vtkImageData* image,
         const int      seed[3],
         int            outIJK[3]) const;
+
+    // Найти "кожуру" (6-связная граница) вокселей в заданном объёме.
+    // В shell возвращаются линейные индексы (как в Volume::at(size_t)).
+    void CollectShellVoxels(const Volume& vol,
+        std::vector<size_t>& shell) const;
+        
+    double ClearingVolume(Volume& vol,
+        const int seedIn[3],
+        double percent);
+
 
 private:
     enum class State { Off, WaitingClick };

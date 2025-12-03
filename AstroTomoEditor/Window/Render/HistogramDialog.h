@@ -35,6 +35,8 @@ public:
     double axisMin() const { return mAxisMin; }
     double axisMax() const { return mAxisMax; }
 
+    void HideAutoRange(vtkImageData* image);
+
 signals:
     // ВАЖНО: отдаем ГРАНИЦЫ В ДАННЫХ HistMin..HistMax
     void rangeChanged(int left, int right);

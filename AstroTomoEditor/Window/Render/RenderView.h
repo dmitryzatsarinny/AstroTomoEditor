@@ -189,4 +189,7 @@ private:
 
     void addStlPreview();
     void clearStlPreview();
+
+    bool mGradientOpacityOn = false;
+    void updateGradientOpacity();
 };

@@ -17,6 +17,8 @@ public:
     void set2DVisible(bool on);
     void set3DVisible(bool on);
     void setSaveVisible(bool on);
+    bool is2DVisible() { return mBtn2D->isVisible(); }
+    bool is3DVisible() { return mBtn3D->isVisible(); }
 
 signals:
     void patientClicked();

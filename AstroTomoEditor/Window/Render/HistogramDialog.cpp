@@ -182,6 +182,11 @@ void HistogramDialog::buildUi()
     );
 }
 
+void HistogramDialog::HideAutoRange(vtkImageData* image)
+{
+    refreshFromImage(image);
+    autoRange();
+}
 
 void HistogramDialog::refreshFromImage(vtkImageData* image)
 {

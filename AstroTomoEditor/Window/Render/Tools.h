@@ -6,11 +6,13 @@
 class QWidget;
 class QMenu;
 
-enum class Action {
+enum class Action 
+{
     Scissors,
     InverseScissors,
     RemoveUnconnected,
     RemoveConnected,
+    SmartDeleting,
     RemoveSelected,
     VoxelEraser,
     VoxelRecovery,

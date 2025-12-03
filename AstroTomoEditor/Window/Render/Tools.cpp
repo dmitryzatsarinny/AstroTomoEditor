@@ -23,8 +23,9 @@ namespace Tools
         QObject::connect(menu->addAction(QObject::tr("InverseScissors")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors); });
         menu->addSeparator();
         QObject::connect(menu->addAction(QObject::tr("RemoveUnconnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveUnconnected); });
-        QObject::connect(menu->addAction(QObject::tr("RemoveConnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveConnected); });
         QObject::connect(menu->addAction(QObject::tr("RemoveSelected")), &QAction::triggered, [onAction] { onAction(Action::RemoveSelected); });
+        QObject::connect(menu->addAction(QObject::tr("RemoveConnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveConnected); });
+        QObject::connect(menu->addAction(QObject::tr("SmartDeleting")), &QAction::triggered, [onAction] { onAction(Action::SmartDeleting); });
         menu->addSeparator();
         QObject::connect(menu->addAction(QObject::tr("VoxelEraser")), &QAction::triggered, [onAction] { onAction(Action::VoxelEraser); });
         QObject::connect(menu->addAction(QObject::tr("VoxelRecovery")), &QAction::triggered, [onAction] { onAction(Action::VoxelRecovery); });
@@ -43,12 +44,14 @@ namespace Tools
 
     QString ToDisplayName(Action a)
     {
-        switch (a) {
+        switch (a) 
+        {
         case Action::Scissors:        return QObject::tr("Scissors");
         case Action::InverseScissors: return QObject::tr("Inverse scissors");
         case Action::RemoveUnconnected:return QObject::tr("Remove unconnected");
-        case Action::RemoveConnected: return QObject::tr("Remove connected");
         case Action::RemoveSelected: return QObject::tr("Remove selected");
+        case Action::RemoveConnected: return QObject::tr("Remove connected");
+        case Action::SmartDeleting: return QObject::tr("Smart deleting");
         case Action::VoxelEraser: return QObject::tr("VoxelEraser");
         case Action::VoxelRecovery: return QObject::tr("VoxelRecovery");
         }

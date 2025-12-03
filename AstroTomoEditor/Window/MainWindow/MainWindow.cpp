@@ -473,6 +473,32 @@ void MainWindow::wireSignals()
     actSave->setShortcut(QKeySequence::Save);
     connect(actSave, &QAction::triggered, this, &MainWindow::onSave3DR);
     addAction(actSave);
+
+    auto sc2 = new QShortcut(QKeySequence(Qt::Key_2), this);
+    connect(sc2, &QShortcut::activated, this, [this]
+        {
+            if (!mPlanar)
+                return;
+
+            if (mTitle)
+                if (!mTitle->is2DVisible())
+                    return;
+
+            onShowPlanar2D();
+        });
+
+    auto sc3 = new QShortcut(QKeySequence(Qt::Key_3), this);
+    connect(sc3, &QShortcut::activated, this, [this]    // ← sc3 здесь
+        {
+            if (!mPlanar)
+                return;
+
+            if (mTitle)
+                if (!mTitle->is3DVisible())
+                    return;
+
+            onShowVolume3D();
+        });
 }
 
 void MainWindow::onSave3DR()
@@ -663,7 +689,8 @@ void MainWindow::onShowVolume3D()
 
 void MainWindow::onShowPlanar2D()
 {
-    if (mPlanar) {
+    if (mPlanar) 
+    {
         mViewerStack->setCurrentWidget(mPlanar);
 
         if (mRenderView)

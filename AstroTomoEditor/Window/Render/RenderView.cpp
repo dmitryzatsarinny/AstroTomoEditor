@@ -430,6 +430,37 @@ void RenderView::buildOverlay()
         connect(scRedo, &QShortcut::activated, this, &RenderView::onRedo);
     }
 
+    auto* scHist = new QShortcut(QKeySequence(Qt::Key_H), this);
+    connect(scHist, &QShortcut::activated, this, [this] {
+        if (!mImage || !mVolume)
+            return;
+
+        // помечаем, что активен режим Histogram, чтобы кнопка "Applications" тоже подсветилась
+        setAppUiActive(true, App::Histogram);
+        openHistogram();
+        });
+
+    auto* scHistAuto = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_H), this);
+    connect(scHistAuto, &QShortcut::activated, this, [this] {
+        if (!mImage)
+            return;
+
+        if (!mHistDlg)
+            return;
+
+        // и вызываем нужную функцию
+        mHistDlg->HideAutoRange(mImage);
+        });
+
+    auto* scGradOpacity = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_T), this);
+    connect(scGradOpacity, &QShortcut::activated, this, [this] {
+        if (!mVolume)
+            return;
+
+        mGradientOpacityOn = !mGradientOpacityOn;
+        updateGradientOpacity();
+        });
+
     topPanel->adjustSize();
     mTopOverlay->resize(topPanel->sizeHint());
     
@@ -626,7 +657,7 @@ void RenderView::commitNewImage(vtkImageData* im)
 
     // 2) принять новый том (возможно им владеет инструмент)
     if (im)
-        mImage = im; // принять владение, если это свежесозданный vtkImageData::New()
+        mImage = im;
 
     // 3) обновить маппер и перерисовать
     setMapperInput(mImage);
@@ -647,6 +678,8 @@ void RenderView::onUndo()
     // заменить
     mImage = prev;
     setMapperInput(mImage);
+    if (mRemoveConn)
+        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
@@ -662,6 +695,8 @@ void RenderView::onRedo()
 
     mImage = next;
     setMapperInput(mImage);
+    if (mRemoveConn)
+        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
@@ -719,7 +754,15 @@ bool RenderView::ToolModeChanged(Action a)
         mScissors->handle(a);
         return true;
     }
-    if (mRemoveConn && (a == Action::RemoveUnconnected || a == Action::RemoveSelected || a == Action::RemoveConnected || a == Action::VoxelEraser || a == Action::VoxelRecovery))
+    else if (mRemoveConn && (
+        a == Action::RemoveUnconnected || 
+        a == Action::RemoveSelected || 
+        a == Action::RemoveConnected || 
+        a == Action::SmartDeleting || 
+        a == Action::VoxelEraser || 
+        a == Action::VoxelRecovery || 
+        a == Action::Minus || 
+        a == Action::Plus))
     {
         setToolUiActive(true, a);
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
@@ -1270,6 +1313,33 @@ void RenderView::centerOnVolume()
     if (auto* rw = mVtk->renderWindow()) rw->Render();
 }
 
+void RenderView::updateGradientOpacity()
+{
+    if (!mVolume)
+        return;
+
+    auto* prop = mVolume->GetProperty();
+    if (!prop)
+        return;
+
+    if (mGradientOpacityOn) {
+        auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
+        gtf->AddPoint(0, 0.00);
+        gtf->AddPoint(15, 0.25);
+        gtf->AddPoint(60, 0.80);
+        prop->SetGradientOpacity(gtf);
+    }
+    else {
+        auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
+        gtf->AddPoint(0, 1.0);
+        gtf->AddPoint(255, 1.0);
+        prop->SetGradientOpacity(gtf);
+    }
+
+    if (auto* rw = mVtk->renderWindow())
+        rw->Render();
+}
+
 void RenderView::setViewPreset(ViewPreset v)
 {
     if (!mVolume || !mRenderer) return;
@@ -1406,7 +1476,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetAmbient(0.05);
     prop->SetDiffuse(0.9);
     prop->SetSpecular(0.1);
-    prop->SetInterpolationTypeToLinear();
+    prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
 
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
