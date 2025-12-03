@@ -680,6 +680,8 @@ void RenderView::onUndo()
     setMapperInput(mImage);
     if (mRemoveConn)
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+    if (mScissors)
+        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
@@ -697,6 +699,8 @@ void RenderView::onRedo()
     setMapperInput(mImage);
     if (mRemoveConn)
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+    if (mScissors)
+        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
