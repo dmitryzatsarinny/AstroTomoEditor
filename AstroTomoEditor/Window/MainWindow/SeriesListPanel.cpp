@@ -25,6 +25,8 @@
 #include <atomic>
 #include <algorithm>
 #include <utility>
+#include <limits>
+#include <cmath>
 
 #include <vtkDICOMMetaData.h>
 #include <vtkDICOMParser.h>
@@ -183,6 +185,21 @@ static bool isDicomLikelyFast(const QString& path)
 
 struct SeriesScanResult
 {
+    struct QuickDicomFile
+    {
+        QString path;
+        QString fileName;
+        bool    hasZ = false;
+        double  z = std::numeric_limits<double>::quiet_NaN();
+        bool    hasInstance = false;
+        int     instance = 0;
+        QString modality;
+        QString seriesDescription;
+        QString studyUID;
+        QString seriesNumber;
+    };
+
+    QHash<QString, QVector<QuickDicomFile>> entriesBySeries;
     QHash<QString, QVector<QString>> filesBySeries;
     QVector<SeriesItem> items;
     PatientInfo patientInfo;
@@ -274,7 +291,7 @@ void SeriesListPanel::cancelScan()
     }
 }
 
-static QString pickMiddleSliceFile(const QVector<QString>& files)
+static QString pickMiddleSliceFile(const QVector<SeriesScanResult::QuickDicomFile>& files)
 {
     if (files.isEmpty()) return {};
 
@@ -290,27 +307,14 @@ static QString pickMiddleSliceFile(const QVector<QString>& files)
     QVector<Key> keys;
     keys.reserve(files.size());
 
-    for (const QString& f : files) {
-        auto r = vtkSmartPointer<vtkDICOMReader>::New();
-        r->SetFileName(f.toUtf8().constData());
-        r->UpdateInformation();
-        vtkDICOMMetaData* md = r->GetMetaData();
-
-        Key k; k.path = f; k.name = QFileInfo(f).fileName();
-
-        // Z из ImagePositionPatient[2]
-        if (md && md->Has(DC::ImagePositionPatient)) {
-            const vtkDICOMValue& v = md->Get(DC::ImagePositionPatient);
-            if (v.GetNumberOfValues() >= 3) {
-                k.z = v.GetDouble(2);
-                k.hasZ = true;
-            }
-        }
-        // InstanceNumber
-        if (md && md->Has(DC::InstanceNumber)) {
-            k.num = md->Get(DC::InstanceNumber).AsInt();
-            k.hasNum = true;
-        }
+    for (const auto& f : files) {
+        Key k;
+        k.path = f.path;
+        k.name = f.fileName;
+        k.hasZ = f.hasZ;
+        k.z = f.z;
+        k.hasNum = f.hasInstance;
+        k.num = f.instance;
         keys.push_back(std::move(k));
     }
 
@@ -850,8 +854,8 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
 
     struct MapOut {
         bool ok = false;
-        QString path;
         QString seriesKey;
+        SeriesScanResult::QuickDicomFile meta;
         PatientInfo pinfo;
         bool pinfoValid = false;
     };
@@ -859,7 +863,7 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
     QAtomicInt progressed = 0;
 
     auto mapFn = [&](const QString& p) -> MapOut {
-        MapOut out; out.path = p;
+        MapOut out; out.meta.path = p;
         if (shouldCancel()) return out;
 
         // быстрый sniff (mmap + 16KB)
@@ -879,6 +883,30 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
 
         out.seriesKey = makeSeriesKey(meta);
         out.ok = !out.seriesKey.isEmpty();
+
+        if (out.ok)
+        {
+            out.meta.fileName = QFileInfo(p).fileName();
+
+            if (meta->Has(DC::ImagePositionPatient)) {
+                const vtkDICOMValue& v = meta->Get(DC::ImagePositionPatient);
+                if (v.GetNumberOfValues() >= 3) {
+                    out.meta.z = v.GetDouble(2);
+                    out.meta.hasZ = true;
+                }
+            }
+
+            if (meta->Has(DC::InstanceNumber)) {
+                out.meta.instance = meta->Get(DC::InstanceNumber).AsInt();
+                out.meta.hasInstance = true;
+            }
+
+            out.meta.modality = QString::fromUtf8(meta->Get(DC::Modality).AsString());
+            out.meta.seriesDescription = QString::fromUtf8(meta->Get(DC::SeriesDescription).AsString());
+            out.meta.studyUID = QString::fromUtf8(meta->Get(DC::StudyInstanceUID).AsString());
+            out.meta.seriesNumber = QString::fromUtf8(meta->Get(DC::SeriesNumber).AsString());
+        }
+
 
         if (out.ok) {
             PatientInfo pi;
@@ -900,7 +928,7 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
 
     auto reduceFn = [&](SeriesScanResult& a, const MapOut& m) {
         if (!m.ok) return;
-        a.filesBySeries[m.seriesKey].push_back(m.path);
+        a.entriesBySeries[m.seriesKey].push_back(m.meta);
         if (!a.patientInfoValid && m.pinfoValid) {
             a.patientInfo = m.pinfo;
             a.patientInfoValid = true;
@@ -914,14 +942,14 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
     if (shouldCancel()) { result.canceled = true; return result; }
 
     // Если ничего не найдено как DICOM — выходим
-    if (acc.filesBySeries.isEmpty()) {
+    if (acc.entriesBySeries.isEmpty()) {
         result.totalFiles = 0;
         return result;
     }
 
     // Точное кол-во найденных файлов (а не кандидатов)
     int dicomCount = 0;
-    for (const auto& v : std::as_const(acc.filesBySeries))
+    for (const auto& v : std::as_const(acc.entriesBySeries))
         dicomCount += v.size();
     result.totalFiles = dicomCount;
 
@@ -931,57 +959,82 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
     QVector<SeriesItem> items;
     items.reserve(acc.filesBySeries.size());
 
-    auto detailsParser = vtkSmartPointer<vtkDICOMParser>::New();
-
-    const auto keys = acc.filesBySeries.keys();
+    const auto keys = acc.entriesBySeries.keys();
     items.reserve(keys.size());
 
     for (const QString& seriesKey : keys) {
         if (shouldCancel()) { result.canceled = true; break; }
 
-        QVector<QString> sorted = acc.filesBySeries.value(seriesKey);
-        std::sort(sorted.begin(), sorted.end(),
-            [&](const QString& a, const QString& b) { return coll.compare(a, b) < 0; });
+        QVector<SeriesScanResult::QuickDicomFile> entries = acc.entriesBySeries.value(seriesKey);
+        std::sort(entries.begin(), entries.end(),
+            [&](const SeriesScanResult::QuickDicomFile& a, const SeriesScanResult::QuickDicomFile& b)
+            { return coll.compare(a.fileName, b.fileName) < 0; });
 
-        QVector<QString> valid = sorted;
-        {
-            auto rep = PlanarView::filterSeriesByConsistency(sorted);
-            valid = rep.good.isEmpty() ? QVector<QString>{ pickMiddleSliceFile(sorted) } : rep.good;
+        QVector<QString> sortedPaths;
+        sortedPaths.reserve(entries.size());
+        QHash<QString, SeriesScanResult::QuickDicomFile> entryByPath;
+        entryByPath.reserve(entries.size());
+        for (const auto& e : entries) {
+            sortedPaths.push_back(e.path);
+            entryByPath.insert(e.path, e);
         }
 
-        auto computeSliceCoords = [&](const QString& file)->double {
-            vtkNew<vtkDICOMParser> p; vtkNew<vtkDICOMMetaData> m;
-            p->SetMetaData(m); p->SetFileName(file.toUtf8().constData()); p->Update();
-            if (!m->Has(DC::ImagePositionPatient)) return std::numeric_limits<double>::quiet_NaN();
-            auto ipp = m->Get(DC::ImagePositionPatient);
-            if (ipp.GetNumberOfValues() < 3)       return std::numeric_limits<double>::quiet_NaN();
-            return ipp.GetDouble(2);
+        QVector<QString> valid = sortedPaths;
+        {
+            auto rep = PlanarView::filterSeriesByConsistency(sortedPaths);
+            if (rep.good.isEmpty()) {
+                const QString mid = pickMiddleSliceFile(entries);
+                valid = mid.isEmpty() ? QVector<QString>{} : QVector<QString>{ mid };
+            }
+            else {
+                valid = rep.good;
+            }
+        }
+
+        auto zForPath = [&](const QString& path) {
+            auto it = entryByPath.constFind(path);
+            if (it == entryByPath.constEnd() || !it->hasZ)
+                return std::numeric_limits<double>::quiet_NaN();
+            return it->z;
             };
 
-        if (!valid.isEmpty()
-            && computeSliceCoords(valid.constFirst()) == computeSliceCoords(valid.constLast()))
+        if (!valid.isEmpty())
         {
-            const QString first = valid.constFirst();
-            valid = { first };
+            const double firstZ = zForPath(valid.constFirst());
+            const double lastZ = zForPath(valid.constLast());
+            if (std::isfinite(firstZ) && std::isfinite(lastZ) && firstZ == lastZ) {
+                const QString first = valid.constFirst();
+                valid = { first };
+            }
         }
 
         acc.filesBySeries[seriesKey] = valid;  // безопасно: мы не используем итератор карты
 
+        QVector<SeriesScanResult::QuickDicomFile> validEntries;
+        validEntries.reserve(valid.size());
+        for (const auto& p : valid) {
+            auto it = entryByPath.constFind(p);
+            if (it != entryByPath.constEnd())
+                validEntries.push_back(it.value());
+        }
+
         SeriesItem s;
         s.seriesKey = seriesKey;
-        s.firstFile = pickMiddleSliceFile(valid);
+        s.firstFile = pickMiddleSliceFile(validEntries.isEmpty() ? entries : validEntries);
         s.numImages = valid.size();
 
-        auto meta = vtkSmartPointer<vtkDICOMMetaData>::New();
-        detailsParser->SetMetaData(meta);
-        detailsParser->SetFileName(s.firstFile.toUtf8().constData());
-        detailsParser->Update();
+        const auto pickMeta = [&]() -> SeriesScanResult::QuickDicomFile {
+            for (const auto& e : validEntries)
+                return e;
+            if (!entries.isEmpty()) return entries.constFirst();
+            return {};
+            }();
 
-        s.studyID = QString::fromUtf8(meta->Get(DC::StudyInstanceUID).AsString());
-        QString desc = QString::fromUtf8(meta->Get(DC::SeriesDescription).AsString());
+        s.studyID = pickMeta.studyUID;
+        QString desc = pickMeta.seriesDescription;
         if (desc.isEmpty()) {
-            const QString modality = QString::fromUtf8(meta->Get(DC::Modality).AsString());
-            const QString snum = QString::fromUtf8(meta->Get(DC::SeriesNumber).AsString());
+            const QString modality = pickMeta.modality;
+            const QString snum = pickMeta.seriesNumber;
             desc = (modality.isEmpty() && snum.isEmpty()) ? QObject::tr("No Name")
                 : QStringLiteral("%1 %2").arg(modality, snum);
         }
