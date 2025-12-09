@@ -499,6 +499,8 @@ bool ExplorerDialog::dirHasDicom(const QString& dirPath, int maxProbe) const {
     QDirIterator it(dirPath, QDir::Files | QDir::NoDotAndDotDot);
     int checked = 0;
 
+    const bool allowMagic = (m_magicCheck && m_magicCheck->isChecked());
+
     while (it.hasNext() && checked < std::max(1, maxProbe)) {
         const QString p = it.next();
         const QString name = QFileInfo(p).fileName();
@@ -510,7 +512,7 @@ bool ExplorerDialog::dirHasDicom(const QString& dirPath, int maxProbe) const {
             return true;
 
         // Точная проверка по сигнатуре (дороже, но мы её ограничили maxProbe)
-        if (DicomSniffer::looksLikeDicomFile(p))
+        if (allowMagic && DicomSniffer::looksLikeDicomFile(p))
             return true;
 
         ++checked;
@@ -586,7 +588,8 @@ void ExplorerDialog::onDirectoryLoaded(const QString& path)
     setStatus(LoadState::Ready, tr("Ready"));
     const QString loaded = normPath(path);
 
-    if (!mCurrentRootPath.isEmpty() && loaded == mCurrentRootPath) {
+    if (!mCurrentRootPath.isEmpty() && loaded.compare(mCurrentRootPath, Qt::CaseInsensitive) == 0) 
+    {
         mPendingPath.clear();
         hideBusy();
     }

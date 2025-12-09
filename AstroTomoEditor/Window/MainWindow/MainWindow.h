@@ -63,6 +63,7 @@ protected:
     void changeEvent(QEvent* e) override;
     void resizeEvent(QResizeEvent* e) override;
     void showEvent(QShowEvent*) override;
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private:
     // построение и настройка UI

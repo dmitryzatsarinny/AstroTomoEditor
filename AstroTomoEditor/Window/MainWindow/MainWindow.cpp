@@ -5,6 +5,8 @@
 #include "PlanarView.h"
 #include <QScopedValueRollback>
 #include <Services/Save3DR.h>
+#include <QApplication>
+#include <QEvent>
 
 namespace 
 {
@@ -29,6 +31,8 @@ MainWindow::MainWindow(QWidget* parent,
 #ifdef Q_OS_WIN
     if (auto* mb = menuBar()) mb->setNativeMenuBar(false);
 #endif
+
+    qApp->installEventFilter(this);
 
     buildUi();
     mUiToDisable = centralWidget();
@@ -572,7 +576,8 @@ void MainWindow::StartLoading()
 {
     if (mLoading)
         return;
-    QScopedValueRollback<bool> lk(mLoading, true);
+
+    mLoading = true;
 
     QObject* src = sender();
     std::optional<QSignalBlocker> blocker;
@@ -590,6 +595,7 @@ void MainWindow::StopLoading()
         QApplication::restoreOverrideCursor();
 
     if (mUiToDisable) mUiToDisable->setEnabled(true);
+    mLoading = false;
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 
@@ -608,6 +614,31 @@ void MainWindow::onOpenStudy()
 
     qApp->processEvents(QEventLoop::AllEvents);
     QTimer::singleShot(0, this, &MainWindow::startScan);
+}
+
+bool MainWindow::eventFilter(QObject* obj, QEvent* event)
+{
+    if (mLoading)
+    {
+        switch (event->type())
+        {
+        case QEvent::MouseButtonPress:
+        case QEvent::MouseButtonRelease:
+        case QEvent::MouseButtonDblClick:
+        case QEvent::Wheel:
+        case QEvent::KeyPress:
+        case QEvent::KeyRelease:
+        case QEvent::TouchBegin:
+        case QEvent::TouchUpdate:
+        case QEvent::TouchEnd:
+        case QEvent::ContextMenu:
+            return true; // игнорируем пользовательский ввод пока идёт загрузка
+        default:
+            break;
+        }
+    }
+
+    return QMainWindow::eventFilter(obj, event);
 }
 
 
