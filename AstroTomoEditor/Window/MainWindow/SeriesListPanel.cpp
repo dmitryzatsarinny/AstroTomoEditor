@@ -236,8 +236,12 @@ SeriesListPanel::SeriesListPanel(QWidget* parent) : QWidget(parent)
 
     auto activate = [this](QListWidgetItem* it) {
         if (!it) return;
+
         const QString key = it->data(Qt::UserRole).toString();
-        emit seriesActivated(key, mFilesBySeries.value(key));
+        const QVector<QString> files = mFilesBySeries.value(key);
+
+        emit seriesActivated(key, files);              // как и было
+        updatePatientInfoForSeries(key, files);        // новая логика
         };
 
     connect(mList, &QListWidget::itemClicked, this, activate);
@@ -389,6 +393,7 @@ void SeriesListPanel::scanSingleFile(const QString& filePath)
     }
 
     // Patient info
+    // Patient info
     PatientInfo pinfo;
     pinfo.patientName = DicomParcer::normalizePN(qstr(md->Get(DC::PatientName)));
     {
@@ -398,6 +403,30 @@ void SeriesListPanel::scanSingleFile(const QString& filePath)
     }
     pinfo.sex = DicomParcer::mapSex(qstr(md->Get(DC::PatientSex)));
     pinfo.birthDate = DicomParcer::normalizeDicomDate(qstr(md->Get(DC::PatientBirthDate)));
+
+    // новые поля
+    pinfo.Mode = qstr(md->Get(DC::Modality)).trimmed();
+
+    QString seriesDescr = qstr(md->Get(DC::SeriesDescription)).trimmed();
+    if (seriesDescr.isEmpty()) {
+        const QString modality = qstr(md->Get(DC::Modality));
+        const QString snum = qstr(md->Get(DC::SeriesNumber));
+        seriesDescr = (modality.isEmpty() && snum.isEmpty())
+            ? tr("(single image)")
+            : QString("%1 %2").arg(modality, snum);
+    }
+    pinfo.Description = seriesDescr;
+
+    QString seqName;
+    if (md->Has(DC::SequenceName))
+        seqName = qstr(md->Get(DC::SequenceName));
+    else if (md->Has(DC::ProtocolName))
+        seqName = qstr(md->Get(DC::ProtocolName));
+    else
+        seqName = qstr(md->Get(DC::SeriesNumber)); // на крайний случай
+
+    pinfo.Sequence = seqName.trimmed();
+
 
     // Series item
     QString seriesUID = qstr(md->Get(DC::SeriesInstanceUID));
@@ -545,6 +574,13 @@ void SeriesListPanel::scan3drFile(const QString& filePath)
     PatientInfo pinfo;
     pinfo.patientName = fi.completeBaseName();
     pinfo.patientId = fi.baseName();
+    pinfo.sex.clear();
+    pinfo.birthDate.clear();
+
+    pinfo.Mode = (hdr.IsMRI == 1) ? "MRI" : "CT";
+    pinfo.Description = QStringLiteral("3DR volume %1×%2×%3")
+        .arg(nx).arg(ny).arg(nz);
+    pinfo.Sequence = QString();   // для 3DR можно оставить пустым или "N/A"
 
     const QString seriesKey = QStringLiteral("3DR_%1x%2x%3_%4")
         .arg(nx).arg(ny).arg(nz).arg(fi.fileName());
@@ -744,8 +780,11 @@ static bool tryFillPatientInfo(const QString& fp, PatientInfo& out)
     out.patientId = pid.trimmed();
     out.sex = DicomParcer::mapSex(sex);
     out.birthDate = DicomParcer::normalizeDicomDate(bday);
+
     return true;
 }
+
+
 
 // естественная сортировка имён
 void SeriesScanWorker::startScan(const QString& rootPath, const QString& dicomdirPath)
@@ -955,6 +994,8 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
 
     sortSeriesByName(items);
 
+
+
     // Переносим из acc и отдаём результат
     result.filesBySeries = std::move(acc.filesBySeries);
     result.items = std::move(items);
@@ -1006,11 +1047,19 @@ void SeriesListPanel::populate(const QVector<SeriesItem>& items)
         // превью
         if (!s.thumb.isNull()) {
             QImage scaled = s.thumb.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            it->setIcon(QIcon(QPixmap::fromImage(scaled)));
+            QPixmap pm = QPixmap::fromImage(scaled);
+
+            QIcon icon;
+            icon.addPixmap(pm, QIcon::Normal);
+            icon.addPixmap(pm, QIcon::Active);
+            icon.addPixmap(pm, QIcon::Selected);
+
+            it->setIcon(icon);
         }
         else {
             enqueueThumbRequest(it, s.firstFile);
         }
+
     }
 
     startNextThumb();
@@ -1087,6 +1136,62 @@ void SeriesListPanel::startNextThumb()
     mThumbWatcher.setFuture(future);
 }
 
+void SeriesListPanel::updatePatientInfoForSeries(const QString& seriesKey,
+    const QVector<QString>& files)
+{
+    Q_UNUSED(seriesKey);
+
+    if (!mHasBasePatientInfo || files.isEmpty())
+        return;
+
+    const QString firstFile = files.first();
+
+    auto r = vtkSmartPointer<vtkDICOMReader>::New();
+    r->SetFileName(firstFile.toUtf8().constData());
+    r->UpdateInformation();
+    vtkDICOMMetaData* md = r->GetMetaData();
+    if (!md) return;
+
+    PatientInfo info = mBasePatientInfo; // копия демографии
+
+    // --- тип (Modality) ---
+    if (md->Has(DC::Modality))
+        info.Mode = QString::fromUtf8(md->Get(DC::Modality).AsString()).trimmed();
+    else
+        info.Mode.clear();
+
+    // --- описание серии ---
+    QString desc;
+    if (md->Has(DC::SeriesDescription))
+        desc = QString::fromUtf8(md->Get(DC::SeriesDescription).AsString()).trimmed();
+
+    if (desc.isEmpty()) {
+        QString modality = md->Has(DC::Modality)
+            ? QString::fromUtf8(md->Get(DC::Modality).AsString())
+            : QString();
+        QString snum = md->Has(DC::SeriesNumber)
+            ? QString::fromUtf8(md->Get(DC::SeriesNumber).AsString())
+            : QString();
+        desc = (modality.isEmpty() && snum.isEmpty())
+            ? tr("(unnamed series)")
+            : QStringLiteral("%1 %2").arg(modality, snum);
+    }
+    info.Description = desc;
+
+    // --- sequence ---
+    QString seq;
+    if (md->Has(DC::SequenceName))
+        seq = QString::fromUtf8(md->Get(DC::SequenceName).AsString());
+    else if (md->Has(DC::ProtocolName))
+        seq = QString::fromUtf8(md->Get(DC::ProtocolName).AsString());
+    else if (md->Has(DC::SeriesNumber))
+        seq = QString::fromUtf8(md->Get(DC::SeriesNumber).AsString());
+
+    info.Sequence = seq.trimmed();
+
+    emit patientInfoChanged(info);
+}
+
 void SeriesListPanel::handleScanResult(const SeriesScanResult& result)
 {
 
@@ -1099,6 +1204,8 @@ void SeriesListPanel::handleScanResult(const SeriesScanResult& result)
     populate(result.items);
 
     if (result.patientInfoValid) {
+        mBasePatientInfo = result.patientInfo;
+        mHasBasePatientInfo = true;
         emit patientInfoChanged(result.patientInfo);
     }
 
@@ -1118,9 +1225,17 @@ void SeriesListPanel::handleThumbReady()
         const QImage image = mThumbWatcher.result();
         if (!image.isNull()) {
             QImage scaled = image.scaled(64, 64, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            mCurrentThumbItem->setIcon(QIcon(QPixmap::fromImage(scaled)));
+            QPixmap pm = QPixmap::fromImage(scaled);
+
+            QIcon icon;
+            icon.addPixmap(pm, QIcon::Normal);
+            icon.addPixmap(pm, QIcon::Active);
+            icon.addPixmap(pm, QIcon::Selected);
+
+            mCurrentThumbItem->setIcon(icon);
         }
     }
+
 
     mCurrentThumbItem = nullptr;
     mCurrentThumbFile.clear();

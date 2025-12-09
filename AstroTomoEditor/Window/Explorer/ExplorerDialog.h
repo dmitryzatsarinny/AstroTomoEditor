@@ -4,6 +4,7 @@
 
 #include "..\..\Services\Pool.h"
 #include "..\MainWindow\DialogShell.h"
+#include "..\MainWindow\AsyncProgressBar.h"
 
 class QComboBox;                                                // Предварительные объявления (forward declarations) Qt-классов.
 class QTreeView;                                                // Они уменьшают связность/время сборки: нам нужна только ссылка/указатель,
@@ -13,6 +14,8 @@ class QModelIndex;
 class QSortFilterProxyModel;                                    // Тоже forward-declaration: используется в сигнатуре слота.
 class ContentFilterProxy;
 class QCheckBox;
+class TitleBar;
+class AsyncProgressBar;
 
 class ExplorerDialog : public DialogShell
 {
@@ -93,8 +96,7 @@ private:
 
     // --- статус-бар ---
     QWidget* mStatusBar = nullptr;
-    QLabel* mStatusText = nullptr;
-    QProgressBar* mBusy = nullptr;
+    AsyncProgressBar* mBusy = nullptr;
     QTimer* mBusyDelayTimer = nullptr;
     QTimer* mOpenTimeout = nullptr;   // страховка «на всякий случай»
     LoadState     mState = LoadState::Ready;

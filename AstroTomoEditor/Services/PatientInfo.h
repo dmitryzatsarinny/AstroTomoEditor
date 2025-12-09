@@ -6,5 +6,8 @@ struct PatientInfo
 	QString patientName;
 	QString patientId;
 	QString sex;
-	QString birthDate;
+	QString birthDate;	
+	QString Mode;
+	QString Description;
+	QString Sequence;
 };

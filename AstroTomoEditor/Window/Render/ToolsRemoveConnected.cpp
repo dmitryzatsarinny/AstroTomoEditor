@@ -38,7 +38,8 @@
 #include <vtkProperty.h>
 
 #include "Tools.h"
-
+#include <vtkFlyingEdges3D.h>
+#include <vtkImageMask.h>
 
 
 ToolsRemoveConnected::ToolsRemoveConnected(QWidget* hostParent)
@@ -156,7 +157,7 @@ void ToolsRemoveConnected::setHoverVisible(bool on)
 
 void ToolsRemoveConnected::rebuildVisibilityLUT()
 {
-    mVisibleLut.assign(mLutBins, 0);
+    mVisibleLut.clear();
 
     if (!m_volume) return;
     auto* prop = m_volume->GetProperty();
@@ -164,47 +165,35 @@ void ToolsRemoveConnected::rebuildVisibilityLUT()
     auto* pwf = prop->GetScalarOpacity(0);
     if (!pwf) return;
 
-    mLutMin = HistMin;
-    mLutMax = HistMax;
+    // работаем по целым HU
+    const int lo = HistMin;
+    const int hi = HistMax;
+    const int bins = hi - lo + 1;
+    if (bins <= 0) return;
 
-    const double span = mLutMax - mLutMin;
-    if (span <= 0.0)
-        return;
+    mLutMin = lo;
+    mLutMax = hi;
+    mLutBins = bins;
+    mVisibleLut.assign(bins, 0);
 
-    for (int i = 0; i < mLutBins; ++i)
-    {
-        const double t = (mLutBins == 1)
-            ? 0.0
-            : double(i) / double(mLutBins - 1);
-
-        const double s = mLutMin + t * span;
-
-        double op = pwf->GetValue(s);
-
-        if (mHistHi > mHistLo) {
-            if (s < mHistLo || s > mHistHi)
-                op = 0.0;
-        }
-
-        mVisibleLut[i] = (op > mVisibleEps) ? 1 : 0;
+    for (int v = lo; v <= hi; ++v) {
+        const double op = pwf->GetValue(static_cast<double>(v));
+        // либо >0, либо очень маленький eps
+        mVisibleLut[v - lo] = (op > mVisibleEps) ? 1 : 0;
     }
 }
 
-
-inline bool ToolsRemoveConnected::isVisible(double s) const
+bool ToolsRemoveConnected::isVisible(const short v) const
 {
-    if (mVisibleLut.empty() || mLutBins <= 0) return true;
+    if (mVisibleLut.empty()) return true;
 
-    if (s <= mLutMin) return mVisibleLut.front() != 0;
+    const int idx = int(v) - int(mLutMin);
+    if (idx < 0 || idx >= (int)mVisibleLut.size())
+        return false;
 
-    if (s >= mLutMax)
-        return true;
-
-    const double t = (s - mLutMin) / (mLutMax - mLutMin);
-    int idx = static_cast<int>(t * (mLutBins - 1) + 0.5);
-    if (idx < 0) idx = 0; else if (idx >= mLutBins) idx = mLutBins - 1;
-    return mVisibleLut[idx] != 0;
+    return mVisibleLut[size_t(idx)] != 0;
 }
+
 
 void ToolsRemoveConnected::forwardMouseToVtk(QEvent* e)
 {
@@ -385,13 +374,22 @@ bool ToolsRemoveConnected::handle(Action a)
         a == Action::RemoveConnected ||
         a == Action::SmartDeleting ||
         a == Action::VoxelEraser ||
-        a == Action::VoxelRecovery)
+        a == Action::VoxelRecovery ||
+        a == Action::AddBase ||
+        a == Action::FillEmpty)
     {
         start(a);
         return true;
     }
     else if(a == Action::Minus ||
-        a == Action::Plus)
+        a == Action::Plus ||
+        a == Action::TotalSmoothing ||
+        a == Action::PeelRecovery)
+    {
+        startnohover(a);
+        return true;
+    }
+    else if (a == Action::SurfaceMapping)
     {
         startnohover(a);
         return true;
@@ -601,6 +599,12 @@ void ToolsRemoveConnected::startnohover(Action a)
     case Action::Minus:
         MinusVoxels();
         break;
+    case Action::TotalSmoothing:
+        TotalSmoothingVolume();
+        break;
+    case Action::PeelRecovery:
+        PeelRecoveryVolume();
+        break;
     default:
         break;
     }
@@ -667,6 +671,8 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
             return;
         }
 
+        AverageVisibleValue = GetAverageVisibleValue();
+
         switch (m_mode)
         {
         case Action::RemoveUnconnected:
@@ -682,9 +688,23 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
             RemoveConnectedRegions(mark, seed);
             SmartDeleting(seed);
             break;
+        case Action::AddBase:
+            AddBaseToBounds(mark, seed);
+            break;
+        case Action::FillEmpty:
+            FillEmptyRegions(mark, seed);
+            break;
         default:
             break;
         }
+
+        auto maskFilter = vtkSmartPointer<vtkImageMask>::New();
+        maskFilter->SetImageInputData(m_image);    // CT
+        maskFilter->SetMaskInputData(m_vol.raw());
+        maskFilter->SetMaskedOutputValue(0u);
+        maskFilter->Update();
+
+        m_vol.raw()->DeepCopy(maskFilter->GetOutput());
     }
 
     if (m_vol.raw())
@@ -806,7 +826,7 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
                 if (v > 240) qDebug() << "BIG V =" << int(v)
                     << "at" << i << j << k;
 
-                if (!isVisible(double(v))) continue; // стираем только видимое
+                if (!isVisible(v)) continue; // стираем только видимое
 
                 *p = 0u;
             }
@@ -870,7 +890,7 @@ void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
 
                 const unsigned char ov = *pOrig;
                 if (!ov) continue;
-                if (!isVisible(double(ov))) continue; // восстанавливаем только видимое
+                if (!isVisible(ov)) continue; // восстанавливаем только видимое
 
                 *pCur = ov;
             }
@@ -1260,13 +1280,20 @@ void ToolsRemoveConnected::SmartDeleting(const int seedIn[3])
 }
 
 // ---- ядро ----
-void ToolsRemoveConnected::makeBinaryMask(vtkImageData* m_image)
+void ToolsRemoveConnected::makeBinaryMask(vtkImageData* image)
 {
-    m_bin.set(m_image, [&](uint8_t v) 
+    m_bin.set(image, [&](uint8_t v) -> uint8_t
         {
-            return v != 0 && isVisible(double(v));
+            if (v <= 0u)
+                return 0u;
+
+            if (mVisibleLut.empty() || mLutBins < 255 || v >= 255u)
+                return 1u;
+
+            return mVisibleLut[v];
         });
 }
+
 
 double ToolsRemoveConnected::ClearingVolume(Volume& vol,
     const int seedIn[3],
@@ -2006,6 +2033,29 @@ void ToolsRemoveConnected::ErodeBy6Neighbors(Volume& volume)
             volume.at(idx) = 0u;
 }
 
+uint8_t ToolsRemoveConnected::GetAverageVisibleValue()
+{
+    const double mid = 0.5 * (mHistLo + mHistHi);
+    double s = std::clamp(mid, mLutMin, mLutMax);
+
+    // если вдруг невидим — попробовать сдвинуться вверх/вниз в окне
+    if (!isVisible(s)) {
+        const int steps = 16;
+        const double step = (mHistHi - mHistLo) / double(steps + 1);
+        double x = s;
+        for (int k = 0; k < steps && !isVisible(x); ++k)
+            x += step;
+        if (!isVisible(x)) {
+            x = s;
+            for (int k = 0; k < steps && !isVisible(x); ++k)
+                x -= step;
+        }
+        s = x;
+    }
+
+    return static_cast<uint8_t>(std::clamp(std::lround(s), 0L, 255L));
+}
+
 bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
 {
     const auto& S = volume.u8();
@@ -2080,24 +2130,7 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
     }
 
     // 3. Чем заполняем — среднее между mHistLo и mHistHi
-    const double mid = 0.5 * (mHistLo + mHistHi);
-    double s = std::clamp(mid, mLutMin, mLutMax);
-
-    // если вдруг невидим — попробовать сдвинуться вверх/вниз в окне
-    if (!isVisible(s)) {
-        const int steps = 16;
-        const double step = (mHistHi - mHistLo) / double(steps + 1);
-        double x = s;
-        for (int k = 0; k < steps && !isVisible(x); ++k)
-            x += step;
-        if (!isVisible(x)) {
-            x = s;
-            for (int k = 0; k < steps && !isVisible(x); ++k)
-                x -= step;
-        }
-        s = x;
-    }
-    const uint8_t average = static_cast<uint8_t>(std::clamp(std::lround(s), 0L, 255L));
+    const uint8_t average = GetAverageVisibleValue();
 
     for (size_t idx = 0; idx < total; ++idx)
     {
@@ -2189,6 +2222,1233 @@ void ToolsRemoveConnected::PlusVoxels()
     m_vol = volNew;
 }
 
+void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fillVal)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    // 1. Ищем первый по X слой слева, где есть ненулевой воксель
+    int firstObjI = -1;
+    for (int i = ext[0]; i <= ext[1] && firstObjI < 0; ++i)
+        for (int k = ext[4]; k <= ext[5] && firstObjI < 0; ++k)
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                {
+                    firstObjI = i;
+                    break;
+                }
+            }
+
+    // ничего не нашли или нет "внутреннего" слоя справа
+    if (firstObjI < 0 || firstObjI >= ext[1])
+        return;
+
+    // 2. Заполняем весь найденный X-слой значением fillVal
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
+            vol.at(idxFill) = fillVal;
+        }
+
+    // 3. Проверка: есть ли "опора" по X внутрь (в сторону больших i)
+    auto hasSupportInside = [&](int j, int k) -> bool
+        {
+            const int iMax = std::min(ext[1], firstObjI + static_cast<int>(shift));
+            for (int i = firstObjI + 1; i <= iMax; ++i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                    return true;
+            }
+            return false;
+        };
+
+    // 4. Срезаем свесы без опоры: сначала с "верхне-заднего" угла (max Z, max Y)
+    for (int k = ext[5]; k >= ext[4]; --k)
+        for (int j = ext[3]; j >= ext[2]; --j)
+        {
+            if (!hasSupportInside(j, k))
+            {
+                const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    // потом с противоположного края (min Z, min Y)
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            if (!hasSupportInside(j, k))
+            {
+                const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    // 5. Копируем основание на слой "внутрь" (по X вправо)
+    const int iInside = firstObjI + 1;
+    if (iInside <= ext[1])
+        for (int k = ext[4]; k <= ext[5]; ++k)
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                const size_t idxSide = linearIdx(firstObjI, j, k, ext, nx, ny);
+                const size_t idxInside = linearIdx(iInside, j, k, ext, nx, ny);
+
+                if (vol.at(idxSide) != 0u)
+                    vol.at(idxInside) = vol.at(idxSide);
+            }
+}
+
+void ToolsRemoveConnected::AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fillVal)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    // 1. Ищем первый по X слой справа, где есть ненулевой воксель
+    int firstObjI = -1;
+    for (int i = ext[1]; i >= ext[0] && firstObjI < 0; --i)
+        for (int k = ext[4]; k <= ext[5] && firstObjI < 0; ++k)
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                {
+                    firstObjI = i;
+                    break;
+                }
+            }
+
+    // ничего не нашли или нет "внутреннего" слоя слева
+    if (firstObjI < 0 || firstObjI <= ext[0])
+        return;
+
+    // 2. Заполняем весь найденный X-слой значением fillVal
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
+            vol.at(idxFill) = fillVal;
+        }
+
+    // 3. Проверка: есть ли "опора" по X внутрь (в сторону меньших i)
+    auto hasSupportInside = [&](int j, int k) -> bool
+        {
+            const int iMin = std::max(ext[0], firstObjI - static_cast<int>(shift));
+            for (int i = firstObjI - 1; i >= iMin; --i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                    return true;
+            }
+            return false;
+        };
+
+    // 4. Срезаем свесы без опоры — два прохода по плоскости YZ
+    for (int k = ext[5]; k >= ext[4]; --k)
+        for (int j = ext[3]; j >= ext[2]; --j)
+        {
+            if (!hasSupportInside(j, k))
+            {
+                const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            if (!hasSupportInside(j, k))
+            {
+                const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    // 5. Копируем основание на слой "внутрь" (по X влево)
+    const int iInside = firstObjI - 1;
+    if (iInside >= ext[0])
+        for (int k = ext[4]; k <= ext[5]; ++k)
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                const size_t idxSide = linearIdx(firstObjI, j, k, ext, nx, ny);
+                const size_t idxInside = linearIdx(iInside, j, k, ext, nx, ny);
+
+                if (vol.at(idxSide) != 0u)
+                    vol.at(idxInside) = vol.at(idxSide);
+            }
+}
+
+void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillVal)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    // 1. Ищем первый по Z слой, где есть ненулевой воксель
+    int firstObjK = -1;
+    for (int k = ext[5]; k >= ext[4] && firstObjK < 0; --k)
+        for (int i = ext[0]; i <= ext[1] && firstObjK < 0; ++i)
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                {
+                    firstObjK = k;
+                    break;
+                }
+            }
+
+    // ничего не нашли или слой упёрся в нижнюю границу
+    if (firstObjK < 0 || firstObjK <= ext[4])
+        return;
+
+    // 2. Заполняем весь найденный слой значением fillVal
+    for (int j = ext[2]; j <= ext[3]; ++j)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
+            vol.at(idxFill) = fillVal;
+        }
+
+    // Вспомогательная функция: есть ли "опора" под точкой (i, j)
+    auto hasSupportBelow = [&](int i, int j) -> bool
+        {
+            const int kMin = std::max(ext[4], firstObjK - shift);
+            for (int k = firstObjK - 1; k >= kMin; --k)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                    return true;
+            }
+            return false;
+        };
+
+    // 3. Убираем те заполняемые воксели слоя firstObjK,
+    //    под которыми в исходном томе нет ничего в пределах shift
+    for (int j = ext[3]; j >= ext[2]; --j)
+        for (int i = ext[1]; i >= ext[0]; --i)
+        {
+            if (!hasSupportBelow(i, j))
+            {
+                const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
+                vol.at(idxFill) = 0;
+            }
+            else
+                break;
+        }
+
+    for (int j = ext[2]; j <= ext[3]; ++j)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            if (!hasSupportBelow(i, j))
+            {
+                const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
+                vol.at(idxFill) = 0;
+            }
+            else
+                break;
+        }
+
+    // 4. Копируем основание на слой ниже (если он существует)
+    const int kBelow = firstObjK + 1;
+    if (kBelow <= ext[5])
+        for (int j = ext[2]; j <= ext[3]; ++j)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idxTop = linearIdx(i, j, firstObjK, ext, nx, ny);
+                const size_t idxBelow = linearIdx(i, j, kBelow, ext, nx, ny);
+
+                if (vol.at(idxTop) != 0u)
+                    vol.at(idxBelow) = vol.at(idxTop);
+            }
+}
+
+void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fillVal)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    auto inExt = [&](int i, int j, int k) -> bool {
+        return (i >= ext[0] && i <= ext[1] &&
+            j >= ext[2] && j <= ext[3] &&
+            k >= ext[4] && k <= ext[5]);
+        };
+
+    // 1. Ищем первый по Z слой, где есть ненулевой воксель
+    int firstObjK = -1;
+    for (int k = ext[4]; k <= ext[5] && firstObjK < 0; ++k)
+        for (int i = ext[0]; i <= ext[1] && firstObjK < 0; ++i)
+            for (int j = ext[2]; j <= ext[3]; ++j)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                {
+                    firstObjK = k;
+                    break;
+                }
+            }
+    
+    // ничего не нашли или слой упёрся в нижнюю границу
+    if (firstObjK < 0 || firstObjK <= ext[4])
+        return;
+    
+    // 2. Заполняем весь найденный слой значением fillVal
+    for (int j = ext[2]; j <= ext[3]; ++j)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
+            vol.at(idxFill) = fillVal;
+        }
+    
+    // Вспомогательная функция: есть ли "опора" под точкой (i, j)
+    auto hasSupportBelow = [&](int i, int j) -> bool
+        {
+            const int kMax = std::min(ext[5], firstObjK + shift);
+            for (int k = firstObjK + 1; k <= kMax; ++k)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                    return true;
+            }
+            return false;
+        };
+    
+    // 3. Убираем те заполняемые воксели слоя firstObjK,
+    //    под которыми в исходном томе нет ничего в пределах shift
+    for (int j = ext[3]; j >= ext[2]; --j)
+        for (int i = ext[1]; i >= ext[0]; --i) 
+        { 
+            if (!hasSupportBelow(i, j))
+            {
+                const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
+                vol.at(idxFill) = 0;
+            }
+            else
+                break;
+        }
+
+    for (int j = ext[2]; j <= ext[3]; ++j) 
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            if (!hasSupportBelow(i, j))
+            {
+                const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
+                vol.at(idxFill) = 0;
+            }
+            else
+                break;
+        }
+    
+    // 4. Копируем основание на слой ниже (если он существует)
+    const int kBelow = firstObjK - 1;
+    if (kBelow >= ext[4])
+        for (int j = ext[2]; j <= ext[3]; ++j)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idxTop = linearIdx(i, j, firstObjK, ext, nx, ny);
+                const size_t idxBelow = linearIdx(i, j, kBelow, ext, nx, ny);
+    
+                if (vol.at(idxTop) != 0u)
+                    vol.at(idxBelow) = vol.at(idxTop);
+            }
+}
+
+void ToolsRemoveConnected::AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fillVal)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    // 1. Ищем первый по Y слой спереди (минимальный j), где есть ненулевой воксель
+    int firstObjJ = -1;
+    for (int j = ext[2]; j <= ext[3] && firstObjJ < 0; ++j)
+        for (int k = ext[4]; k <= ext[5] && firstObjJ < 0; ++k)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                {
+                    firstObjJ = j;
+                    break;
+                }
+            }
+
+    if (firstObjJ < 0 || firstObjJ >= ext[3])
+        return;
+
+    // 2. Заполняем найденный Y-слой
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
+            vol.at(idxFill) = fillVal;
+        }
+
+    // 3. Опора внутрь по Y (к большим j)
+    auto hasSupportInside = [&](int i, int k) -> bool
+        {
+            const int jMax = std::min(ext[3], firstObjJ + static_cast<int>(shift));
+            for (int j = firstObjJ + 1; j <= jMax; ++j)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                    return true;
+            }
+            return false;
+        };
+
+    // 4. Срезаем свесы по плоскости XZ
+    for (int k = ext[5]; k >= ext[4]; --k)
+        for (int i = ext[1]; i >= ext[0]; --i)
+        {
+            if (!hasSupportInside(i, k))
+            {
+                const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            if (!hasSupportInside(i, k))
+            {
+                const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    // 5. Копируем основание внутрь (к большим j)
+    const int jInside = firstObjJ + 1;
+    if (jInside <= ext[3])
+        for (int k = ext[4]; k <= ext[5]; ++k)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idxSide = linearIdx(i, firstObjJ, k, ext, nx, ny);
+                const size_t idxInside = linearIdx(i, jInside, k, ext, nx, ny);
+
+                if (vol.at(idxSide) != 0u)
+                    vol.at(idxInside) = vol.at(idxSide);
+            }
+}
+
+void ToolsRemoveConnected::AddBaseBackY(Volume& vol, uint8_t shift, uint8_t fillVal)
+{
+    const auto& S = vol.u8();
+    if (!S.valid || !vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    // 1. Ищем первый по Y слой сзади (максимальный j), где есть ненулевой воксель
+    int firstObjJ = -1;
+    for (int j = ext[3]; j >= ext[2] && firstObjJ < 0; --j)
+        for (int k = ext[4]; k <= ext[5] && firstObjJ < 0; ++k)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                {
+                    firstObjJ = j;
+                    break;
+                }
+            }
+
+    if (firstObjJ < 0 || firstObjJ <= ext[2])
+        return;
+
+    // 2. Заполняем найденный Y-слой
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
+            vol.at(idxFill) = fillVal;
+        }
+
+    // 3. Опора внутрь по Y (к меньшим j)
+    auto hasSupportInside = [&](int i, int k) -> bool
+        {
+            const int jMin = std::max(ext[2], firstObjJ - static_cast<int>(shift));
+            for (int j = firstObjJ - 1; j >= jMin; --j)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (vol.at(idx) != 0u)
+                    return true;
+            }
+            return false;
+        };
+
+    // 4. Срезаем свесы по плоскости XZ
+    for (int k = ext[5]; k >= ext[4]; --k)
+        for (int i = ext[1]; i >= ext[0]; --i)
+        {
+            if (!hasSupportInside(i, k))
+            {
+                const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            if (!hasSupportInside(i, k))
+            {
+                const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
+                vol.at(idxFill) = 0u;
+            }
+            else
+                break;
+        }
+
+    // 5. Копируем основание внутрь (к меньшим j)
+    const int jInside = firstObjJ - 1;
+    if (jInside >= ext[2])
+        for (int k = ext[4]; k <= ext[5]; ++k)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idxSide = linearIdx(i, firstObjJ, k, ext, nx, ny);
+                const size_t idxInside = linearIdx(i, jInside, k, ext, nx, ny);
+
+                if (vol.at(idxSide) != 0u)
+                    vol.at(idxInside) = vol.at(idxSide);
+            }
+}
+
+void ToolsRemoveConnected::AddBaseToBounds(const std::vector<uint8_t>& mark, const int seedIn[3])
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+    if (mark.size() < total) return; // подстраховка
+
+    for (size_t n = 0; n < total; ++n)
+    {
+        if (!mark[n])               // если маска 0 → обнуляем воксель
+            m_vol.at(n) = 0u;
+    }
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    const auto& S = volNew.u8();
+    if (!S.valid || !volNew.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    const size_t slice = size_t(nx) * ny;
+
+    const int si = seedIn[0];
+    const int sj = seedIn[1];
+    const int sk = seedIn[2];
+
+    const int dXMin = (si - ext[0]);
+    const int dXMax = (ext[1] - si);
+    const int dYMin = (sj - ext[2]);
+    const int dYMax = (ext[3] - sj);
+    const int dZMin = (sk - ext[4]);
+    const int dZMax = (ext[5] - sk);
+
+    int dist[6] = { dXMin, dXMax, dYMin, dYMax, dZMin, dZMax };
+
+    int nearestFace = 0;
+    for (int idx = 1; idx < 6; ++idx)
+        if (dist[idx] < dist[nearestFace])
+            nearestFace = idx;
+
+    const uint8_t fillVal = GetAverageVisibleValue();
+    constexpr int baseMargin = 3;   // тот самый N
+
+    switch (nearestFace)
+    {
+    case 0:
+        for (int k = 0; k < nz; ++k)
+            for (int j = 0; j < ny; ++j)
+                volNew.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;      // X = 0
+        AddBaseLeftX(volNew, baseMargin, fillVal);
+        break;
+    case 1:
+        for (int k = 0; k < nz; ++k)
+            for (int j = 0; j < ny; ++j)
+                volNew.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
+        AddBaseRightX(volNew, baseMargin, fillVal);
+        break;
+    case 2:
+        for (int k = 0; k < nz; ++k)
+            for (int i = 0; i < nx; ++i)
+                volNew.at(size_t(k) * slice + i) = 0u;
+        AddBaseFrontY(volNew, baseMargin, fillVal);
+        break;
+    case 3:
+        for (int k = 0; k < nz; ++k)
+            for (int i = 0; i < nx; ++i)
+                volNew.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u;
+        AddBaseBackY(volNew, baseMargin, fillVal);
+        break;
+    case 4:
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i)
+                volNew.at(size_t(j) * nx + i) = 0u;  // Z = 0
+        AddBaseBottomZ(volNew, baseMargin, fillVal);
+        break;
+    case 5:
+        for (int j = 0; j < ny; ++j)
+            for (int i = 0; i < nx; ++i)
+                volNew.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u; // Z = nz-1
+        AddBaseTopZ(volNew, baseMargin, fillVal);
+        break;
+    }
+
+    m_vol = volNew;
+}
+
+void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, const int seedIn[3])
+{
+    Q_UNUSED(seedIn); // пока не нужен
+
+    if (!m_vol.u8().valid || !m_vol.raw())
+        return;
+
+    const size_t total = m_vol.u8().size();
+    if (mark.size() < total)
+        return; // подстраховка
+
+    // 1) применяем маску: оставляем только выбранную компоненту
+    for (size_t n = 0; n < total; ++n)
+    {
+        if (!mark[n])
+            m_vol.at(n) = 0u;
+    }
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    const auto& S = volNew.u8();
+    if (!S.valid || !S.p0)
+    {
+        m_vol = volNew;
+        return;
+    }
+
+    const int* ext = S.ext; // [xmin,xmax, ymin,ymax, zmin,zmax]
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+    {
+        m_vol = volNew;
+        return;
+    }
+
+    const size_t totalLocal = static_cast<size_t>(nx) * ny * nz;
+    const uint8_t fillVal = GetAverageVisibleValue();
+
+    // ===============================
+    // 2) Шаг 1: заполняем ТОЛЬКО внутренние полости
+    // ===============================
+
+    std::vector<uint8_t> outside(totalLocal, 0);
+    std::queue<size_t> q;
+
+    auto markOutside = [&](int i, int j, int k)
+        {
+            if (i < ext[0] || i > ext[1] ||
+                j < ext[2] || j > ext[3] ||
+                k < ext[4] || k > ext[5])
+                return;
+
+            const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+            if (outside[idx])
+                return;
+
+            if (volNew.at(idx) != 0u)
+                return; // объект
+
+            outside[idx] = 1;
+            q.push(idx);
+        };
+
+    // старт по нулям на внешней границе
+    for (int k = ext[4]; k <= ext[5]; ++k)
+    {
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const bool onBoundary =
+                    (i == ext[0] || i == ext[1] ||
+                        j == ext[2] || j == ext[3] ||
+                        k == ext[4] || k == ext[5]);
+                if (!onBoundary)
+                    continue;
+
+                markOutside(i, j, k);
+            }
+        }
+    }
+
+    static const int N6[6][3] = {
+        {+1, 0, 0}, {-1, 0, 0},
+        {0, +1, 0}, {0, -1, 0},
+        {0, 0, +1}, {0, 0, -1}
+    };
+
+    while (!q.empty())
+    {
+        const size_t w = q.front();
+        q.pop();
+
+        int i, j, k;
+        ijkFromLinear(w, ext, nx, ny, i, j, k);
+
+        for (const auto& d : N6)
+        {
+            const int ni = i + d[0];
+            const int nj = j + d[1];
+            const int nk = k + d[2];
+
+            if (ni < ext[0] || ni > ext[1] ||
+                nj < ext[2] || nj > ext[3] ||
+                nk < ext[4] || nk > ext[5])
+                continue;
+
+            const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (outside[nIdx])
+                continue;
+            if (volNew.at(nIdx) != 0u)
+                continue;
+
+            outside[nIdx] = 1;
+            q.push(nIdx);
+        }
+    }
+
+    // заливаем внутренние полости (нули, не помеченные как outside)
+    for (size_t idx = 0; idx < totalLocal; ++idx)
+    {
+        if (volNew.at(idx) == 0u && !outside[idx])
+            volNew.at(idx) = fillVal;
+    }
+
+    // ===============================
+    // 3) Шаг 2: зашпаклевать мелкие порезы на поверхности
+    // ===============================
+
+    // делаем копию, чтобы не портить соседний подсчёт
+    std::vector<uint8_t> dataCopy(totalLocal);
+    for (size_t idx = 0; idx < totalLocal; ++idx)
+        dataCopy[idx] = volNew.at(idx);
+
+    auto countNonZeroNeighbors = [&](int i, int j, int k) -> int
+        {
+            int cnt = 0;
+            for (const auto& d : N6)
+            {
+                const int ni = i + d[0];
+                const int nj = j + d[1];
+                const int nk = k + d[2];
+
+                if (ni < ext[0] || ni > ext[1] ||
+                    nj < ext[2] || nj > ext[3] ||
+                    nk < ext[4] || nk > ext[5])
+                    continue;
+
+                const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+                if (dataCopy[nIdx] != 0u)
+                    ++cnt;
+            }
+            return cnt;
+        };
+
+    // порог "соседей-объектов", при котором считаем нулевой воксель мелким разрезом
+    const int minNeighborsToFill = 4; // 4–5 из 6 обычно хорошо сглаживает, не раздувая сильно
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+    {
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (dataCopy[idx] != 0u)
+                    continue; // это уже объект
+
+                const int nzNeigh = countNonZeroNeighbors(i, j, k);
+                if (nzNeigh >= minNeighborsToFill)
+                {
+                    // этот ноль лежит в "щербинке" между вокселями объекта → заполняем
+                    volNew.at(idx) = fillVal;
+                }
+            }
+        }
+    }
+
+    m_vol = volNew;
+}
+
+int ToolsRemoveConnected::FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& mark)
+{
+    if (!volNew.u8().valid || !volNew.raw())
+        return -1;
+
+    const size_t total = volNew.u8().size();
+    if (mark.size() < total)
+        return -1; // подстраховка
+
+    const auto& S = volNew.u8();
+    if (!S.valid || !S.p0)
+        return -1;
+
+    const int* ext = S.ext; // [xmin,xmax, ymin,ymax, zmin,zmax]
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return -1;
+
+    const size_t totalLocal = static_cast<size_t>(nx) * ny * nz;
+    const uint8_t fillVal = GetAverageVisibleValue();
+
+    const size_t slice = size_t(nx) * ny;
+
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i)
+        {
+            volNew.at(size_t(j) * nx + i) = 0u;  // Z = 0
+            volNew.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u; // Z = nz-1
+        }
+
+    for (int k = 0; k < nz; ++k)
+        for (int i = 0; i < nx; ++i)
+        {
+            volNew.at(size_t(k) * slice + i) = 0u; // Y = 0
+            volNew.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u; // Y = ny-1
+        }
+
+    for (int k = 0; k < nz; ++k)
+        for (int j = 0; j < ny; ++j)
+        {
+            volNew.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;      // X = 0
+            volNew.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
+        }
+
+    // ===============================
+    // 2) Шаг 1: заполняем ТОЛЬКО внутренние полости
+    // ===============================
+
+    std::vector<uint8_t> outside(totalLocal, 0);
+    std::queue<size_t> q;
+
+    auto markOutside = [&](int i, int j, int k)
+        {
+            if (i < ext[0] || i > ext[1] ||
+                j < ext[2] || j > ext[3] ||
+                k < ext[4] || k > ext[5])
+                return;
+
+            const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+            if (outside[idx])
+                return;
+
+            if (volNew.at(idx) != 0u)
+                return; // объект
+
+            outside[idx] = 1;
+            q.push(idx);
+        };
+
+    // старт по нулям на внешней границе
+    for (int k = ext[4]; k <= ext[5]; ++k)
+    {
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const bool onBoundary =
+                    (i == ext[0] || i == ext[1] ||
+                        j == ext[2] || j == ext[3] ||
+                        k == ext[4] || k == ext[5]);
+                if (!onBoundary)
+                    continue;
+
+                markOutside(i, j, k);
+            }
+        }
+    }
+
+    static const int N6[6][3] = {
+        {+1, 0, 0}, {-1, 0, 0},
+        {0, +1, 0}, {0, -1, 0},
+        {0, 0, +1}, {0, 0, -1}
+    };
+
+    while (!q.empty())
+    {
+        const size_t w = q.front();
+        q.pop();
+
+        int i, j, k;
+        ijkFromLinear(w, ext, nx, ny, i, j, k);
+
+        for (const auto& d : N6)
+        {
+            const int ni = i + d[0];
+            const int nj = j + d[1];
+            const int nk = k + d[2];
+
+            if (ni < ext[0] || ni > ext[1] ||
+                nj < ext[2] || nj > ext[3] ||
+                nk < ext[4] || nk > ext[5])
+                continue;
+
+            const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (outside[nIdx])
+                continue;
+            if (volNew.at(nIdx) != 0u)
+                continue;
+
+            outside[nIdx] = 1;
+            q.push(nIdx);
+        }
+    }
+
+    // заливаем внутренние полости (нули, не помеченные как outside)
+    for (size_t idx = 0; idx < totalLocal; ++idx)
+        if (volNew.at(idx) == 0u && !outside[idx])
+            volNew.at(idx) = fillVal;
+
+    // ===============================
+    // 3) Шаг 2: зашпаклевать мелкие порезы на поверхности
+    // ===============================
+
+    // делаем копию, чтобы не портить соседний подсчёт
+    std::vector<uint8_t> dataCopy(totalLocal);
+    for (size_t idx = 0; idx < totalLocal; ++idx)
+        dataCopy[idx] = volNew.at(idx);
+
+    auto countNonZeroNeighbors = [&](int i, int j, int k) -> int
+        {
+            int cnt = 0;
+            for (const auto& d : N6)
+            {
+                const int ni = i + d[0];
+                const int nj = j + d[1];
+                const int nk = k + d[2];
+
+                if (ni < ext[0] || ni > ext[1] ||
+                    nj < ext[2] || nj > ext[3] ||
+                    nk < ext[4] || nk > ext[5])
+                    continue;
+
+                const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+                if (dataCopy[nIdx] != 0u)
+                    ++cnt;
+            }
+            return cnt;
+        };
+
+    // порог "соседей-объектов", при котором считаем нулевой воксель мелким разрезом
+    const int minNeighborsToFill = 4; // 4–5 из 6 обычно хорошо сглаживает, не раздувая сильно
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+    {
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (dataCopy[idx] != 0u)
+                    continue; // это уже объект
+
+                const int nzNeigh = countNonZeroNeighbors(i, j, k);
+                if (nzNeigh >= minNeighborsToFill)
+                {
+                    // этот ноль лежит в "щербинке" между вокселями объекта → заполняем
+                    volNew.at(idx) = fillVal;
+                }
+            }
+        }
+    }
+
+    for (size_t idx = 0; idx < total; idx++)
+    {
+        if (volNew.at(idx) == 0u)
+            continue;
+
+        // 6 индексов
+        const size_t n0 = idx - 1;
+        const size_t n1 = idx + 1;
+        const size_t n2 = idx - nx;
+        const size_t n3 = idx + nx;
+        const size_t n4 = idx - slice;
+        const size_t n5 = idx + slice;
+
+        if (volNew.at(n0) == 0u ||
+            volNew.at(n1) == 0u ||
+            volNew.at(n2) == 0u ||
+            volNew.at(n3) == 0u ||
+            volNew.at(n4) == 0u ||
+            volNew.at(n5) == 0u)
+            mark[idx] = 1;
+    }
+
+    return fillVal;
+}
+
+void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
+    const std::vector<uint8_t>& mark,
+    int shift,
+    uint8_t fillVal)
+{
+    if (!volNew.u8().valid || !volNew.raw())
+        return;
+
+    const auto& S = volNew.u8();
+    if (!S.valid || !S.p0)
+        return;
+
+    const int* ext = S.ext; // [xmin,xmax, ymin,ymax, zmin,zmax]
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    const size_t totalLocal = static_cast<size_t>(nx) * ny * nz;
+    if (mark.size() < totalLocal)
+        return;
+
+    const int shiftClamped = std::max(1, shift);
+    const int shift2 = shiftClamped * shiftClamped;
+
+    // заливка отрезка между (i0,j0,k0) и (i1,j1,k1)
+    auto fillSegment = [&](int i0, int j0, int k0,
+        int i1, int j1, int k1)
+        {
+            int dx = i1 - i0;
+            int dy = j1 - j0;
+            int dz = k1 - k0;
+
+            int steps = std::max({ std::abs(dx), std::abs(dy), std::abs(dz) });
+            if (steps <= 1)
+                return; // нет промежуточных вокселей
+
+            const double incx = static_cast<double>(dx) / steps;
+            const double incy = static_cast<double>(dy) / steps;
+            const double incz = static_cast<double>(dz) / steps;
+
+            double x = static_cast<double>(i0);
+            double y = static_cast<double>(j0);
+            double z = static_cast<double>(k0);
+
+            for (int s = 1; s < steps; ++s)
+            {
+                x += incx;
+                y += incy;
+                z += incz;
+
+                int ci = static_cast<int>(std::round(x));
+                int cj = static_cast<int>(std::round(y));
+                int ck = static_cast<int>(std::round(z));
+
+                if (ci < ext[0] || ci > ext[1] ||
+                    cj < ext[2] || cj > ext[3] ||
+                    ck < ext[4] || ck > ext[5])
+                    break;
+
+                const size_t cIdx = linearIdx(ci, cj, ck, ext, nx, ny);
+                if (volNew.at(cIdx) == 0u)
+                    volNew.at(cIdx) = fillVal;
+            }
+        };
+
+    Volume volNewPeel;
+    volNewPeel.copy(volNew.raw());
+
+    for (size_t n = 0; n < totalLocal; ++n)
+        if (!mark[n])
+            volNewPeel.at(n) = 0u;
+
+    for (size_t idx = 0; idx < totalLocal; ++idx)
+    {
+        if (!mark[idx])
+            continue;               // не поверхность
+
+        if (volNew.at(idx) == 0u)
+            continue;               // центральный должен быть не ноль
+
+        int i, j, k;
+        ijkFromLinear(idx, ext, nx, ny, i, j, k);
+
+        // обходим окрестность радиуса shift
+        for (int dz = -shiftClamped; dz <= shiftClamped; ++dz)
+        {
+            const int nk = k + dz;
+            if (nk < ext[4] || nk > ext[5])
+                continue;
+
+            for (int dy = -shiftClamped; dy <= shiftClamped; ++dy)
+            {
+                const int nj = j + dy;
+                if (nj < ext[2] || nj > ext[3])
+                    continue;
+
+                for (int dx = -shiftClamped; dx <= shiftClamped; ++dx)
+                {
+                    const int ni = i + dx;
+                    if (ni < ext[0] || ni > ext[1])
+                        continue;
+
+                    const int dist2 = dx * dx + dy * dy + dz * dz;
+                    if (dist2 == 0 || dist2 > shift2)
+                        continue;   // вне сферы радиуса shift или центр
+
+                    const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
+                    if (volNewPeel.at(nIdx) == 0u)
+                        continue;   // на сфере должен быть не ноль
+
+                    // оба конца не нули → заполняем всё между ними
+                    fillSegment(i, j, k, ni, nj, nk);
+                }
+            }
+        }
+    }
+
+    for (size_t n = 0; n < totalLocal; ++n)
+        if (!volNew.at(n) && (volNewPeel.at(n)))
+            volNew.at(n) = fillVal;
+}
+
+void ToolsRemoveConnected::PeelRecoveryVolume()
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    for (size_t n = 0; n < total; ++n)
+        if (!m_bin.at(n))
+            volNew.at(n) = 0;
+
+    if (!AddBy6Neighbors(volNew))
+        return;
+
+
+    if (m_hasOrig)
+    {
+        for (size_t n = 0; n < total; ++n)
+            if (m_orig.at(n) && volNew.at(n))
+                if ((m_orig.at(n) >= mHistLo) && (m_orig.at(n) <= mHistHi))
+                    m_vol.at(n) = m_orig.at(n);
+    }
+    else
+    {
+        for (size_t n = 0; n < total; ++n)
+            if (m_vol.at(n) && volNew.at(n))
+                m_vol.at(n) = volNew.at(n);
+    }
+
+}
+
+void ToolsRemoveConnected::TotalSmoothingVolume()
+{
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+
+    const size_t total = m_vol.u8().size();
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    int Shift = m_hoverRadiusVoxels;
+
+    for (size_t n = 0; n < total; ++n)
+        if (!m_bin.at(n))
+            volNew.at(n) = 0;
+
+    std::vector<uint8_t> mark(total, 0);
+    int fillVal = FillAndFindSurf(volNew, mark);
+
+    if (fillVal < 0)
+        return;
+
+    ConnectSurfaceToVolume(volNew, mark, Shift, static_cast<uint8_t>(fillVal));
+
+    m_vol = volNew;
+}
 
 void ToolsRemoveConnected::applyKeepOnlySelected(const std::vector<uint8_t>& mark)
 {
@@ -2249,6 +3509,123 @@ int ToolsRemoveConnected::peelOnce(const std::vector<uint8_t>& inMask,
 
     for (auto v : outMask) if (v) ++kept;
     return kept;
+}
+
+void ToolsRemoveConnected::AddBaseTopZ()
+{
+    const auto& S = m_vol.u8();
+    if (!S.valid || !m_vol.raw())
+        return;
+
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    if (nx <= 0 || ny <= 0 || nz <= 0)
+        return;
+
+    Volume volNew;
+    volNew.copy(m_vol.raw());
+
+    const uint8_t fillVal = GetAverageVisibleValue();
+    const int shift = 2;
+
+    // 1. Находим "первый сверху" слой с объектом
+    int firstObj = -1;
+    for (int k = ext[5]; k >= ext[4]; --k)
+    {
+        bool sliceHas = false;
+        for (int j = ext[2]; j <= ext[3] && !sliceHas; ++j)
+        {
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (m_vol.at(idx) != 0u)
+                {
+                    sliceHas = true;
+                    break;
+                }
+            }
+        }
+        if (sliceHas)
+        {
+            firstObj = k;
+            break;
+        }
+    }
+
+    if (firstObj < 0)
+        return; // в объёме вообще нет ненулевых
+    if (firstObj - shift <= ext[4])
+        return; // объект слишком близко к низу, базу рисовать смысла нет
+
+    // 2. Заполняем ВЕСЬ слой firstObj базой
+    for (int j = ext[2]; j <= ext[3]; ++j)
+        for (int i = ext[0]; i <= ext[1]; ++i)
+        {
+            const size_t idxFill = linearIdx(i, j, firstObj, ext, nx, ny);
+            volNew.at(idxFill) = fillVal;
+        }
+
+    const int kMinCheck = std::max(ext[4], firstObj - shift);
+
+    // 3. Первый проход (как у тебя) – "слева-направо, сверху-вниз"
+    for (int i = ext[0]; i <= ext[1]; ++i)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+        {
+            bool findVoxel = false;
+            for (int k = firstObj - 1; k >= kMinCheck; --k)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (m_vol.at(idx) != 0u)
+                {
+                    findVoxel = true;
+                    break;
+                }
+            }
+            if (findVoxel)
+                continue;
+
+            const size_t idxFill = linearIdx(i, j, firstObj, ext, nx, ny);
+            volNew.at(idxFill) = 0u;
+        }
+
+    // 4. Второй проход – в обратном направлении (как у тебя)
+    for (int i = ext[1]; i >= ext[0]; --i)
+        for (int j = ext[3]; j >= ext[2]; --j)
+        {
+            bool findVoxel = false;
+            for (int k = firstObj - 1; k >= kMinCheck; --k)
+            {
+                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
+                if (m_vol.at(idx) != 0u)
+                {
+                    findVoxel = true;
+                    break;
+                }
+            }
+            if (findVoxel)
+                continue;
+
+            const size_t idxFill = linearIdx(i, j, firstObj, ext, nx, ny);
+            volNew.at(idxFill) = 0u;
+        }
+
+    // 5. Копируем маску слоя firstObj на слой ниже (firstObj-1),
+    //    чтобы база была толщиной 2 вокселя
+    if (firstObj - 1 >= ext[4])
+    {
+        for (int j = ext[2]; j <= ext[3]; ++j)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                const size_t idxTop = linearIdx(i, j, firstObj, ext, nx, ny);
+                const size_t idxBot = linearIdx(i, j, firstObj - 1, ext, nx, ny);
+                if (volNew.at(idxTop))
+                    volNew.at(idxBot) = volNew.at(idxTop);
+            }
+    }
+
+    m_vol = volNew;
 }
 
 int ToolsRemoveConnected::keepOnlyConnectedFromSeed(std::vector<uint8_t>& mask,

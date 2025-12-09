@@ -9,6 +9,7 @@
 
 #include "U8Span.h"
 #include <vtkSphereSource.h>
+#include <vtkImplicitPolyDataDistance.h>
 
 class QWidget;
 class QVTKOpenGLNativeWidget;
@@ -69,6 +70,8 @@ public:
     void setHoverHighlightSizeVoxels(int r) { m_hoverRadiusVoxels = std::max(1, r); }
     void EnsureOriginalSnapshot(vtkImageData* _image);
     void ClearOriginalSnapshot();
+    uint8_t GetAverageVisibleValue();
+    uint8_t ReturnAverageVisibleValue() { return AverageVisibleValue; }
 
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
@@ -92,13 +95,20 @@ private:
     void SmartDeleting(const int seed[3]);
     void MinusVoxels();
     void PlusVoxels();
+    void AddBaseToBounds(const std::vector<uint8_t>& mark, const int seedIn[3]);
     void ErodeBy6Neighbors(Volume& volume);
     bool AddBy6Neighbors(Volume& volume);
-
-    // world↔ijk
+    void FillEmptyRegions(const std::vector<uint8_t>& mark, const int seedIn[3]);
+    void TotalSmoothingVolume();
+    void PeelRecoveryVolume();
+    int FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& mark);
+    void ConnectSurfaceToVolume(Volume& volNew, const std::vector<uint8_t>& mark, int shift, uint8_t fillVal);
+    
+    // world-ijk
     bool worldToIJK(const double world[3], int ijk[3]) const;
     void displayToWorld(double xd, double yd, double z01, double out[3]) const;
    
+    void AddBaseTopZ();
 
     // Удалить несвязанные области (оставить только выбранную компоненту)
     void removeUnconnected(const std::vector<uint8_t>& selMask);
@@ -144,6 +154,7 @@ private:
         const int seedIn[3],
         double percent);
 
+    
 
 private:
     enum class State { Off, WaitingClick };
@@ -184,10 +195,10 @@ private:
     double mLutMin = static_cast<double>(HistMin);
     double mLutMax = static_cast<double>(HistMax);
     int    mLutBins = HistScale;
-    double mVisibleEps = 0.01; // порог по opacity
+    double mVisibleEps = 0.1; // порог по opacity
 
     void  rebuildVisibilityLUT(); // дергаем при attach() и смене TF / hist-mask
-    bool  isVisible(double s) const; // быстрый тест через LUT
+    bool  isVisible(const short v) const; // быстрый тест через LUT
 
     QPoint m_lastMouse{};
     bool   m_hasHover{ false };
@@ -209,4 +220,12 @@ private:
     void ensureHoverPipeline();
     void updateHover(const QPoint& pDevice);
     void setHoverVisible(bool on);
+    void AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fillVal);
+    void AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillVal);
+    void AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fillVal);
+    void AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fillVal);
+    void AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fillVal);
+    void AddBaseBackY(Volume& vol, uint8_t shift, uint8_t fillVal);
+
+    uint8_t AverageVisibleValue = 0;
 };

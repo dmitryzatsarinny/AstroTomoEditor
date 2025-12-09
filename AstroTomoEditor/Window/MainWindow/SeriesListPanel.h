@@ -64,7 +64,7 @@ private:
     void handleScanResult(const SeriesScanResult& result);
     void handleThumbReady();
     void populate(const QVector<SeriesItem>& items);
-
+    void updatePatientInfoForSeries(const QString& seriesKey, const QVector<QString>& files);
 private:
     QListWidget* mList = nullptr;
 
@@ -83,6 +83,9 @@ private:
 
     // флаг отмены синхронных операций
     bool mCancelScan = false;
+
+    PatientInfo mBasePatientInfo;
+    bool mHasBasePatientInfo = false;
 };
 
 #endif

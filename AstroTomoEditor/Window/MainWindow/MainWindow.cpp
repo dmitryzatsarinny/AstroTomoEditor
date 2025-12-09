@@ -125,13 +125,21 @@ void MainWindow::buildUi()
     pbLay->setContentsMargins(0, 0, 0, 0);
     constexpr int kProgWidth = 180;
 
-    mProgress = new QProgressBar(mProgBox);
-    mProgress->setTextVisible(false);
+    mProgress = new AsyncProgressBar(mProgBox);
     mProgress->setFixedHeight(4);
     mProgress->setFixedWidth(kProgWidth);
-    mProgress->setRange(0, 100);
-    mProgress->setValue(0);
-    mProgBox->setVisible(false);
+    mProgress->hideBar();              // внутреннее состояние Hidden
+    mProgress->setVisible(false);      // по умолчанию не показываем
+
+    // немного подправим палитру, чтобы полоска была светлой
+    {
+        QPalette pal = mProgress->palette();
+        pal.setColor(QPalette::Window, QColor(0, 0, 0, 0));
+        pal.setColor(QPalette::Base, QColor(0, 0, 0, 0));
+        pal.setColor(QPalette::Highlight, QColor(230, 230, 230, 190));
+        mProgress->setPalette(pal);
+    }
+
     pbLay->addWidget(mProgress);
     
     // чтобы место сохранялось даже при hide()
@@ -196,6 +204,7 @@ void MainWindow::buildStyles()
         "  border:1px solid rgba(255,255,255,0.14);"
         "  border-radius:10px;"
         "}\n";
+
 
     // Прозрачный внутренний статус-бар — никаких рамок и углов
     ss += "#InnerStatusBar {"
@@ -321,8 +330,17 @@ void MainWindow::buildStyles()
                     );
                 }
             )";
-
-
+    /*ss += R"(
+        #StatusProgress {
+            background: rgba(255,255,255,0.10);
+            border: none;
+            border-radius: 2px;
+        }
+        #StatusProgress::chunk {
+            background: rgba(255,255,255,0.70);
+            border-radius: 2px;
+        }
+    )";*/
 
     // Если окно развёрнуто — без радиусов
     ss += "#CentralCard[maxed=\"true\"] { border-radius:0; }"
@@ -364,21 +382,31 @@ void MainWindow::wireSignals()
             mStatusText->setText(tr("Render 0%"));
             StartLoading();
             mProgBox->setVisible(true);
-            mProgress->setValue(0);
+            if (mProgress) {
+                mProgress->setVisible(true);
+                mProgress->startFill();                     // детерминированный режим
+                mProgress->setRange(0, 100);
+                mProgress->setValue(0);
+            }
         });
 
     connect(mRenderView, &RenderView::renderProgress, this,
         [this](int processed) {
-            mStatusText->setText(tr("Render progress: %1")
-                .arg(processed));
-            mProgress->setRange(0, std::max(1, 100));
-            mProgress->setValue(std::min(processed, processed));
+            mStatusText->setText(tr("Render progress: %1").arg(processed));
+            if (mProgress) {
+                mProgress->setRange(0, std::max(1, 100));
+                mProgress->setValue(std::clamp(processed, 0, 100));
+            }
         });
 
     connect(mRenderView, &RenderView::renderFinished, this,
         [this]() {
             mStatusText->setText(tr("Render success"));
-            mProgress->setValue(mProgress->maximum());
+            if (mProgress) {
+                mProgress->setValue(mProgress->maximum());
+                mProgress->hideBar();
+                mProgress->setVisible(false);
+            }
             StopLoading();
             QTimer::singleShot(800, this, [this] {
                 mProgBox->setVisible(false);
@@ -390,24 +418,34 @@ void MainWindow::wireSignals()
         this, &MainWindow::showInfo);
 
     connect(mSeries, &SeriesListPanel::scanStarted, this,
-    [this](int total) {
-        mStatusText->setText(tr("DICOM files detection 0%"));
-        StartLoading();
-        mProgBox->setVisible(true);
-        mProgress->setRange(0, std::max(1, total));  // ← переключит из 0..0 в 0..total
-        mProgress->setValue(0);
-    });
+        [this](int total) {
+            mStatusText->setText(tr("DICOM files detection 0%"));
+            StartLoading();
+            mProgBox->setVisible(true);
+            if (mProgress) {
+                mProgress->setVisible(true);
+                if (total > 0) {
+                    mProgress->startFill();
+                    mProgress->setRange(0, std::max(1, total));
+                    mProgress->setValue(0);
+                }
+                else {
+                    mProgress->startLoading();    // пока не знаем total
+                }
+            }
+        });
 
     connect(mSeries, &SeriesListPanel::scanProgress, this,
         [this](int processed, int total, const QString& path) {
 
+            if (!mProgress)
+                return;
+
             if (total <= 0) {
-                // Ещё идёт перечисление файлов — показываем индикатор занято,
-                // чтобы не "залипать" на Prepare to scan
                 mStatusText->setText(tr("Searching… %1 files checked: %2")
                     .arg(processed)
                     .arg(QFileInfo(path).fileName()));
-                mProgress->setRange(0, 0); // индетерминатный режим
+                mProgress->startLoading();         // чистый indeterminate
                 return;
             }
 
@@ -415,6 +453,8 @@ void MainWindow::wireSignals()
             mStatusText->setText(tr("Header reading: %1 (%2%)")
                 .arg(QFileInfo(path).fileName())
                 .arg(pct));
+
+            mProgress->startFill();
             mProgress->setRange(0, std::max(1, total));
             mProgress->setValue(std::min(processed, total));
         });
@@ -422,7 +462,11 @@ void MainWindow::wireSignals()
     connect(mSeries, &SeriesListPanel::scanFinished, this,
         [this](int seriesCount, int /*total*/) {
             mStatusText->setText(tr("Ready. Series: %1").arg(seriesCount));
-            mProgress->setValue(mProgress->maximum());
+            if (mProgress) {
+                mProgress->setValue(mProgress->maximum());
+                mProgress->hideBar();
+                mProgress->setVisible(false);
+            }
             StopLoading();
             QTimer::singleShot(800, this, [this] {
                 mProgBox->setVisible(false);
@@ -436,26 +480,35 @@ void MainWindow::wireSignals()
             mViewerStack->setCurrentWidget(mPlanar);
             mStatusText->setText(tr("Series loading… 0/%1").arg(total));
             mProgBox->setVisible(true);
-            mProgress->setRange(0, std::max(1, total));
-            mProgress->setValue(0);
+            if (mProgress) {
+                mProgress->setVisible(true);
+                mProgress->startFill();
+                mProgress->setRange(0, std::max(1, total));
+                mProgress->setValue(0);
+            }
         });
 
     connect(mPlanar, &PlanarView::loadProgress, this,
         [this](int processed, int total) {
             mStatusText->setText(tr("Series loading… %1/%2").arg(processed).arg(total));
-            mProgress->setRange(0, std::max(1, total));
-            mProgress->setValue(std::min(processed, total));
+            if (mProgress) {
+                mProgress->setRange(0, std::max(1, total));
+                mProgress->setValue(std::min(processed, total));
+            }
         });
 
     connect(mPlanar, &PlanarView::loadFinished, this,
         [this](int total) {
             mStatusText->setText(tr("Loaded: %1 slices").arg(total));
-            mProgress->setValue(mProgress->maximum());
+            if (mProgress) {
+                mProgress->setValue(mProgress->maximum());
+                mProgress->hideBar();
+                mProgress->setVisible(false);
+            }
             mPlanar->StopLoading();
             StopLoading();
             onShowPlanar2D();
-            QTimer::singleShot(1200, this, [this] 
-                {
+            QTimer::singleShot(1200, this, [this] {
                 mProgBox->setVisible(false);
                 mStatusText->setText(tr("Ready"));
                 });
@@ -546,13 +599,17 @@ void MainWindow::onOpenStudy()
 
     mPlanar->sethidescroll();
     mProgBox->setVisible(true);
-    mProgress->setRange(0, 0);
+    if (mProgress) {
+        mProgress->setVisible(true);
+        mProgress->startLoading();  // чистый indeterminate
+    }
     mStatusText->setText(tr("Searching DICOM files…"));
     StartLoading();
 
     qApp->processEvents(QEventLoop::AllEvents);
     QTimer::singleShot(0, this, &MainWindow::startScan);
 }
+
 
 void MainWindow::showInfo(const QString& text)
 {
@@ -630,7 +687,8 @@ void MainWindow::onExitRequested()
 void MainWindow::onSeriesPatientInfoChanged(const PatientInfo& info)
 {
     mCurrentPatient = info;
-    if (mTitle) mTitle->setPatientInfo(info);
+    if (mTitle) mTitle->setPatientInfo(mCurrentPatient);
+    if (mPatientDlg) mPatientDlg->setInfo(mCurrentPatient);
 }
 
 void MainWindow::onSeriesActivated(const QString& /*seriesUID*/, const QVector<QString>& files)

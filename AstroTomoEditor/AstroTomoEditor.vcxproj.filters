@@ -122,6 +122,9 @@
     <ClCompile Include="Window\MainWindow\PatientDialog.cpp">
       <Filter>Source Files\Window\MainWindow</Filter>
     </ClCompile>
+    <ClCompile Include="Window\MainWindow\AsyncProgressBar.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -223,6 +226,9 @@
       <Filter>Header Files\Window\Render</Filter>
     </QtMoc>
     <QtMoc Include="Window\MainWindow\PatientDialog.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\AsyncProgressBar.h">
       <Filter>Header Files\Window\MainWindow</Filter>
     </QtMoc>
   </ItemGroup>

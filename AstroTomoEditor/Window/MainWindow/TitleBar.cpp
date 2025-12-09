@@ -32,7 +32,7 @@ TitleBar::TitleBar(QWidget* parent, int typeofwindow, const QString titlename) :
     l->addWidget(mIcon);
 
     mAppTitle = new QLabel(titlename, mLeft);
-    mAppTitle->setStyleSheet("font-weight:600; font-size:20px;");
+    mAppTitle->setStyleSheet("font-weight:600; font-size:20px; color:#e6e6e6");
     mAppTitle->setContentsMargins(0, -3, 0, 0);
     l->addWidget(mAppTitle);
 
@@ -238,7 +238,7 @@ void TitleBar::buildnondefaulttitlebar(const QString titlename)
         l->addWidget(mIcon);
 
         mAppTitle = new QLabel(titlename, mLeft);
-        mAppTitle->setStyleSheet("font-weight:600; font-size:14px;");
+        mAppTitle->setStyleSheet("font-weight:600; font-size:14px; color:#e6e6e6;");
         l->addWidget(mAppTitle);
 
         mLeft->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);

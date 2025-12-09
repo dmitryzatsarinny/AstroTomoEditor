@@ -29,6 +29,7 @@
     <ClCompile Include="Services\Save3DR.cpp" />
     <ClCompile Include="Services\VolumeFix3DR.cpp" />
     <ClCompile Include="Window\Explorer\ExplorerDialog.cpp" />
+    <ClCompile Include="Window\MainWindow\AsyncProgressBar.cpp" />
     <ClCompile Include="Window\MainWindow\DialogShell.cpp" />
     <ClCompile Include="Window\MainWindow\PatientDialog.cpp" />
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
@@ -65,6 +66,7 @@
     <ClInclude Include="Services\Save3DR.h" />
     <ClInclude Include="Services\VolumeFix3DR.h" />
     <QtMoc Include="Window\Render\HistogramDialog.h" />
+    <QtMoc Include="Window\MainWindow\AsyncProgressBar.h" />
     <ClInclude Include="Window\MainWindow\DialogShell.h" />
     <QtMoc Include="Window\MainWindow\PatientDialog.h" />
     <ClInclude Include="Window\Render\HoverDelegate.h" />

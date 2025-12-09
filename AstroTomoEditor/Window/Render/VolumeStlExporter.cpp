@@ -225,12 +225,72 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromVisible(
     if (opt.progress) opt.progress(35, "Classified visible voxels");
     if (!mask) return nullptr;
 
-    mask = CloseAndPadMask(mask, /*radius=*/1);
+    mask = CloseAndPadMask(mask, 0);
     if (opt.progress) opt.progress(50, "Closed mask & padded");
 
     auto poly = ExtractLargestFromMask(mask, opt);
     if (opt.progress) opt.progress(98, "Surface extracted");
     return poly;
+}
+
+vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxels(
+    vtkImageData* binImage, const VisibleExportOptions& opt)
+{
+    if (!binImage) return nullptr;
+    if (opt.progress) opt.progress(5, "Init binary export");
+
+    // 1) Паддинг на 1 воксель, чтобы FlyingEdges не резал края
+    int ext[6];
+    binImage->GetExtent(ext);
+
+    vtkNew<vtkImageConstantPad> pad;
+    pad->SetInputData(binImage);
+    pad->SetConstant(0);
+    pad->SetOutputWholeExtent(
+        ext[0] - 1, ext[1] + 1,
+        ext[2] - 1, ext[3] + 1,
+        ext[4] - 1, ext[5] + 1
+    );
+    if (opt.progress) opt.progress(10, "Padding");
+
+    // 2) Изо-поверхность по бинарному полю
+    vtkNew<vtkFlyingEdges3D> fe;
+    fe->SetInputConnection(pad->GetOutputPort());
+    fe->SetValue(0, 127.5); // 0 vs 255
+    fe->ComputeNormalsOff();
+    fe->ComputeGradientsOff();
+    fe->ComputeScalarsOff();
+    if (opt.progress) opt.progress(35, "Extracting surface");
+
+    // 3) Треугольники
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputConnection(fe->GetOutputPort());
+
+    // 4) Чистка
+    vtkNew<vtkCleanPolyData> clean;
+    clean->SetInputConnection(tri->GetOutputPort());
+    clean->PointMergingOn();
+    if (opt.progress) opt.progress(60, "Cleaning");
+
+    // 5) (опц.) Заполнить мелкие дырки, но НЕ изменять форму
+    vtkNew<vtkFillHolesFilter> fill;
+    fill->SetInputConnection(clean->GetOutputPort());
+    fill->SetHoleSize(500.0); // маленькие дырки; не зашивает огромные пробелы
+    if (opt.progress) opt.progress(75, "Filling small holes");
+
+    // 6) Взять крупнейшую компоненту
+    vtkNew<vtkPolyDataConnectivityFilter> conn;
+    conn->SetInputConnection(fill->GetOutputPort());
+    conn->SetExtractionModeToLargestRegion();
+    conn->Update();
+    if (opt.progress) opt.progress(90, "Largest component");
+
+    // 7) DeepCopy → гарантированная живучесть результатов
+    vtkSmartPointer<vtkPolyData> out = vtkSmartPointer<vtkPolyData>::New();
+    out->DeepCopy(conn->GetOutput());
+    if (opt.progress) opt.progress(100, "Done");
+
+    return out;
 }
 
 

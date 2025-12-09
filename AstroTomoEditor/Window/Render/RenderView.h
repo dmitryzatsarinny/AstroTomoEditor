@@ -115,6 +115,7 @@ private:
     QVector<TF::CustomPreset> mCustom;
     void reloadTfMenu();
     void reloadHistogram();
+    void updateAfterImageChange(bool reattachTools);
 
     bool mOverlaysBuilt{ false };
     bool mOverlaysShown{ false };

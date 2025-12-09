@@ -35,6 +35,7 @@
 #include <Services/DicomRange.h>
 #include <QTimer>
 #include <QLineEdit>
+#include <vtkFlyingEdges3D.h>
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
 VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
@@ -132,13 +133,13 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
     auto style = vtkSmartPointer<InteractorStyleCtrlWheelShiftPan>::New();
     iren->SetInteractorStyle(style);
 
-    auto sc = new QShortcut(QKeySequence(Qt::Key_F10), this);
+    auto sc = new QShortcut(QKeySequence(Qt::Key_F12), this);
     connect(sc, &QShortcut::activated, this, &RenderView::centerOnVolume);
 
     mOrMarker = vtkSmartPointer<vtkOrientationMarkerWidget>::New();
     mOrMarker->SetOrientationMarker(MakeHumanMarker());
     mOrMarker->SetInteractor(mVtk->interactor());
-    mOrMarker->SetViewport(0.0, 0.0, 0.18, 0.18);
+    mOrMarker->SetViewport(0.00, 0.025, 0.15, 0.225);
     mOrMarker->EnabledOn();
     mOrMarker->InteractiveOff();
 
@@ -644,6 +645,71 @@ void RenderView::updateUndoRedoUi()
         : ":/icons/Resources/redo-no.svg"));
 }
 
+static vtkSmartPointer<vtkActor> MakeSurfaceActor(vtkPolyData* pd)
+{
+    if (!pd) return nullptr;
+
+    vtkNew<vtkPolyDataNormals> normals;
+    normals->SetInputData(pd);
+    normals->ConsistencyOn();       // согласованные нормали
+    normals->SplittingOff();        // не ломать по углам
+    normals->ComputePointNormalsOn();
+    normals->ComputeCellNormalsOff();
+    normals->Update();
+
+    vtkNew<vtkPolyDataMapper> mp;
+    mp->SetInputConnection(normals->GetOutputPort());
+    mp->ScalarVisibilityOff();
+
+    vtkNew<vtkActor> ac;
+    ac->SetMapper(mp);
+
+    // ВНЕШНЯЯ сторона (front faces)
+    auto* front = ac->GetProperty();
+    front->SetInterpolationToPhong();
+    front->SetColor(0.98, 0.99, 1.00);
+    front->SetAmbient(0.12);
+    front->SetDiffuse(0.88);
+    front->SetSpecular(0.12);
+    front->SetSpecularPower(24.0);
+    front->SetSpecularColor(1.0, 1.0, 1.0);
+    front->SetOpacity(0.86);           // чуть больше просвета
+    front->BackfaceCullingOff();       // важное условие
+
+    // Бек — светлее и со спекуляром
+    vtkNew<vtkProperty> back;
+    back->SetInterpolationToPhong();
+    back->SetColor(0.75, 0.22, 0.20);  // светлее и теплее
+    back->SetAmbient(0.20);            // «подсветка изнутри»
+    back->SetDiffuse(0.85);
+    back->SetSpecular(0.18);           // добавим блик
+    back->SetSpecularPower(18.0);
+    back->SetSpecularColor(1.0, 0.95, 0.95);
+    back->SetOpacity(0.32);            // чтобы вклад был заметен
+
+    ac->SetBackfaceProperty(back);
+
+    return ac;
+}
+
+
+void RenderView::updateAfterImageChange(bool reattachTools)
+{
+    setMapperInput(mImage);
+    if (reattachTools)
+    {
+        if (mRemoveConn)
+            mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+        if (mScissors)
+            mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+    }
+    updateUndoRedoUi();
+    if (mHistDlg && mHistDlg->isVisible())
+        mHistDlg->refreshFromImage(mImage);
+    if (mVtk && mVtk->renderWindow()) 
+        mVtk->renderWindow()->Render();
+}
+
 void RenderView::commitNewImage(vtkImageData* im)
 {
     // 1) текущий том → в undo (глубокая копия), очистить redo
@@ -660,50 +726,31 @@ void RenderView::commitNewImage(vtkImageData* im)
         mImage = im;
 
     // 3) обновить маппер и перерисовать
-    setMapperInput(mImage);
-    updateUndoRedoUi();
-    if (mHistDlg && mHistDlg->isVisible())
-        mHistDlg->refreshFromImage(mImage);
-    if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
+    updateAfterImageChange(false);
 }
 
 void RenderView::onUndo()
 {
     if (mUndoStack.isEmpty() || !mImage) return;
 
-    // текущий том уедет в Redo
+    // текущий в Redo
     mRedoStack.push_back(cloneImage(mImage));
     auto prev = mUndoStack.takeLast();
 
-    // заменить
     mImage = prev;
-    setMapperInput(mImage);
-    if (mRemoveConn)
-        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
-    if (mScissors)
-        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
-    updateUndoRedoUi();
-    if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
-    if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
+    updateAfterImageChange(true);
 }
 
 void RenderView::onRedo()
 {
     if (mRedoStack.isEmpty() || !mImage) return;
 
-    // текущий → в Undo
+    // текущий в Undo
     mUndoStack.push_back(cloneImage(mImage));
     auto next = mRedoStack.takeLast();
 
     mImage = next;
-    setMapperInput(mImage);
-    if (mRemoveConn)
-        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
-    if (mScissors)
-        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
-    updateUndoRedoUi();
-    if (mHistDlg && mHistDlg->isVisible()) mHistDlg->refreshFromImage(mImage);
-    if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
+    updateAfterImageChange(true);
 }
 
 void RenderView::setToolUiActive(bool on, Action a)
@@ -766,7 +813,12 @@ bool RenderView::ToolModeChanged(Action a)
         a == Action::VoxelEraser || 
         a == Action::VoxelRecovery || 
         a == Action::Minus || 
-        a == Action::Plus))
+        a == Action::Plus ||
+        a == Action::AddBase ||
+        a == Action::FillEmpty ||
+        a == Action::TotalSmoothing ||
+        a == Action::PeelRecovery ||
+        a == Action::SurfaceMapping))
     {
         setToolUiActive(true, a);
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
@@ -801,52 +853,6 @@ bool RenderView::AppModeChanged(App a)
     return false;
 }
 
-static vtkSmartPointer<vtkActor> MakeSurfaceActor(vtkPolyData* pd)
-{
-    if (!pd) return nullptr;
-
-    vtkNew<vtkPolyDataNormals> normals;
-    normals->SetInputData(pd);
-    normals->ConsistencyOn();       // согласованные нормали
-    normals->SplittingOff();        // не ломать по углам
-    normals->ComputePointNormalsOn();
-    normals->ComputeCellNormalsOff();
-    normals->Update();
-
-    vtkNew<vtkPolyDataMapper> mp;
-    mp->SetInputConnection(normals->GetOutputPort());
-    mp->ScalarVisibilityOff();
-
-    vtkNew<vtkActor> ac;
-    ac->SetMapper(mp);
-
-    // ВНЕШНЯЯ сторона (front faces)
-    auto* front = ac->GetProperty();
-    front->SetInterpolationToPhong();
-    front->SetColor(0.98, 0.99, 1.00);
-    front->SetAmbient(0.12);
-    front->SetDiffuse(0.88);
-    front->SetSpecular(0.12);
-    front->SetSpecularPower(24.0);
-    front->SetSpecularColor(1.0, 1.0, 1.0);
-    front->SetOpacity(0.86);           // чуть больше просвета
-    front->BackfaceCullingOff();       // важное условие
-
-    // Бек — светлее и со спекуляром
-    vtkNew<vtkProperty> back;
-    back->SetInterpolationToPhong();
-    back->SetColor(0.75, 0.22, 0.20);  // светлее и теплее
-    back->SetAmbient(0.20);            // «подсветка изнутри»
-    back->SetDiffuse(0.85);
-    back->SetSpecular(0.18);           // добавим блик
-    back->SetSpecularPower(18.0);
-    back->SetSpecularColor(1.0, 0.95, 0.95);
-    back->SetOpacity(0.32);            // чтобы вклад был заметен
-
-    ac->SetBackfaceProperty(back);
-
-    return ac;
-}
 
 void RenderView::clearStlPreview()
 {
@@ -994,7 +1000,7 @@ void RenderView::onBuildStl()
 
 
     
-    mIsoMesh = VolumeStlExporter::BuildFromVisible(mImage, mVolume, opt);
+    mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxels(mImage, opt);
     if (isCtrlDown())
     {
         emit showInfo(tr("Simplify Surface"));
@@ -1456,12 +1462,12 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
 
     DI = Dicom;
 
-    // 2) настраиваем mapper/prop (без тяжёлого рендера пока)
+    // 2) настраиваем mapper/prop
     auto mapper = vtkSmartPointer<vtkGPUVolumeRayCastMapper>::New();
     mapper->SetInputData(image);
     mapper->SetBlendModeToComposite();
-    mapper->SetAutoAdjustSampleDistances(true);   // плавнее/качественнее
-    mapper->SetUseJittering(true);                // убирает полосы, визуально «мягче»
+    mapper->SetAutoAdjustSampleDistances(true);
+    mapper->SetUseJittering(true);
 
     auto ctf = vtkSmartPointer<vtkColorTransferFunction>::New();
     ctf->AddRGBPoint(HistMin, 0, 0, 0);
@@ -1480,7 +1486,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetAmbient(0.05);
     prop->SetDiffuse(0.9);
     prop->SetSpecular(0.1);
-    prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
+    prop->SetInterpolationTypeToLinear();
 
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
@@ -1488,17 +1494,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetScalarOpacityUnitDistance(std::max(0.3 * smin, 1e-3));
     pump(40);
 
-    mShiftValue = 3;
 
-    //// (доп.) градиентная непрозрачность
-    //{
-    //    auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
-    //    gtf->AddPoint(0, 0.00);
-    //    gtf->AddPoint(15, 0.25);
-    //    gtf->AddPoint(60, 0.80);
-    //    prop->SetGradientOpacity(gtf);
-    //}
-    //pump(48);
+    mShiftValue = 3;
 
     // 3) собираем volume и сцену
     auto vol = vtkSmartPointer<vtkVolume>::New();

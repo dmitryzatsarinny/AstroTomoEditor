@@ -9,6 +9,7 @@
 #include <QElapsedTimer>
 #include <Services/CornerGrip.h>
 #include "PatientDialog.h"
+#include "AsyncProgressBar.h"
 
 class QSplitter;
 class QStackedWidget;
@@ -24,6 +25,7 @@ class SeriesListPanel;
 class PlanarView;
 class RenderView;
 class PatientDialog;
+class AsyncProgressBar;
 
 class MainWindow final : public QMainWindow
 {
@@ -96,7 +98,7 @@ private:
     QWidget* mFooter{ nullptr };
     QLabel* mStatusText{ nullptr };
     QWidget* mProgBox{ nullptr };
-    QProgressBar* mProgress{ nullptr };
+    AsyncProgressBar* mProgress{ nullptr };
     CornerGrip* mCornerGrip = nullptr;
 
     bool mLoading = false;

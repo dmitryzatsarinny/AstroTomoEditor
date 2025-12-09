@@ -19,13 +19,14 @@ enum class Action
     AddBase,
     FillEmpty,
     TotalSmoothing,
-    PrepareSurface,
-    ClearSurface,
+    SurfaceMapping,
+    PeelRecovery,
     Plus,
     Minus
 };
 
-enum class App {
+enum class App 
+{
     Histogram,
     Templates,
     Electrodes

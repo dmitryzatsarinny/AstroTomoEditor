@@ -33,8 +33,8 @@ namespace Tools
         QObject::connect(menu->addAction(QObject::tr("AddBase")), &QAction::triggered, [onAction] { onAction(Action::AddBase); });
         QObject::connect(menu->addAction(QObject::tr("FillEmpty")), &QAction::triggered, [onAction] { onAction(Action::FillEmpty); });
         QObject::connect(menu->addAction(QObject::tr("TotalSmoothing")), &QAction::triggered, [onAction] { onAction(Action::TotalSmoothing); });
-        QObject::connect(menu->addAction(QObject::tr("PrepareSurface")), &QAction::triggered, [onAction] { onAction(Action::PrepareSurface); });
-        QObject::connect(menu->addAction(QObject::tr("ClearSurface")), &QAction::triggered, [onAction] { onAction(Action::ClearSurface); });
+        QObject::connect(menu->addAction(QObject::tr("SurfaceMapping")), &QAction::triggered, [onAction] { onAction(Action::SurfaceMapping); });
+        QObject::connect(menu->addAction(QObject::tr("PeelRecovery")), &QAction::triggered, [onAction] { onAction(Action::PeelRecovery); });
         menu->addSeparator();
         QObject::connect(menu->addAction(QObject::tr("Plus")), &QAction::triggered, [onAction] { onAction(Action::Plus); });
         QObject::connect(menu->addAction(QObject::tr("Minus")), &QAction::triggered, [onAction] { onAction(Action::Minus); });

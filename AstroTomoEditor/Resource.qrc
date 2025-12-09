@@ -9,5 +9,6 @@
         <file>Resources/close.svg</file>
         <file>Resources/fullscreen.svg</file>
         <file>Resources/fullscreen-exit.svg</file>
+        <file>Resources/ref.obj</file>
     </qresource>
 </RCC>

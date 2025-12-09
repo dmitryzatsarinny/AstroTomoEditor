@@ -8,6 +8,15 @@
 #include <vtkProperty.h>
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTransform.h>
+#include <vtkOBJReader.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkActor.h>
+#include <vtkAssembly.h>
+#include <vtkPolyData.h>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QDebug>
 
 // материал «пластик»
 static inline void NiceMat(vtkActor* a, double r, double g, double b) {
@@ -53,7 +62,7 @@ static vtkSmartPointer<vtkActor> Ball(const double c[3], double r) {
     return a;
 }
 
-static vtkSmartPointer<vtkAssembly> MakeHumanMarker()
+static vtkSmartPointer<vtkAssembly> MakeHumanMarker2()
 {
     auto assm = vtkSmartPointer<vtkAssembly>::New();
 
@@ -195,4 +204,104 @@ static vtkSmartPointer<vtkAssembly> MakeHumanMarker()
     assm->SetScale(1.0);
     return assm;
 }
+
+
+
+static QString EnsureHumanMarkerObjOnDisk()
+{
+    const QString targetPath = QStringLiteral("C:/Share/Features/Pictures/obj/ref.obj");
+    QFileInfo fi(targetPath);
+
+    // 1. создаём каталог, если его нет
+    QDir dir(fi.path());
+    if (!dir.exists()) {
+        if (!dir.mkpath(".")) {
+            qDebug() << "EnsureHumanMarkerObjOnDisk: can't create dir" << fi.path();
+            return QString();
+        }
+    }
+
+    // 2. если файл уже существует и не пустой — ок, используем его
+    if (fi.exists() && fi.isFile() && fi.size() > 0) {
+        return targetPath;
+    }
+
+    // 3. файла нет — копируем из ресурсов
+    const QString resPath = QStringLiteral(":/icons/Resources/ref.obj");
+    QFile res(resPath);
+    if (!res.open(QIODevice::ReadOnly)) {
+        qDebug() << "EnsureHumanMarkerObjOnDisk: can't open resource" << resPath;
+        return QString();
+    }
+
+    QFile out(targetPath);
+    if (!out.open(QIODevice::WriteOnly)) {
+        qDebug() << "EnsureHumanMarkerObjOnDisk: can't open for write" << targetPath;
+        return QString();
+    }
+
+    const qint64 written = out.write(res.readAll());
+    out.close();
+    res.close();
+
+    if (written <= 0) {
+        qDebug() << "EnsureHumanMarkerObjOnDisk: failed to write data to" << targetPath;
+        return QString();
+    }
+
+    qDebug() << "EnsureHumanMarkerObjOnDisk: copied OBJ to" << targetPath;
+    return targetPath;
+}
+
+// NiceMat как у тебя выше
+
+static vtkSmartPointer<vtkAssembly> MakeHumanMarker()
+{
+    auto assm = vtkSmartPointer<vtkAssembly>::New();
+
+    const QString objPath = EnsureHumanMarkerObjOnDisk();
+    if (objPath.isEmpty()) {
+        qDebug() << "MakeHumanMarker: no OBJ, using empty assembly";
+        return MakeHumanMarker2();
+    }
+
+    auto reader = vtkSmartPointer<vtkOBJReader>::New();
+    const QByteArray pathBA = objPath.toLocal8Bit();
+    reader->SetFileName(pathBA.constData());
+    reader->Update();
+
+    vtkPolyData* poly = reader->GetOutput();
+    if (!poly || poly->GetNumberOfPoints() == 0) {
+        qDebug() << "MakeHumanMarker: OBJ is empty:" << objPath;
+        return MakeHumanMarker2();
+    }
+
+    auto mapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+    mapper->SetInputConnection(reader->GetOutputPort());
+
+    auto actor = vtkSmartPointer<vtkActor>::New();
+    actor->SetMapper(mapper);
+
+    // нормируем размер и центрируем фигурку, чтобы она была аккуратной
+    double b[6];
+    poly->GetBounds(b);
+    const double dx = b[1] - b[0];
+    const double dy = b[3] - b[2];
+    const double dz = b[5] - b[4];
+    const double maxDim = std::max({ dx, dy, dz, 1e-6 });
+
+    const double cx = 0.5 * (b[0] + b[1]);
+    const double cy = 0.5 * (b[2] + b[3]);
+    const double cz = 0.5 * (b[4] + b[5]);
+
+    const double scale = 2.0 / maxDim;
+    actor->SetScale(scale, scale, scale);
+    actor->SetPosition(-cx * scale, -cy * scale, -cz * scale);
+
+    NiceMat(actor, 0.70, 0.90, 0.82); // тот же пластик, что был
+
+    assm->AddPart(actor);
+    return assm;
+}
+
 

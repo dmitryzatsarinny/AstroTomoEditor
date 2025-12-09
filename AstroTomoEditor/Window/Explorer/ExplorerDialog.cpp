@@ -25,6 +25,35 @@ namespace {
             QWidget* popup = v->window();
             if (!popup) popup = v;
 
+            // ---------- палитра попапа + списка ----------
+            QPalette pal = popup->palette();
+            pal.setColor(QPalette::Window, QColor("#1f2023"));           // фон окна
+            pal.setColor(QPalette::Base, QColor("#1f2023"));          // фон списка
+            pal.setColor(QPalette::Text, QColor("#f0f0f0"));          // текст
+            pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
+            pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
+
+            //// ЯРКОЕ выделение через палитру
+            //QPalette pal = v->palette();
+            //pal.setColor(QPalette::Base, QColor("#1f2023"));          // фон списка
+            //pal.setColor(QPalette::Text, QColor("#f0f0f0"));          // текст
+            //pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
+            //pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
+            //v->setPalette(pal);
+
+            popup->setPalette(pal);
+            popup->setAutoFillBackground(true);
+
+            v->setPalette(pal);
+            if (auto* vp = v->viewport()) {
+                vp->setPalette(pal);
+                vp->setAutoFillBackground(true);
+            }
+
+            // на всякий — убираем рамку у контейнера
+            if (auto* fr = qobject_cast<QFrame*>(popup))
+                fr->setFrameStyle(QFrame::NoFrame);
+
             // высота строки
             int rowH = v->sizeHintForRow(0);
             if (rowH <= 0)
@@ -63,13 +92,7 @@ namespace {
 
             v->setMouseTracking(true);
 
-            // ЯРКОЕ выделение через палитру
-            QPalette pal = v->palette();
-            pal.setColor(QPalette::Base, QColor("#1f2023"));          // фон списка
-            pal.setColor(QPalette::Text, QColor("#f0f0f0"));          // текст
-            pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
-            pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
-            v->setPalette(pal);
+            
         }
     };
 
@@ -188,22 +211,24 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     barLy->setContentsMargins(0, 2, 0, 0);
     barLy->setSpacing(8);
 
-    mStatusText = new QLabel(tr("Ready"), mStatusBar);
-    mBusy = new QProgressBar(mStatusBar);
-    mBusy->setRange(0, 0);
-    mBusy->setTextVisible(false);
-    mBusy->setFixedHeight(4);
-    mBusy->setVisible(false);
+    mBusy = new AsyncProgressBar(mStatusBar);
+    mBusy->setVisible(false);      // по умолчанию спрячем
+    mBusy->hideBar();              // внутренний режим Hidden
+    //mBusy->setObjectName("StatusProgress");
 
-    barLy->addWidget(mStatusText, 0);
+    QPalette pal = mBusy->palette();
+    pal.setColor(QPalette::Base, QColor(0, 0, 0, 0));              // фон
+    pal.setColor(QPalette::Window, QColor(0, 0, 0, 0));            // на всякий
+    pal.setColor(QPalette::Highlight, QColor(230, 230, 230, 180)); // цвет "бегущей" полоски
+    pal.setColor(QPalette::HighlightedText, Qt::white);
+    mBusy->setPalette(pal);
+
     barLy->addWidget(mBusy, 0);
     barLy->addStretch();
     barLy->addWidget(m_buttons, 0);
 
     mainLay->addWidget(mStatusBar, 0);
 
-    // ===== ЛОГИКА =====
-    mStatusText->clear();
 
     mOpenTimeout = new QTimer(this);
     mOpenTimeout->setSingleShot(true);
@@ -532,12 +557,21 @@ void ExplorerDialog::navigateTo(const QString& path)
 
 void ExplorerDialog::showBusy(const QString& text)
 {
-    mStatusText->setText(text);
+    Q_UNUSED(text);
+    if (!mBusy)
+        return;
+
+    mBusy->setVisible(true);
+    mBusy->startLoading();
 }
 
 void ExplorerDialog::hideBusy()
 {
-    mStatusText->clear();
+    if (!mBusy)
+        return;
+
+    mBusy->hideBar();
+    mBusy->setVisible(false);
 }
 
 void ExplorerDialog::onDirectoryAboutToChange(const QString& path)
@@ -659,26 +693,42 @@ QString ExplorerDialog::selectedPath() const {
 
 void ExplorerDialog::setStatus(LoadState st, const QString& text)
 {
+    Q_UNUSED(text);
+
     mState = st;
 
-    // Кнопка OK неактивна во время "Opening"
-    if (m_buttons && m_buttons->button(QDialogButtonBox::Ok))
-        m_buttons->button(QDialogButtonBox::Ok)
-        ->setEnabled(st != LoadState::Opening && selectedKind() != SelectionKind::None);
+    // Кнопка OK неактивна, пока "Opening"
+    if (m_buttons && m_buttons->button(QDialogButtonBox::Ok)) {
+        const bool canOk = (st != LoadState::Opening &&
+            selectedKind() != SelectionKind::None);
+        m_buttons->button(QDialogButtonBox::Ok)->setEnabled(canOk);
+    }
 
-    if (!mStatusBar) return; // на всякий случай
+    if (!mStatusBar)
+        return;
 
     if (st == LoadState::Opening) {
-        if (mStatusText) mStatusText->setText(text.isEmpty() ? tr("Opening…") : text);
-        if (mBusy)       mBusy->setVisible(true);
+        if (mBusy) {
+            mBusy->setVisible(true);
+            mBusy->startLoading();
+        }
         mStatusBar->show();
-        if (mOpenTimeout) mOpenTimeout->start(5000); // есть — используем; нет — игнорируем
+
+        if (mOpenTimeout)
+            mOpenTimeout->start(5000);
     }
     else { // Ready
-        if (mOpenTimeout) mOpenTimeout->stop();
+        if (mOpenTimeout)
+            mOpenTimeout->stop();
+
         mPendingPath.clear();
-        if (mStatusText) mStatusText->setText(text.isEmpty() ? tr("Ready") : text);
-        if (mBusy)       mBusy->setVisible(false);
-        mStatusBar->show();  // пусть остаётся видимым с текстом Ready
+
+        if (mBusy) {
+            mBusy->hideBar();
+            mBusy->setVisible(false);
+        }
+
+        mStatusBar->show();
     }
 }
+

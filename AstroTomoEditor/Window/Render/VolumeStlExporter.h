@@ -38,6 +38,9 @@ public:
         vtkVolume* volumeWithTF,
         const VisibleExportOptions& opt = {});
 
+    static vtkSmartPointer<vtkPolyData> BuildFromBinaryVoxels(
+        vtkImageData* binImage, const VisibleExportOptions& opt);
+
     static vtkSmartPointer<vtkPolyData> SimplifySurface(
         vtkPolyData* in, double targetReduction = 0.25, int smoothIter = 10, double passBand = 0.15);
 
