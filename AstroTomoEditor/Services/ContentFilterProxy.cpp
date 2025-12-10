@@ -1,13 +1,32 @@
 ﻿#include "ContentFilterProxy.h"
 #include "DicomSniffer.h"
 
+#include <QFileSystemModel>
+#include <QFileInfo>
+#include <QtConcurrent/QtConcurrentRun>
+#include <QFutureWatcher>
+
 ContentFilterProxy::ContentFilterProxy(QObject* parent)
-	: QSortFilterProxyModel(parent)
+    : QSortFilterProxyModel(parent)
 {
-	setDynamicSortFilter(true);
-	setFilterCaseSensitivity(Qt::CaseInsensitive);
+    setDynamicSortFilter(true);
+    setFilterCaseSensitivity(Qt::CaseInsensitive);
+
+    refilterTimer_ = new QTimer(this);
+    refilterTimer_->setSingleShot(true);
+    refilterTimer_->setInterval(256);
+    connect(refilterTimer_, &QTimer::timeout, this, [this]() {
+        invalidateFilter();
+        });
 }
 
+void ContentFilterProxy::scheduleInvalidate()
+{
+    if (!refilterTimer_)
+        return;
+    if (!refilterTimer_->isActive())
+        refilterTimer_->start();
+}
 
 bool ContentFilterProxy::filterAcceptsRow(int row, const QModelIndex& parent) const
 {
@@ -17,7 +36,8 @@ bool ContentFilterProxy::filterAcceptsRow(int row, const QModelIndex& parent) co
     const QModelIndex idx = fsm->index(row, 0, parent);
     const QFileInfo fi = fsm->fileInfo(idx);
 
-    if (fi.isDir()) return true; // Папки оставляем для навигации
+    if (fi.isDir())
+        return true; // папки не фильтруем
 
     const QString name = fi.fileName();
 
@@ -26,19 +46,18 @@ bool ContentFilterProxy::filterAcceptsRow(int row, const QModelIndex& parent) co
         return name.endsWith(".3dr", Qt::CaseInsensitive);
 
     case DicomFiles:
-        if (name.endsWith(".dcm", Qt::CaseInsensitive))  return true;
+        if (name.endsWith(".dcm", Qt::CaseInsensitive))   return true;
         if (name.endsWith(".dicom", Qt::CaseInsensitive)) return true;
         if (name.endsWith(".ima", Qt::CaseInsensitive))   return true;
         if (DicomSniffer::isDicomdirName(name))           return true;
-        // дальше — только «магия»
+        // дальше только "магия"
         break;
 
     default:
         break;
     }
 
-    // ---- сюда попали только если в режиме DicomFiles и расширение «левое» ----
-
+    // сюда попали, если: режим DicomFiles, расширение "левое"
     if (!checkMagic_)
         return false;
 
@@ -50,16 +69,8 @@ bool ContentFilterProxy::filterAcceptsRow(int row, const QModelIndex& parent) co
     if (it != cache_.end() && it->first == lm)
         return it->second;
 
-    // 2) если ещё есть бюджет — проверяем синхронно
-    if (magicBudgetRemaining_ > 0) {
-        --magicBudgetRemaining_;
-        const bool ok = DicomSniffer::looksLikeDicomFile(path);
-        cache_[path] = qMakePair(lm, ok);
-        return ok;
-    }
-
-    // 3) бюджета нет — ставим в очередь фоновую проверку и пока скрываем
-    if (!pendingAsync_.contains(path)) {
+    // 2) ещё не проверяли – ставим в фон, если есть место в очереди
+    if (pendingAsync_.size() < maxAsyncPerDir_ && !pendingAsync_.contains(path)) {
         pendingAsync_.insert(path);
         QMetaObject::invokeMethod(
             const_cast<ContentFilterProxy*>(this),
@@ -70,16 +81,14 @@ bool ContentFilterProxy::filterAcceptsRow(int row, const QModelIndex& parent) co
         );
     }
 
-    return false;   // до прихода результата не показываем
+    // Пока результата нет – считаем не DICOM и не показываем
+    return false;
 }
-
-#include <QtConcurrent/QtConcurrentRun>
-#include <QFutureWatcher>
 
 void ContentFilterProxy::enqueueMagicCheck(const QString& path,
     const QDateTime& lm)
 {
-    auto* watcher = new QFutureWatcher<bool>(const_cast<ContentFilterProxy*>(this));
+    auto* watcher = new QFutureWatcher<bool>(this);
 
     connect(watcher, &QFutureWatcher<bool>::finished,
         this, [this, watcher, path, lm]() {
@@ -88,7 +97,10 @@ void ContentFilterProxy::enqueueMagicCheck(const QString& path,
 
             pendingAsync_.remove(path);
             cache_[path] = qMakePair(lm, ok);
-            invalidateFilter();   // пересчитать фильтрацию, файл появится/пропадёт
+
+            // Не перефильтровывать мгновенно каждый файл,
+            // а чуть-чуть подождать и сделать один проход.
+            scheduleInvalidate();
         });
 
     watcher->setFuture(QtConcurrent::run([path]() {

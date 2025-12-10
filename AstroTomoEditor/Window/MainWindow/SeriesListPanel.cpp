@@ -219,7 +219,7 @@ public:
     void setInclude3dr(bool on) { mInclude3dr = on; }
 
 public slots:
-    void startScan(const QString& rootPath, const QString& dicomdirPath);
+    void startScan(const QStringList& rootPaths);
     void cancel() { mCancelRequested.store(true, std::memory_order_relaxed); }
 
 signals:
@@ -229,7 +229,7 @@ signals:
 
 private:
     bool shouldCancel() const { return mCancelRequested.load(std::memory_order_relaxed); }
-    SeriesScanResult runScan(const QString& rootPath);
+    SeriesScanResult runScan(const QStringList& rootPaths);
 
     std::atomic_bool mCancelRequested{ false };
     bool mInclude3dr = false;
@@ -483,15 +483,21 @@ void SeriesListPanel::scanDicomDir(const QString& rootPath)
         }
     }
 
+    QStringList roots = DicomParcer::dicomFoldersFromDicomdir(dicomdirPath);
+    if (roots.isEmpty())
+        roots = { baseDir };
+
     ensureWorker();
     abortThumbLoading();
 
     mCancelScan = false;
     mFilesBySeries.clear();
 
-    QMetaObject::invokeMethod(mScanWorker, "startScan", Qt::QueuedConnection,
-        Q_ARG(QString, baseDir),
-        Q_ARG(QString, dicomdirPath));
+    QMetaObject::invokeMethod(
+        mScanWorker, 
+        "startScan", 
+        Qt::QueuedConnection,
+        Q_ARG(QStringList, roots));
 }
 
 static QImage makeThumbImageFromVtkMidSlice(vtkImageData* img)
@@ -731,40 +737,6 @@ static QString makeSeriesKey(vtkDICOMMetaData* d)
 }
 
 
-//struct MiniMeta { QString seriesUID; bool ok; };
-//
-//static MiniMeta readMiniMeta(const QString& fp)
-//{
-//    // DICM — лишь подсказка; если нет — всё равно пробуем парсер
-//    {
-//        QFile f(fp);
-//        if (!f.open(QIODevice::ReadOnly)) return { "", false };
-//        if (f.size() >= 132) {
-//            f.seek(128); char magic[4];
-//            if (f.read(magic, 4) == 4 && ::memcmp(magic, "DICM", 4) == 0) {
-//                // ок, вероятный dicom
-//            }
-//        }
-//    }
-//
-//    auto p = vtkSmartPointer<vtkDICOMParser>::New();
-//    auto d = vtkSmartPointer<vtkDICOMMetaData>::New();
-//    p->SetMetaData(d);
-//    p->SetFileName(fp.toUtf8().constData());
-//    p->Update(); // парсит заголовок; пиксели не грузит
-//
-//    // минимум валидности: наличие размеров или PixelData-тегов (не строгая проверка)
-//    const bool hasSomething =
-//        d->Has(DC::Rows) || d->Has(DC::Columns) ||
-//        d->Has(DC::PixelData) || d->Has(DC::FloatPixelData) || d->Has(DC::DoubleFloatPixelData);
-//
-//    if (!hasSomething) return { "", false };
-//
-//    // ключ серии (реальный или композитный)
-//    const QString key = makeSeriesKey(d);
-//    return { key, !key.isEmpty() };
-//}
-
 static bool tryFillPatientInfo(const QString& fp, PatientInfo& out)
 {
     auto p = vtkSmartPointer<vtkDICOMParser>::New();
@@ -792,65 +764,87 @@ static bool tryFillPatientInfo(const QString& fp, PatientInfo& out)
 
 
 // естественная сортировка имён
-void SeriesScanWorker::startScan(const QString& rootPath, const QString& dicomdirPath)
+void SeriesScanWorker::startScan(const QStringList& rootPaths)
 {
-    Q_UNUSED(dicomdirPath);
     mCancelRequested.store(false, std::memory_order_relaxed);
 
-    SeriesScanResult result = runScan(rootPath);
+    SeriesScanResult result = runScan(rootPaths);
     emit scanCompleted(result);
 }
 
-SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
+SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
 {
     SeriesScanResult result;
 
-    const QFileInfo fi(rootPath);
-    const QString baseDir = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
-
-    // ---------- PASS 1: Обход ФС (кандидаты) ----------
-    QVector<QString> candidates;
-    candidates.reserve(1 << 15);
-
-    QElapsedTimer tick; tick.start();
-    int seen = 0;
-
-    for (QDirIterator it(baseDir,
-        QDir::Files | QDir::Readable | QDir::NoSymLinks | QDir::NoDotAndDotDot,
-        QDirIterator::Subdirectories);
-        it.hasNext(); )
-    {
-        if (shouldCancel()) { result.canceled = true; break; }
-
-        it.next();
-        const QFileInfo fi = it.fileInfo();
-
-        // Пропускаем .3dr, если не включён смешанный режим
-        const QString ext = fi.suffix().toLower();
-        if (ext == "3dr" && !mInclude3dr) continue;
-
-        // Быстрый отсев по размеру
-        const qint64 sz = fi.size();
-        if (sz < 1024 || sz >(1ll << 33)) continue;
-
-        ++seen;
-        if (tick.hasExpired(120)) {
-            emit scanProgress(seen, 0, fi.filePath());  // total=0 => индикатор "занято"
-            tick.restart();
-        }
-
-        candidates.push_back(fi.filePath());
-        if (candidates.size() >= maxfiles) break;
-    }
-
-    if (shouldCancel()) { result.canceled = true; return result; }
-    if (candidates.isEmpty()) {
+    if (rootPaths.isEmpty()) {
         result.totalFiles = 0;
-        emit scanStarted(0);
         return result;
     }
 
-    // ---------- PASS 2: один проход — sniff + парсинг + группировка ----------
+    // ---------- PASS 1: обход нескольких каталогов и сбор кандидатов ----------
+    QVector<QString> candidates;
+    candidates.reserve(1 << 15);
+
+    QElapsedTimer tick;
+    tick.start();
+
+    int seen = 0;
+
+    for (const QString& rootPath : rootPaths)
+    {
+        if (shouldCancel()) { result.canceled = true; return result; }
+
+        QFileInfo fi(rootPath);
+        const QString baseDir = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
+
+        QDirIterator it(
+            baseDir,
+            QDir::Files | QDir::Readable | QDir::NoSymLinks | QDir::NoDotAndDotDot,
+            QDirIterator::Subdirectories
+        );
+
+        while (it.hasNext())
+        {
+            if (shouldCancel()) { result.canceled = true; return result; }
+
+            it.next();
+            const QFileInfo fi = it.fileInfo();
+
+            const QString ext = fi.suffix().toLower();
+            if (ext == "3dr" && !mInclude3dr)
+                continue;
+
+            qint64 sz = fi.size();
+            if (sz < 1024 || sz >(1ll << 33))
+                continue;
+
+            ++seen;
+            if (tick.hasExpired(120)) {
+                emit scanProgress(seen, 0, fi.filePath());
+                tick.restart();
+            }
+
+            candidates.push_back(fi.filePath());
+            if (candidates.size() >= maxfiles)
+                break;
+        }
+
+        if (candidates.size() >= maxfiles)
+            break;
+    }
+
+    if (shouldCancel()) {
+        result.canceled = true;
+        return result;
+    }
+
+    if (candidates.isEmpty()) {
+        emit scanStarted(0);
+        result.totalFiles = 0;
+        return result;
+    }
+
+    // ---------- PASS 2: sniff + metadata parsing + группировка ----------
     emit scanStarted(candidates.size());
 
     struct MapOut {
@@ -864,23 +858,29 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
     QAtomicInt progressed = 0;
 
     auto mapFn = [&](const QString& p) -> MapOut {
-        MapOut out; out.meta.path = p;
+        MapOut out;
+        out.meta.path = p;
         if (shouldCancel()) return out;
 
-        // быстрый sniff (mmap + 16KB)
-        if (!isDicomLikelyFast(p)) return out;
+        if (!isDicomLikelyFast(p))
+            return out;
 
-        // парсим заголовок сразу (без пикселей)
+        // Парсим метаданные
         auto meta = vtkSmartPointer<vtkDICOMMetaData>::New();
         auto parser = vtkSmartPointer<vtkDICOMParser>::New();
         parser->SetMetaData(meta);
         parser->SetFileName(p.toUtf8().constData());
         parser->Update();
 
-        const bool hasGeometry = meta->Has(DC::Rows) || meta->Has(DC::Columns);
+        const bool hasGeometry =
+            meta->Has(DC::Rows) || meta->Has(DC::Columns);
         const bool hasPixel =
-            meta->Has(DC::PixelData) || meta->Has(DC::FloatPixelData) || meta->Has(DC::DoubleFloatPixelData);
-        if (!(hasGeometry || hasPixel)) return out;
+            meta->Has(DC::PixelData) ||
+            meta->Has(DC::FloatPixelData) ||
+            meta->Has(DC::DoubleFloatPixelData);
+
+        if (!(hasGeometry || hasPixel))
+            return out;
 
         out.seriesKey = makeSeriesKey(meta);
         out.ok = !out.seriesKey.isEmpty();
@@ -902,12 +902,15 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
                 out.meta.hasInstance = true;
             }
 
-            out.meta.modality = QString::fromUtf8(meta->Get(DC::Modality).AsString());
-            out.meta.seriesDescription = QString::fromUtf8(meta->Get(DC::SeriesDescription).AsString());
-            out.meta.studyUID = QString::fromUtf8(meta->Get(DC::StudyInstanceUID).AsString());
-            out.meta.seriesNumber = QString::fromUtf8(meta->Get(DC::SeriesNumber).AsString());
+            out.meta.modality =
+                QString::fromUtf8(meta->Get(DC::Modality).AsString());
+            out.meta.seriesDescription =
+                QString::fromUtf8(meta->Get(DC::SeriesDescription).AsString());
+            out.meta.studyUID =
+                QString::fromUtf8(meta->Get(DC::StudyInstanceUID).AsString());
+            out.meta.seriesNumber =
+                QString::fromUtf8(meta->Get(DC::SeriesNumber).AsString());
         }
-
 
         if (out.ok) {
             PatientInfo pi;
@@ -917,14 +920,13 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
             }
         }
 
-        const int k = ++progressed;
-        if ((k & 0x0F) == 0) // апдейт раз в ~256 файлов
+        int k = ++progressed;
+        if ((k & 0x0F) == 0)
             emit scanProgress(k, candidates.size(), p);
 
         return out;
         };
 
-    // Аккумулятор, в который reduce будет СЕРИЙНО писать
     SeriesScanResult acc;
 
     auto reduceFn = [&](SeriesScanResult& a, const MapOut& m) {
@@ -936,110 +938,106 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
         }
         };
 
-    // ВАЖНО: используем blockingMappedReduced + SequentialReduce (убирает гонки)
     acc = QtConcurrent::blockingMappedReduced<SeriesScanResult>(
         candidates, mapFn, reduceFn, QtConcurrent::SequentialReduce);
 
-    if (shouldCancel()) { result.canceled = true; return result; }
+    if (shouldCancel()) {
+        result.canceled = true;
+        return result;
+    }
 
-    // Если ничего не найдено как DICOM — выходим
     if (acc.entriesBySeries.isEmpty()) {
         result.totalFiles = 0;
         return result;
     }
 
-    // Точное кол-во найденных файлов (а не кандидатов)
-    int dicomCount = 0;
-    for (const auto& v : std::as_const(acc.entriesBySeries))
-        dicomCount += v.size();
-    result.totalFiles = dicomCount;
-
-    // ---------- PASS 3: Формирование карточек серий и превью ----------
-    QCollator coll; coll.setNumericMode(true); coll.setCaseSensitivity(Qt::CaseInsensitive);
+    // ---------- PASS 3: группировка, сортировка, превью ----------
+    QCollator coll;
+    coll.setNumericMode(true);
+    coll.setCaseSensitivity(Qt::CaseInsensitive);
 
     QVector<SeriesItem> items;
-    items.reserve(acc.filesBySeries.size());
+    items.reserve(acc.entriesBySeries.size());
 
     const auto keys = acc.entriesBySeries.keys();
     items.reserve(keys.size());
 
-    for (const QString& seriesKey : keys) {
+    for (const QString& seriesKey : keys)
+    {
         if (shouldCancel()) { result.canceled = true; break; }
 
-        QVector<SeriesScanResult::QuickDicomFile> entries = acc.entriesBySeries.value(seriesKey);
+        QVector<SeriesScanResult::QuickDicomFile> entries =
+            acc.entriesBySeries.value(seriesKey);
+
         std::sort(entries.begin(), entries.end(),
-            [&](const SeriesScanResult::QuickDicomFile& a, const SeriesScanResult::QuickDicomFile& b)
-            { return coll.compare(a.fileName, b.fileName) < 0; });
+            [&](const auto& a, const auto& b) {
+                return coll.compare(a.fileName, b.fileName) < 0;
+            });
 
         QVector<QString> sortedPaths;
         sortedPaths.reserve(entries.size());
         QHash<QString, SeriesScanResult::QuickDicomFile> entryByPath;
         entryByPath.reserve(entries.size());
+
         for (const auto& e : entries) {
             sortedPaths.push_back(e.path);
             entryByPath.insert(e.path, e);
         }
 
         QVector<QString> valid = sortedPaths;
-        {
-            auto rep = PlanarView::filterSeriesByConsistency(sortedPaths);
-            if (rep.good.isEmpty()) {
-                const QString mid = pickMiddleSliceFile(entries);
-                valid = mid.isEmpty() ? QVector<QString>{} : QVector<QString>{ mid };
-            }
-            else {
-                valid = rep.good;
-            }
+        auto rep = PlanarView::filterSeriesByConsistency(sortedPaths);
+        if (rep.good.isEmpty()) {
+            QString mid = pickMiddleSliceFile(entries);
+            valid = mid.isEmpty() ? QVector<QString>{} : QVector<QString>{ mid };
+        }
+        else {
+            valid = rep.good;
         }
 
-        auto zForPath = [&](const QString& path) {
-            auto it = entryByPath.constFind(path);
-            if (it == entryByPath.constEnd() || !it->hasZ)
+        auto zForPath = [&](const QString& p) {
+            auto it = entryByPath.find(p);
+            if (it == entryByPath.end() || !it->hasZ)
                 return std::numeric_limits<double>::quiet_NaN();
             return it->z;
             };
 
-        if (!valid.isEmpty())
-        {
-            const double firstZ = zForPath(valid.constFirst());
-            const double lastZ = zForPath(valid.constLast());
+        if (!valid.isEmpty()) {
+            double firstZ = zForPath(valid.first());
+            double lastZ = zForPath(valid.last());
             if (std::isfinite(firstZ) && std::isfinite(lastZ) && firstZ == lastZ) {
-                const QString first = valid.constFirst();
-                valid = { first };
+                valid = { valid.first() };
             }
         }
 
-        acc.filesBySeries[seriesKey] = valid;  // безопасно: мы не используем итератор карты
+        acc.filesBySeries[seriesKey] = valid;
 
         QVector<SeriesScanResult::QuickDicomFile> validEntries;
-        validEntries.reserve(valid.size());
-        for (const auto& p : valid) {
-            auto it = entryByPath.constFind(p);
-            if (it != entryByPath.constEnd())
-                validEntries.push_back(it.value());
-        }
+        for (const auto& p : valid)
+            validEntries.push_back(entryByPath[p]);
 
         SeriesItem s;
         s.seriesKey = seriesKey;
-        s.firstFile = pickMiddleSliceFile(validEntries.isEmpty() ? entries : validEntries);
+        s.firstFile =
+            pickMiddleSliceFile(validEntries.isEmpty() ? entries : validEntries);
         s.numImages = valid.size();
 
         const auto pickMeta = [&]() -> SeriesScanResult::QuickDicomFile {
-            for (const auto& e : validEntries)
-                return e;
-            if (!entries.isEmpty()) return entries.constFirst();
+            for (const auto& x : validEntries) return x;
+            if (!entries.isEmpty()) return entries.first();
             return {};
             }();
 
         s.studyID = pickMeta.studyUID;
         QString desc = pickMeta.seriesDescription;
         if (desc.isEmpty()) {
-            const QString modality = pickMeta.modality;
-            const QString snum = pickMeta.seriesNumber;
-            desc = (modality.isEmpty() && snum.isEmpty()) ? QObject::tr("No Name")
-                : QStringLiteral("%1 %2").arg(modality, snum);
+            QString mod = pickMeta.modality;
+            QString sn = pickMeta.seriesNumber;
+            desc = (mod.isEmpty() && sn.isEmpty())
+                ? QObject::tr("No Name")
+                : QStringLiteral("%1 %2").arg(mod, sn);
         }
         s.description = desc;
+
         s.thumb = SeriesListPanel::makeThumbImageFromDicom(s.firstFile);
         items.push_back(std::move(s));
     }
@@ -1048,29 +1046,39 @@ SeriesScanResult SeriesScanWorker::runScan(const QString& rootPath)
 
     sortSeriesByName(items);
 
-
-
-    // Переносим из acc и отдаём результат
+    // переносим данные в результат
     result.filesBySeries = std::move(acc.filesBySeries);
     result.items = std::move(items);
     result.patientInfo = acc.patientInfo;
     result.patientInfoValid = acc.patientInfoValid;
 
+    int dicomCount = 0;
+    for (const auto& v : result.filesBySeries)
+        dicomCount += v.size();
+    result.totalFiles = dicomCount;
+
     return result;
 }
 
 
+
 void SeriesListPanel::scanStudy(const QString& rootPath)
 {
+    QStringList roots;
+    roots.push_back(rootPath);
+
     ensureWorker();
     abortThumbLoading();
 
     mCancelScan = false;
     mFilesBySeries.clear();
 
-    QMetaObject::invokeMethod(mScanWorker, "startScan", Qt::QueuedConnection,
-        Q_ARG(QString, rootPath),
-        Q_ARG(QString, QString()));
+    QMetaObject::invokeMethod(
+        mScanWorker,
+        "startScan",
+        Qt::QueuedConnection,
+        Q_ARG(QStringList, roots)
+    );
 }
 
 void SeriesListPanel::populate(const QVector<SeriesItem>& items)
