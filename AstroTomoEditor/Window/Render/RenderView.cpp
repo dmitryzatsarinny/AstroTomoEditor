@@ -1486,12 +1486,12 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetAmbient(0.05);
     prop->SetDiffuse(0.9);
     prop->SetSpecular(0.1);
-    prop->SetInterpolationTypeToLinear();
+    prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
 
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
     const double smin = std::min({ sp[0],sp[1],sp[2] });
-    prop->SetScalarOpacityUnitDistance(std::max(0.3 * smin, 1e-3));
+    prop->SetScalarOpacityUnitDistance(std::max(0.3 * smin, 1e-6));
     pump(40);
 
 

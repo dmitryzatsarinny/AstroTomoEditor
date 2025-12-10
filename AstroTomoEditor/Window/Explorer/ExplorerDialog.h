@@ -55,7 +55,7 @@ private slots:                                                  // Раздел 
 
     void onDoubleClicked(const QModelIndex& idx);               // Двойной клик по элементу в дереве: если папка — входим,                                                       // если файл — выбираем и активируем Ok.
 
-    void onSelectionChanged();                                  // Обновляем состояние кнопки Ok при изменении выбора.
+    void onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected);
 
     void onTypeChanged(int index);                              // смена типа
 
@@ -69,7 +69,7 @@ private:
     void populateDrives();                                      // Собрать список доступных логических дисков (C:, D:, ...).
     void navigateTo(const QString& path);                       // Переход к произвольному пути: синхронизирует модель, дерево и combo.
     void applyFiltersForType();                                 // применить фильтры по типу
-    void updateOkState();                                       // Включить/выключить кнопку Ok в зависимости от валидности выбора.
+    void updateOkState(const bool state);                       // Включить/выключить кнопку Ok в зависимости от валидности выбора.
     void setStatus(LoadState st, const QString& text = {});
     void showBusy(const QString& text);
     void hideBusy();

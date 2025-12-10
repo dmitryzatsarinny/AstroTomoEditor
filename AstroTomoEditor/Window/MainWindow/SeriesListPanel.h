@@ -2,7 +2,7 @@
 #ifndef SERIESLISTPANEL_h
 #define SERIESLISTPANEL_h
 
-#include <QWidget>                // ✅ нужно, т.к. наследуемся от QWidget
+#include <QWidget>
 #include "..\..\Services\PatientInfo.h"
 
 #include <QFutureWatcher>

@@ -33,14 +33,6 @@ namespace {
             pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
             pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
 
-            //// ЯРКОЕ выделение через палитру
-            //QPalette pal = v->palette();
-            //pal.setColor(QPalette::Base, QColor("#1f2023"));          // фон списка
-            //pal.setColor(QPalette::Text, QColor("#f0f0f0"));          // текст
-            //pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
-            //pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
-            //v->setPalette(pal);
-
             popup->setPalette(pal);
             popup->setAutoFillBackground(true);
 
@@ -214,6 +206,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     mBusy = new AsyncProgressBar(mStatusBar);
     mBusy->setVisible(false);      // по умолчанию спрячем
     mBusy->hideBar();              // внутренний режим Hidden
+    mBusy->setFixedHeight(4);
     //mBusy->setObjectName("StatusProgress");
 
     QPalette pal = mBusy->palette();
@@ -269,7 +262,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     connect(m_typeCombo, &QComboBox::currentIndexChanged,
         this, &ExplorerDialog::onTypeChanged);
 
-    updateOkState();
+    updateOkState(false);
 
     // ===== СТИЛИ: список, скролл, комбобоксы, чекбокс, кнопки =====
     content->setStyleSheet(
@@ -499,8 +492,6 @@ bool ExplorerDialog::dirHasDicom(const QString& dirPath, int maxProbe) const {
     QDirIterator it(dirPath, QDir::Files | QDir::NoDotAndDotDot);
     int checked = 0;
 
-    const bool allowMagic = (m_magicCheck && m_magicCheck->isChecked());
-
     while (it.hasNext() && checked < std::max(1, maxProbe)) {
         const QString p = it.next();
         const QString name = QFileInfo(p).fileName();
@@ -512,7 +503,7 @@ bool ExplorerDialog::dirHasDicom(const QString& dirPath, int maxProbe) const {
             return true;
 
         // Точная проверка по сигнатуре (дороже, но мы её ограничили maxProbe)
-        if (allowMagic && DicomSniffer::looksLikeDicomFile(p))
+        if (DicomSniffer::looksLikeDicomFile(p))
             return true;
 
         ++checked;
@@ -554,7 +545,7 @@ void ExplorerDialog::navigateTo(const QString& path)
         }
     }
 
-    updateOkState();
+    updateOkState(false);
 }
 
 void ExplorerDialog::showBusy(const QString& text)
@@ -627,19 +618,28 @@ void ExplorerDialog::onDoubleClicked(const QModelIndex& vIdx) {
     }
 
     // файл — если валиден под режим, то OK
-    if (fi.isFile() && selectedKind() != SelectionKind::None) {
+    if (fi.isFile() && m_buttons->button(QDialogButtonBox::Ok)->isChecked()) {
         accept();
     }
 }
 
-void ExplorerDialog::onSelectionChanged()
+void ExplorerDialog::onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
 {
-    updateOkState();                        // Любое изменение выбора -> пересчитать доступность Ok.
+    auto sm = m_view->selectionModel();
+    if (!sm)
+        updateOkState(false);
+
+    // Если после изменения выделения НЕ осталось выделенных строк — выходим
+    if (!sm->hasSelection())
+        updateOkState(false);
+
+    updateOkState(true);                        // Любое изменение выбора -> пересчитать доступность Ok.
 }
 
-void ExplorerDialog::updateOkState() 
+void ExplorerDialog::updateOkState(const bool state) 
 {
-    bool enable = true;
+    bool enable = state;
+    if (enable)
     switch (selectedKind()) 
     {
     case ExplorerDialog::SelectionKind::DicomFile:
@@ -681,10 +681,12 @@ ExplorerDialog::SelectionKind ExplorerDialog::selectedKind() const {
         return SelectionKind::None;
     }
 
-    if (fi.isDir()) {
+    if (fi.isDir()) 
+    {
         if (mode == ContentFilterProxy::DicomFiles && dirHasDicom(path))
             return SelectionKind::DicomFolder;
     }
+
     return SelectionKind::None;
 }
 
@@ -699,13 +701,7 @@ void ExplorerDialog::setStatus(LoadState st, const QString& text)
     Q_UNUSED(text);
 
     mState = st;
-
-    // Кнопка OK неактивна, пока "Opening"
-    if (m_buttons && m_buttons->button(QDialogButtonBox::Ok)) {
-        const bool canOk = (st != LoadState::Opening &&
-            selectedKind() != SelectionKind::None);
-        m_buttons->button(QDialogButtonBox::Ok)->setEnabled(canOk);
-    }
+    m_buttons->button(QDialogButtonBox::Ok)->setEnabled(false);
 
     if (!mStatusBar)
         return;
@@ -720,7 +716,8 @@ void ExplorerDialog::setStatus(LoadState st, const QString& text)
         if (mOpenTimeout)
             mOpenTimeout->start(5000);
     }
-    else { // Ready
+    else 
+    {
         if (mOpenTimeout)
             mOpenTimeout->stop();
 

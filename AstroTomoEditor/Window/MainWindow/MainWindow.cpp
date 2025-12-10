@@ -7,6 +7,7 @@
 #include <Services/Save3DR.h>
 #include <QApplication>
 #include <QEvent>
+#include <QElapsedTimer>
 
 namespace 
 {
@@ -594,10 +595,26 @@ void MainWindow::StopLoading()
     while (QApplication::overrideCursor())
         QApplication::restoreOverrideCursor();
 
-    if (mUiToDisable) mUiToDisable->setEnabled(true);
+    // Пока идёт загрузка, чуть подчистим очередь событий,
+    // чтобы накопленные клики/скроллы не выстрелили сразу после разблокировки.
+    QElapsedTimer flushTimer;
+    flushTimer.start();
+
+    // крутимся не дольше 50 мс, просто обрабатывая все события
+    while (mLoading && flushTimer.elapsed() < 50)
+    {
+        qApp->processEvents(QEventLoop::AllEvents);
+    }
+
+    if (mUiToDisable)
+        mUiToDisable->setEnabled(true);
+
     mLoading = false;
+
+    // Ещё раз обновим UI, но без пользовательского ввода
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
+
 
 void MainWindow::onOpenStudy()
 {

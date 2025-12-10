@@ -27,6 +27,7 @@
 #include <utility>
 #include <limits>
 #include <cmath>
+#include <QSet>
 
 #include <vtkDICOMMetaData.h>
 #include <vtkDICOMParser.h>
