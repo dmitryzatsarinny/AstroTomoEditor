@@ -879,22 +879,10 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 
 // ===== cache / display ======================================================
 
-static inline uchar wl8fast(double v, double min, double max, bool invMono1)
-{
-    int window = max - min;
-    double x = (v - min) * static_cast<double>(HistScale) / window;
-    int y = static_cast<int>(std::floor(x));
-    if (y < HistMin + 1)
-        y = HistMin;
-    if (y > HistMax)
-        y = HistMax;
-    if (invMono1) y = HistMax - y;
-    return static_cast<uchar>(y);
-}
-
 static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, bool invMono1)
 {
-    int window = max - min;
+    double window = std::max(1.0, max - min);
+
     if (TypeOfRecord == CT)
     {
         if (v > max + window)
@@ -902,15 +890,48 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
         else if (v > max - window / 20)
             v = max - window / 20;
     }
-    double x = (v - min) * static_cast<double>(HistScale) / window;
-    int y = static_cast<int>(std::floor(x));
-    if (y < HistMin + 1)
-        y = HistMin;
-    if (y > HistMax)
-        y = HistMax;
-    if (invMono1) y = HistMax - y;
-    return static_cast<uchar>(y);
+
+    // проекция значения в шкалу [HistMin..HistMax]
+    double xf = (v - min) * scale / window;
+    int y = static_cast<int>(std::floor(xf));
+
+    // зажимаем в допустимый диапазон
+    if (y < static_cast<int>(HistMin))
+        y = static_cast<int>(HistMin);
+    if (y > static_cast<int>(HistMax))
+        y = static_cast<int>(HistMax);
+
+    int bin = y;
+
+    // инверсия для MONOCHROME1 в той же шкале
+    if (invMono1)
+        bin = static_cast<int>(HistMin + (HistMax - bin));
+
+    // тут bin гарантированно в [0..255], так что каст безопасен
+    return static_cast<uchar>(bin);
 }
+
+
+//static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, bool invMono1)
+//{
+//    int window = max - min;
+//    if (TypeOfRecord == CT)
+//    {
+//        if (v > max + window)
+//            v = max;
+//        else if (v > max - window / 20)
+//            v = max - window / 20;
+//    }
+//    double x = (v - min) * static_cast<double>(HistScale) / window;
+//    int y = static_cast<int>(std::floor(x));
+//    if (y < HistMin + 1)
+//        y = HistMin;
+//    if (y > HistMax)
+//        y = HistMax;
+//    if (invMono1) y = HistMax - y;
+//    return static_cast<uchar>(y);
+//}
+
 
 void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, bool invertMono1, DicomInfo Dicom)
 {

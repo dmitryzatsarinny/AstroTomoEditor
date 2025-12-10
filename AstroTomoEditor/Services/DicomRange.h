@@ -8,6 +8,7 @@ enum Mode { CT, MRI, CT3DR, MRI3DR};
 constexpr unsigned int HistScale = 256u;
 constexpr unsigned int HistMin = 0u;
 constexpr unsigned int HistMax = 255u;
+constexpr double scale = static_cast<double>(HistMax - HistMin); 
 
 struct DicomInfo 
 {
