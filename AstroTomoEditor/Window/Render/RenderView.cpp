@@ -462,6 +462,7 @@ void RenderView::buildOverlay()
         updateGradientOpacity();
         });
 
+
     topPanel->adjustSize();
     mTopOverlay->resize(topPanel->sizeHint());
     
@@ -692,10 +693,13 @@ static vtkSmartPointer<vtkActor> MakeSurfaceActor(vtkPolyData* pd)
     return ac;
 }
 
-
 void RenderView::updateAfterImageChange(bool reattachTools)
 {
+    if(mVolume)
+        mVolume->GetProperty()->SetInterpolationTypeToNearest();
+
     setMapperInput(mImage);
+
     if (reattachTools)
     {
         if (mRemoveConn)
@@ -1487,7 +1491,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetDiffuse(0.9);
     prop->SetSpecular(0.1);
     prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
-
+    
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
     const double smin = std::min({ sp[0],sp[1],sp[2] });
@@ -1586,7 +1590,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     if (rw) rw->Render();
     pump(96);
 
-    // guard доведёт до 100 и вызовет renderFinished()
+    updateAfterImageChange(false);
 }
 
 void RenderView::applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop,

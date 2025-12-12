@@ -70,9 +70,8 @@ public:
     void setHoverHighlightSizeVoxels(int r) { m_hoverRadiusVoxels = std::max(1, r); }
     void EnsureOriginalSnapshot(vtkImageData* _image);
     void ClearOriginalSnapshot();
-    uint8_t GetAverageVisibleValue();
     uint8_t ReturnAverageVisibleValue() { return AverageVisibleValue; }
-
+    
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
 
@@ -83,7 +82,7 @@ private:
     void redraw();
 
     // ядро
-    
+    void RecoveryNonVisibleVoxels(Volume& volume);
     void makeBinaryMask(vtkImageData* image);  // uchar 0/1
     bool screenToSeedIJK(const QPoint& pDevice, int ijk[3]) const;
     int  floodFill6(const Volume& bin, const int seed[3], std::vector<uint8_t>& mark) const;
@@ -103,7 +102,8 @@ private:
     void PeelRecoveryVolume();
     int FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& mark);
     void ConnectSurfaceToVolume(Volume& volNew, const std::vector<uint8_t>& mark, int shift, uint8_t fillVal);
-    
+    uint8_t GetAverageVisibleValue();
+
     // world-ijk
     bool worldToIJK(const double world[3], int ijk[3]) const;
     void displayToWorld(double xd, double yd, double z01, double out[3]) const;
@@ -195,7 +195,7 @@ private:
     double mLutMin = static_cast<double>(HistMin);
     double mLutMax = static_cast<double>(HistMax);
     int    mLutBins = HistScale;
-    double mVisibleEps = 0.1; // порог по opacity
+    double mVisibleEps = 0.001; // порог по opacity
 
     void  rebuildVisibilityLUT(); // дергаем при attach() и смене TF / hist-mask
     bool  isVisible(const short v) const; // быстрый тест через LUT

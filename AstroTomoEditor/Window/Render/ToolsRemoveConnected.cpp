@@ -178,22 +178,32 @@ void ToolsRemoveConnected::rebuildVisibilityLUT()
 
     for (int v = lo; v <= hi; ++v) {
         const double op = pwf->GetValue(static_cast<double>(v));
-        // либо >0, либо очень маленький eps
         mVisibleLut[v - lo] = (op > mVisibleEps) ? 1 : 0;
     }
 }
 
-bool ToolsRemoveConnected::isVisible(const short v) const
+uint8_t ToolsRemoveConnected::GetAverageVisibleValue()
 {
-    if (mVisibleLut.empty()) return true;
+    const double mid = 0.5 * (mHistLo + mHistHi);
+    double s = std::clamp(mid, mLutMin, mLutMax);
 
-    const int idx = int(v) - int(mLutMin);
-    if (idx < 0 || idx >= (int)mVisibleLut.size())
-        return false;
+    // если вдруг невидим — попробовать сдвинуться вверх/вниз в окне
+    if (!isVisible(s)) {
+        const int steps = 16;
+        const double step = (mHistHi - mHistLo) / double(steps + 1);
+        double x = s;
+        for (int k = 0; k < steps && !isVisible(x); ++k)
+            x += step;
+        if (!isVisible(x)) {
+            x = s;
+            for (int k = 0; k < steps && !isVisible(x); ++k)
+                x -= step;
+        }
+        s = x;
+    }
 
-    return mVisibleLut[size_t(idx)] != 0;
+    return static_cast<uint8_t>(std::clamp(std::lround(s), 0L, 255L));
 }
-
 
 void ToolsRemoveConnected::forwardMouseToVtk(QEvent* e)
 {
@@ -697,14 +707,6 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
         default:
             break;
         }
-
-        auto maskFilter = vtkSmartPointer<vtkImageMask>::New();
-        maskFilter->SetImageInputData(m_image);    // CT
-        maskFilter->SetMaskInputData(m_vol.raw());
-        maskFilter->SetMaskedOutputValue(0u);
-        maskFilter->Update();
-
-        m_vol.raw()->DeepCopy(maskFilter->GetOutput());
     }
 
     if (m_vol.raw())
@@ -1231,7 +1233,7 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
         if (isShell[n])
             volNew.at(n) = 0u;
 
-   
+
     int newSeed[3] = { seedIn[0], seedIn[1], seedIn[2] };
     if (!findNearestNonEmptyConnectedVoxel(volNew.raw(), seedIn, newSeed))
         return;
@@ -2033,27 +2035,129 @@ void ToolsRemoveConnected::ErodeBy6Neighbors(Volume& volume)
             volume.at(idx) = 0u;
 }
 
-uint8_t ToolsRemoveConnected::GetAverageVisibleValue()
+bool ToolsRemoveConnected::isVisible(const short v) const
 {
-    const double mid = 0.5 * (mHistLo + mHistHi);
-    double s = std::clamp(mid, mLutMin, mLutMax);
+    if (mVisibleLut.empty()) return true;
 
-    // если вдруг невидим — попробовать сдвинуться вверх/вниз в окне
-    if (!isVisible(s)) {
-        const int steps = 16;
-        const double step = (mHistHi - mHistLo) / double(steps + 1);
-        double x = s;
-        for (int k = 0; k < steps && !isVisible(x); ++k)
-            x += step;
-        if (!isVisible(x)) {
-            x = s;
-            for (int k = 0; k < steps && !isVisible(x); ++k)
-                x -= step;
+    const int idx = int(v) - int(mLutMin);
+    if (idx < 0 || idx >= (int)mVisibleLut.size())
+        return false;
+
+    return mVisibleLut[size_t(idx)] != 0;
+}
+
+void ToolsRemoveConnected::RecoveryNonVisibleVoxels(Volume& volume)
+{
+    Volume refvol;
+    refvol.clear();
+    refvol.copy(m_image);
+
+    const auto& S = volume.u8();
+    if (!S.valid || !volume.raw())
+        return;
+
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+
+    const size_t slice = size_t(nx) * ny;
+    const size_t total = slice * nz;
+    if (total == 0)
+        return;
+
+    // 1. Обнуляем границы (X/Y/Z)
+    for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i)
+        {
+            volume.at(size_t(j) * nx + i) = 0u;  // Z = 0
+            volume.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u; // Z = nz-1
         }
-        s = x;
+
+    for (int k = 0; k < nz; ++k)
+        for (int i = 0; i < nx; ++i)
+        {
+            volume.at(size_t(k) * slice + i) = 0u; // Y = 0
+            volume.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u; // Y = ny-1
+        }
+
+    for (int k = 0; k < nz; ++k)
+        for (int j = 0; j < ny; ++j)
+        {
+            volume.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;      // X = 0
+            volume.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
+        }
+
+    // 2. Отмечаем НУЛИ, которые рядом с ненулевыми (6-соседство)
+    std::vector<uint8_t> toFill(total, 0);
+
+    for (int k = 1; k < nz - 1; ++k)
+    {
+        const size_t zOff = size_t(k) * slice;
+        for (int j = 1; j < ny - 1; ++j)
+        {
+            const size_t yOff = zOff + size_t(j) * nx;
+            for (int i = 1; i < nx - 1; ++i)
+            {
+                const size_t idx = yOff + size_t(i);
+
+                if (volume.at(idx) != 0u)
+                    continue; // нас интересуют только нули
+
+                const size_t n0 = idx - 1;
+                const size_t n1 = idx + 1;
+                const size_t n2 = idx - nx;
+                const size_t n3 = idx + nx;
+                const size_t n4 = idx - slice;
+                const size_t n5 = idx + slice;
+                const size_t n6 = idx - nx - 1;
+                const size_t n7 = idx - nx + 1;
+                const size_t n8 = idx + nx - 1;
+                const size_t n9 = idx + nx + 1;
+
+                const size_t n10 = idx - slice - 1;
+                const size_t n11 = idx - slice + 1;
+                const size_t n12 = idx + slice - 1;
+                const size_t n13 = idx + slice + 1;
+
+                const size_t n14 = idx - slice - nx;
+                const size_t n15 = idx - slice + nx;
+                const size_t n16 = idx + slice - nx;
+                const size_t n17 = idx + slice + nx;
+
+                if (volume.at(n0) ||
+                    volume.at(n1) ||
+                    volume.at(n2) ||
+                    volume.at(n3) ||
+                    volume.at(n4) ||
+                    volume.at(n5) ||
+                    volume.at(n6) ||
+                    volume.at(n7) ||
+                    volume.at(n8) ||
+                    volume.at(n9) ||
+                    volume.at(n10) ||
+                    volume.at(n11) ||
+                    volume.at(n12) ||
+                    volume.at(n13) ||
+                    volume.at(n14) ||
+                    volume.at(n15) ||
+                    volume.at(n16) ||
+                    volume.at(n17))
+                {
+                    toFill[idx] = 1;
+                }
+            }
+        }
     }
 
-    return static_cast<uint8_t>(std::clamp(std::lround(s), 0L, 255L));
+    for (size_t idx = 0; idx < total; ++idx)
+        if (toFill[idx] && !volume.at(idx) && refvol.at(idx))
+            volume.at(idx) = refvol.at(idx);
+
+    for (size_t i = 0; i < total; i++)
+        if (!volume.at(i))
+            refvol.at(i) = 0;
+
+    volume = refvol;
 }
 
 bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)

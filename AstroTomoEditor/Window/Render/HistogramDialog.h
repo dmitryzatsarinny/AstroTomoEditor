@@ -52,7 +52,7 @@ private:
     // UI
     void buildUi();
     void paintCanvas();
-    void autoRange();
+    void autoRange(bool refresh);
     void setRange(int loBin, int hiBin, bool emitSig);
     void setRangeAxis(double loAxis, double hiAxis, bool emitSig = true);
     GaussianPeak FindSecondPeak(const QVector<double>& s);
@@ -120,6 +120,9 @@ private:
     bool   mAxisFixed{ false };
     double mAxisMin{ 0.0 };
     double mAxisMax{ static_cast<double>(HistMax) };
+
+    int    autoleft = -1;
+    int    autoright = -1;
 
     // выбор пользователя — ВСЕГДА в ДАННЫХ HistMin..HistMax
     int mLo{ static_cast<int>(HistMin) };

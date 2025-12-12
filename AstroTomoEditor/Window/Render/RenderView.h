@@ -37,6 +37,7 @@ class QMenu;
 class TransferFunctionEditor;
 class vtkActor;
 class HistogramDialog;
+class VolumeSurfaceFinder;
 
 enum class ViewPreset { AP, PA, LAO, RAO, L, R };
 

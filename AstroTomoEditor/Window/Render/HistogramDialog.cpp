@@ -121,6 +121,8 @@ static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
 HistogramDialog::HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* image)
     : DialogShell(parent, tr("Histogram")), mImage(image)
 {
+    autoleft = -1;
+    autoright = -1;
     Dicom = DI;
     resize(860, 460);
     buildUi();
@@ -185,13 +187,14 @@ void HistogramDialog::buildUi()
 void HistogramDialog::HideAutoRange(vtkImageData* image)
 {
     refreshFromImage(image);
-    autoRange();
+    autoRange(false);
 }
 
 void HistogramDialog::refreshFromImage(vtkImageData* image)
 {
     mImage = image;
     buildHistogram();
+    autoRange(true);
 
     if (mLo == (int)HistMin && mHi == (int)HistMax)
         emit rangeChanged(mLo, mHi);
@@ -607,7 +610,7 @@ GaussianPeak HistogramDialog::FindSecondPeak(const QVector<double>& s)
     return mSecondPeak;
 }
 
-void HistogramDialog::autoRange()
+void HistogramDialog::autoRange(bool refresh)
 {
     if (mH.isEmpty() || mSmooth.isEmpty()) {
         setRange((int)HistMin, (int)HistMax, true);
@@ -616,6 +619,14 @@ void HistogramDialog::autoRange()
 
     if (Dicom.TypeOfRecord != CT && Dicom.TypeOfRecord != CT3DR) {
         setRange((int)HistMin, (int)HistMax, true);
+        return;
+    }
+
+    
+    if (autoleft != -1 && autoright != -1)
+    {
+        if (!refresh)
+            setRange(autoleft, autoright, true);
         return;
     }
 
@@ -713,7 +724,8 @@ void HistogramDialog::autoRange()
 
     qDebug() << " Right i " << RightBySigma << " axis " << axisFromData(RightBySigma) << " s " << s[RightBySigma];
 
-    setRange(loBin, RightBySigma, true);
+    autoleft = loBin;
+    autoright = RightBySigma;
 }
 
 
