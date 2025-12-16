@@ -87,12 +87,6 @@ static void forwardMouseToWidget(QWidget* target, QMouseEvent* me)
     QCoreApplication::sendEvent(target, &copy);
 }
 
-void ToolsRemoveConnected::removeUnconnected(const std::vector<uint8_t>& selMask)
-{
-    if (!m_vol.u8().valid || !m_vol.raw())
-        return;
-    applyKeepMask(m_vol.raw(), selMask);
-}
 
 void ToolsRemoveConnected::ensureHoverPipeline()
 {
@@ -330,8 +324,9 @@ bool ToolsRemoveConnected::eventFilter(QObject* obj, QEvent* ev)
     {
         auto* me = static_cast<QMouseEvent*>(ev);
         m_lastMouse = me->pos();
+
         updateHover(m_lastMouse);
-        return true; // мы обработали hover
+        return true;
     }
     case QEvent::MouseButtonPress:
     {
@@ -354,9 +349,10 @@ bool ToolsRemoveConnected::eventFilter(QObject* obj, QEvent* ev)
         }
 
         if (me->button() == Qt::LeftButton) {
-            onLeftClick(me->pos()); // pos в координатах overlay == в координатах m_vtk (мы их синхроним)
+            onLeftClick(me->pos());
             return true;
         }
+
         if (me->button() == Qt::RightButton) {
             cancel();
             return true;
@@ -379,32 +375,30 @@ bool ToolsRemoveConnected::eventFilter(QObject* obj, QEvent* ev)
 
 bool ToolsRemoveConnected::handle(Action a)
 {
-    if (a == Action::RemoveUnconnected ||
-        a == Action::RemoveSelected ||
-        a == Action::RemoveConnected ||
-        a == Action::SmartDeleting ||
-        a == Action::VoxelEraser ||
-        a == Action::VoxelRecovery ||
-        a == Action::AddBase ||
-        a == Action::FillEmpty)
+    switch (a)
     {
-        start(a);
+    case Action::RemoveUnconnected:
+    case Action::RemoveSelected:
+    case Action::RemoveConnected:
+    case Action::SmartDeleting:
+    case Action::VoxelEraser:
+    case Action::VoxelRecovery:
+    case Action::AddBase:
+    case Action::FillEmpty:
+        start(a, HoverMode::Default);
         return true;
-    }
-    else if(a == Action::Minus ||
-        a == Action::Plus ||
-        a == Action::TotalSmoothing ||
-        a == Action::PeelRecovery)
-    {
-        startnohover(a);
+
+    case Action::Minus:
+    case Action::Plus:
+    case Action::TotalSmoothing:
+    case Action::PeelRecovery:
+    case Action::SurfaceMapping:
+        start(a, HoverMode::None);
         return true;
+
+    default:
+        return false;
     }
-    else if (a == Action::SurfaceMapping)
-    {
-        startnohover(a);
-        return true;
-    }
-    return false;
 }
 
 void ToolsRemoveConnected::onViewResized()
@@ -557,84 +551,81 @@ void ToolsRemoveConnected::updateHover(const QPoint& pDevice)
 }
 
 
-void ToolsRemoveConnected::start(Action a)
+void ToolsRemoveConnected::start(Action a, HoverMode hm)
 {
+
     if (!m_vtk || !m_renderer || !m_volume || !m_image) return;
 
     // на всякий случай скрыть старый след
     if (mHoverActor) { mHoverActor->SetVisibility(0); mHoverActor->Modified(); }
-
+    
     m_mode = a;
-    m_pts.clear();
-    m_state = State::WaitingClick;
-
-
-    onViewResized();
-    makeBinaryMask(m_image);
-    ensureHoverPipeline();
-    setHoverVisible(false);
-    m_hasHover = false;
-
-    m_overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    m_overlay->removeEventFilter(this);
-    m_overlay->installEventFilter(this);
-    m_overlay->setMouseTracking(true);
-    m_overlay->setCursor(Qt::CrossCursor);
-    m_overlay->setFocus(Qt::OtherFocusReason);
-    m_overlay->show();
-
-    redraw();
-}
-
-void ToolsRemoveConnected::startnohover(Action a)
-{
-    if (!m_vtk || !m_renderer || !m_volume || !m_image) return;
-
-    // на всякий случай скрыть старый след
-    if (mHoverActor) { mHoverActor->SetVisibility(0); mHoverActor->Modified(); }
-
-    m_mode = a;
-    m_state = State::WaitingClick;
-
+    m_hm = hm;
     m_vol.clear();
     m_vol.copy(m_image);
     m_bin.clear();
     makeBinaryMask(m_image);
 
-    switch (m_mode)
+    switch (m_hm)
     {
-    case Action::Plus:
-        PlusVoxels();
-        break;
-    case Action::Minus:
-        MinusVoxels();
-        break;
-    case Action::TotalSmoothing:
-        TotalSmoothingVolume();
-        break;
-    case Action::PeelRecovery:
-        PeelRecoveryVolume();
-        break;
-    default:
+    case HoverMode::None:
+    {
+        switch (m_mode)
+        {
+        case Action::Plus:
+            PlusVoxels();
+            break;
+        case Action::Minus:
+            MinusVoxels();
+            break;
+        case Action::TotalSmoothing:
+            TotalSmoothingVolume();
+            break;
+        case Action::PeelRecovery:
+            PeelRecoveryVolume();
+            break;
+        default:
+            break;
+        }
+
+        if (m_vol.raw())
+            m_vol.raw()->Modified();
+        if (m_onImageReplaced)
+            m_onImageReplaced(m_vol.raw());
+
+        if (m_vtk && m_vtk->renderWindow())
+            m_vtk->renderWindow()->Render();
+
+        const bool wasActive = (m_state != State::Off);
+        if (!wasActive) return;
+
+        m_state = State::Off;
+        m_bin.clear();
+        m_vol.clear();
+
+        if (m_onFinished) m_onFinished();
+    }
+    break;
+    case HoverMode::Default:
+        m_pts.clear();
+        m_state = State::WaitingClick;
+
+        onViewResized();
+        ensureHoverPipeline();
+        setHoverVisible(false);
+        m_hasHover = false;
+
+        m_overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+        m_overlay->removeEventFilter(this);
+        m_overlay->installEventFilter(this);
+        m_overlay->setMouseTracking(true);
+        m_overlay->setCursor(Qt::CrossCursor);
+        m_overlay->setFocus(Qt::OtherFocusReason);
+        m_overlay->show();
+
+        redraw();
         break;
     }
-
-    if (m_vol.raw())
-        m_vol.raw()->Modified();
-    if (m_onImageReplaced)
-        m_onImageReplaced(m_vol.raw());
-
-    if (m_vtk && m_vtk->renderWindow())
-        m_vtk->renderWindow()->Render();
-
-    const bool wasActive = (m_state != State::Off);
-    if (!wasActive) return;
-
-    m_state = State::Off;
-    m_bin.clear();
-    m_vol.clear();
-
-    if (m_onFinished) m_onFinished();
 }
 
 void ToolsRemoveConnected::redraw()
@@ -642,7 +633,6 @@ void ToolsRemoveConnected::redraw()
     if (m_overlay) 
         m_overlay->update();
 }
-
 
 void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
 {
@@ -2210,8 +2200,8 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
             {
                 const size_t idx = yOff + size_t(i);
 
-                if (volume.at(idx) != 0u)
-                    continue; // нас интересуют только нули
+                if (!volume.at(idx))
+                    continue;
 
                 const size_t n0 = idx - 1;
                 const size_t n1 = idx + 1;
@@ -2219,16 +2209,39 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
                 const size_t n3 = idx + nx;
                 const size_t n4 = idx - slice;
                 const size_t n5 = idx + slice;
+                const size_t n6 = idx - nx - 1;
+                const size_t n7 = idx - nx + 1;
+                const size_t n8 = idx + nx - 1;
+                const size_t n9 = idx + nx + 1;
 
-                if (volume.at(n0) ||
-                    volume.at(n1) ||
-                    volume.at(n2) ||
-                    volume.at(n3) ||
-                    volume.at(n4) ||
-                    volume.at(n5))
-                {
-                    toFill[idx] = 1;
-                }
+                const size_t n10 = idx - slice - 1;
+                const size_t n11 = idx - slice + 1;
+                const size_t n12 = idx + slice - 1;
+                const size_t n13 = idx + slice + 1;
+
+                const size_t n14 = idx - slice - nx;
+                const size_t n15 = idx - slice + nx;
+                const size_t n16 = idx + slice - nx;
+                const size_t n17 = idx + slice + nx;
+
+                toFill[n0] = 1;
+                toFill[n1] = 1;
+                toFill[n2] = 1;
+                toFill[n3] = 1;
+                toFill[n4] = 1;
+                toFill[n5] = 1;
+                toFill[n6] = 1;
+                toFill[n7] = 1;
+                toFill[n8] = 1;
+                toFill[n9] = 1;
+                toFill[n12] = 1;
+                toFill[n10] = 1;
+                toFill[n11] = 1;
+                toFill[n13] = 1;
+                toFill[n14] = 1;
+                toFill[n15] = 1;
+                toFill[n16] = 1;
+                toFill[n17] = 1;
             }
         }
     }
@@ -2237,50 +2250,8 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
     const uint8_t average = GetAverageVisibleValue();
 
     for (size_t idx = 0; idx < total; ++idx)
-    {
         if (toFill[idx] && !volume.at(idx))
-        {
-            const size_t n0 = idx - 1;
-            const size_t n1 = idx + 1;
-            const size_t n2 = idx - nx;
-            const size_t n3 = idx + nx;
-            const size_t n4 = idx - slice;
-            const size_t n5 = idx + slice;
-            const size_t n6 = idx - nx - 1;
-            const size_t n7 = idx - nx + 1;
-            const size_t n8 = idx + nx - 1;
-            const size_t n9 = idx + nx + 1;
-
-            const size_t n10 = idx - slice - 1;
-            const size_t n11 = idx - slice + 1;
-            const size_t n12 = idx + slice - 1;
-            const size_t n13 = idx + slice + 1;
-
-            const size_t n14 = idx - slice - nx;
-            const size_t n15 = idx - slice + nx;
-            const size_t n16 = idx + slice - nx;
-            const size_t n17 = idx + slice + nx;
-
-            volume.at(n0) = average;
-            volume.at(n1) = average;
-            volume.at(n2) = average;
-            volume.at(n3) = average;
-            volume.at(n4) = average;
-            volume.at(n5) = average;
-            volume.at(n6) = average;
-            volume.at(n7) = average;
-            volume.at(n8) = average;
-            volume.at(n9) = average;
-            volume.at(n10) = average;
-            volume.at(n11) = average;
-            volume.at(n12) = average;
-            volume.at(n13) = average;
-            volume.at(n14) = average;
-            volume.at(n15) = average;
-            volume.at(n16) = average;
-            volume.at(n17) = average;
-        }   
-    }
+            volume.at(idx) = average;
 
     return true;
 }
@@ -2288,6 +2259,7 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
 void ToolsRemoveConnected::MinusVoxels()
 {
     if (!m_vol.u8().valid || !m_vol.raw()) return;
+    if (CountNonZero(m_bin) == 0) return; // нет видимых вокселей — ничего не делать
 
     const size_t total = m_vol.u8().size();
 
@@ -2306,22 +2278,15 @@ void ToolsRemoveConnected::MinusVoxels()
 void ToolsRemoveConnected::PlusVoxels()
 {
     if (!m_vol.u8().valid || !m_vol.raw()) return;
+    if (CountNonZero(m_vol) == 0) return; // нет видимых вокселей — нечего расширять
 
     const size_t total = m_vol.u8().size();
 
     Volume volNew;
     volNew.copy(m_vol.raw());
 
-    for (size_t n = 0; n < total; ++n)
-        if (!m_bin.at(n))
-            volNew.at(n) = 0;
-
     if (!AddBy6Neighbors(volNew))
         return;
-
-    for (size_t n = 0; n < total; ++n)
-        if (!m_bin.at(n) && volNew.at(n))
-            m_vol.at(n) = volNew.at(n);
 
     m_vol = volNew;
 }
@@ -3162,6 +3127,7 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
     m_vol = volNew;
 }
 
+
 int ToolsRemoveConnected::FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& mark)
 {
     if (!volNew.u8().valid || !volNew.raw())
@@ -3369,6 +3335,65 @@ int ToolsRemoveConnected::FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& 
     }
 
     return fillVal;
+}
+
+int ToolsRemoveConnected::floodFill6MultiSeed(const Volume& bin,
+    const std::vector<size_t>& seeds,
+    std::vector<uint8_t>& mark) const
+{
+    const auto& S = bin.u8();
+    if (!S.valid || !S.p0) return 0;
+
+    const int* ext = S.ext;
+    const int nx = S.nx, ny = S.ny, nz = S.nz;
+    const size_t total = size_t(nx) * ny * nz;
+
+    mark.assign(total, 0);
+
+    std::queue<size_t> q;
+
+    auto pushSeed = [&](size_t w) {
+        if (w >= total) return;
+        if (mark[w]) return;
+        if (bin.at(w) == 0u) return;
+        mark[w] = 1;
+        q.push(w);
+        };
+
+    for (size_t w : seeds)
+        pushSeed(w);
+
+    if (q.empty()) return 0;
+
+    static const int N6[6][3] = {
+        {+1,0,0},{-1,0,0},{0,+1,0},{0,-1,0},{0,0,+1},{0,0,-1}
+    };
+
+    int visited = 0;
+    while (!q.empty())
+    {
+        const size_t idx = q.front(); q.pop();
+        ++visited;
+
+        int i, j, k;
+        ijkFromLinear(idx, ext, nx, ny, i, j, k);
+
+        for (auto& d : N6)
+        {
+            const int ni = i + d[0], nj = j + d[1], nk = k + d[2];
+            if (ni<ext[0] || ni>ext[1] || nj<ext[2] || nj>ext[3] || nk<ext[4] || nk>ext[5])
+                continue;
+
+            const size_t w = linearIdx(ni, nj, nk, ext, nx, ny);
+            if (w >= total) continue;
+            if (mark[w]) continue;
+            if (bin.at(w) == 0u) continue;
+
+            mark[w] = 1;
+            q.push(w);
+        }
+    }
+    return visited;
 }
 
 void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
@@ -3579,316 +3604,5 @@ void ToolsRemoveConnected::applyRemoveSelected(const std::vector<uint8_t>& selMa
     {
         if (selMask[n])
             m_vol.at(n) = 0u;
-    }
-}
-
-
-
-int ToolsRemoveConnected::peelOnce(const std::vector<uint8_t>& inMask,
-    std::vector<uint8_t>& outMask,
-    const int ext[6]) const
-{
-    const int nx = ext[1] - ext[0] + 1, ny = ext[3] - ext[2] + 1, nz = ext[5] - ext[4] + 1;
-    auto inExt = [&](int i, int j, int k)->bool {
-        return (i >= ext[0] && i <= ext[1] && j >= ext[2] && j <= ext[3] && k >= ext[4] && k <= ext[5]);
-        };
-    static const int N6[6][3] = { {+1,0,0},{-1,0,0},{0,+1,0},{0,-1,0},{0,0,+1},{0,0,-1} };
-
-    outMask = inMask; // копия, будем занулять границу
-    int kept = 0;
-
-    for (int k = ext[4]; k <= ext[5]; ++k)
-        for (int j = ext[2]; j <= ext[3]; ++j)
-            for (int i = ext[0]; i <= ext[1]; ++i) {
-                const size_t w = linearIdx(i, j, k, ext, nx, ny);
-                if (!inMask[w]) continue;
-
-                bool boundary = false;
-                for (auto& d : N6) {
-                    const int ni = i + d[0], nj = j + d[1], nk = k + d[2];
-                    if (!inExt(ni, nj, nk) || !inMask[linearIdx(ni, nj, nk, ext, nx, ny)]) { boundary = true; break; }
-                }
-                if (boundary) outMask[w] = 0;
-            }
-
-    for (auto v : outMask) if (v) ++kept;
-    return kept;
-}
-
-void ToolsRemoveConnected::AddBaseTopZ()
-{
-    const auto& S = m_vol.u8();
-    if (!S.valid || !m_vol.raw())
-        return;
-
-    const int* ext = S.ext;
-    const int nx = S.nx;
-    const int ny = S.ny;
-    const int nz = S.nz;
-    if (nx <= 0 || ny <= 0 || nz <= 0)
-        return;
-
-    Volume volNew;
-    volNew.copy(m_vol.raw());
-
-    const uint8_t fillVal = GetAverageVisibleValue();
-    const int shift = 2;
-
-    // 1. Находим "первый сверху" слой с объектом
-    int firstObj = -1;
-    for (int k = ext[5]; k >= ext[4]; --k)
-    {
-        bool sliceHas = false;
-        for (int j = ext[2]; j <= ext[3] && !sliceHas; ++j)
-        {
-            for (int i = ext[0]; i <= ext[1]; ++i)
-            {
-                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
-                if (m_vol.at(idx) != 0u)
-                {
-                    sliceHas = true;
-                    break;
-                }
-            }
-        }
-        if (sliceHas)
-        {
-            firstObj = k;
-            break;
-        }
-    }
-
-    if (firstObj < 0)
-        return; // в объёме вообще нет ненулевых
-    if (firstObj - shift <= ext[4])
-        return; // объект слишком близко к низу, базу рисовать смысла нет
-
-    // 2. Заполняем ВЕСЬ слой firstObj базой
-    for (int j = ext[2]; j <= ext[3]; ++j)
-        for (int i = ext[0]; i <= ext[1]; ++i)
-        {
-            const size_t idxFill = linearIdx(i, j, firstObj, ext, nx, ny);
-            volNew.at(idxFill) = fillVal;
-        }
-
-    const int kMinCheck = std::max(ext[4], firstObj - shift);
-
-    // 3. Первый проход (как у тебя) – "слева-направо, сверху-вниз"
-    for (int i = ext[0]; i <= ext[1]; ++i)
-        for (int j = ext[2]; j <= ext[3]; ++j)
-        {
-            bool findVoxel = false;
-            for (int k = firstObj - 1; k >= kMinCheck; --k)
-            {
-                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
-                if (m_vol.at(idx) != 0u)
-                {
-                    findVoxel = true;
-                    break;
-                }
-            }
-            if (findVoxel)
-                continue;
-
-            const size_t idxFill = linearIdx(i, j, firstObj, ext, nx, ny);
-            volNew.at(idxFill) = 0u;
-        }
-
-    // 4. Второй проход – в обратном направлении (как у тебя)
-    for (int i = ext[1]; i >= ext[0]; --i)
-        for (int j = ext[3]; j >= ext[2]; --j)
-        {
-            bool findVoxel = false;
-            for (int k = firstObj - 1; k >= kMinCheck; --k)
-            {
-                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
-                if (m_vol.at(idx) != 0u)
-                {
-                    findVoxel = true;
-                    break;
-                }
-            }
-            if (findVoxel)
-                continue;
-
-            const size_t idxFill = linearIdx(i, j, firstObj, ext, nx, ny);
-            volNew.at(idxFill) = 0u;
-        }
-
-    // 5. Копируем маску слоя firstObj на слой ниже (firstObj-1),
-    //    чтобы база была толщиной 2 вокселя
-    if (firstObj - 1 >= ext[4])
-    {
-        for (int j = ext[2]; j <= ext[3]; ++j)
-            for (int i = ext[0]; i <= ext[1]; ++i)
-            {
-                const size_t idxTop = linearIdx(i, j, firstObj, ext, nx, ny);
-                const size_t idxBot = linearIdx(i, j, firstObj - 1, ext, nx, ny);
-                if (volNew.at(idxTop))
-                    volNew.at(idxBot) = volNew.at(idxTop);
-            }
-    }
-
-    m_vol = volNew;
-}
-
-int ToolsRemoveConnected::keepOnlyConnectedFromSeed(std::vector<uint8_t>& mask,
-    const int ext[6],
-    const int seed[3]) const
-{
-    const int nx = ext[1] - ext[0] + 1;
-    const int ny = ext[3] - ext[2] + 1;
-    const int nz = ext[5] - ext[4] + 1;
-
-    auto inExt = [&](int i, int j, int k) -> bool {
-        return (i >= ext[0] && i <= ext[1] &&
-            j >= ext[2] && j <= ext[3] &&
-            k >= ext[4] && k <= ext[5]);
-        };
-
-    if (!inExt(seed[0], seed[1], seed[2])) {
-        std::fill(mask.begin(), mask.end(), 0);
-        return 0;
-    }
-
-    const size_t total = mask.size();
-    if (total == 0)
-        return 0;
-
-    const size_t seedIdx = linearIdx(seed[0], seed[1], seed[2], ext, nx, ny);
-    if (seedIdx >= total || mask[seedIdx] == 0) {
-        // seed попал в пустую ячейку данной маски
-        std::fill(mask.begin(), mask.end(), 0);
-        return 0;
-    }
-
-    std::vector<uint8_t> out(total, 0);
-
-    struct V { int i, j, k; };
-    std::queue<V> q;
-    q.push({ seed[0], seed[1], seed[2] });
-    out[seedIdx] = 1;
-
-    static const int N6[6][3] = {
-        {+1,0,0},{-1,0,0},
-        {0,+1,0},{0,-1,0},
-        {0,0,+1},{0,0,-1}
-    };
-
-    int visited = 0;
-
-    while (!q.empty()) {
-        V v = q.front(); q.pop();
-        ++visited;
-
-        for (const auto& d : N6) {
-            const int ni = v.i + d[0];
-            const int nj = v.j + d[1];
-            const int nk = v.k + d[2];
-            if (!inExt(ni, nj, nk))
-                continue;
-
-            const size_t w = linearIdx(ni, nj, nk, ext, nx, ny);
-            if (w >= total)
-                continue;
-
-            if (!mask[w])       // вне исходной маски
-                continue;
-            if (out[w])         // уже посещён
-                continue;
-
-            out[w] = 1;
-            q.push({ ni, nj, nk });
-        }
-    }
-
-    if (visited > 0)
-        mask.swap(out);
-    else
-        std::fill(mask.begin(), mask.end(), 0);
-
-    return visited;
-}
-
-int ToolsRemoveConnected::smartPeel(std::vector<uint8_t>& mask,
-    const std::vector<uint8_t>& /*selMask*/,
-    const int ext[6],
-    const int seed[3],
-    double dropFrac,
-    int maxIters) const
-{
-    // держим connectivity к seed после каждого шага
-    int prevCnt = keepOnlyConnectedFromSeed(mask, ext, seed);
-    if (prevCnt <= 0) return 0;
-
-    int did = 0;
-    for (int it = 0; it < maxIters; ++it) {
-        std::vector<uint8_t> peeled;
-        int afterPeel = peelOnce(mask, peeled, ext);
-        if (afterPeel == 0) break;
-
-        // оставляем только связную с seed часть
-        int selCnt = keepOnlyConnectedFromSeed(peeled, ext, seed);
-        if (selCnt <= 0) break;
-
-        const double ratio = (prevCnt > 0) ? double(selCnt) / double(prevCnt) : 0.0;
-        ++did;
-        mask.swap(peeled);
-        prevCnt = selCnt;
-
-        if (ratio < (1.0 - dropFrac)) break; // резкое падение — хватит
-    }
-    return did;
-}
-
-void ToolsRemoveConnected::applyKeepMask(vtkImageData* image,
-    const std::vector<uint8_t>& keepMask) const
-{
-    if (!image) return;
-    int ext[6]; image->GetExtent(ext);
-    const int nx = ext[1] - ext[0] + 1, ny = ext[3] - ext[2] + 1, nz = ext[5] - ext[4] + 1;
-
-    auto* p0 = static_cast<unsigned char*>(image->GetScalarPointer(ext[0], ext[2], ext[4]));
-    vtkIdType incX, incY, incZ; image->GetIncrements(incX, incY, incZ);
-
-    for (int k = ext[4]; k <= ext[5]; ++k)
-        for (int j = ext[2]; j <= ext[3]; ++j)
-            for (int i = ext[0]; i <= ext[1]; ++i) {
-                const size_t w = linearIdx(i, j, k, ext, nx, ny);
-                if (!keepMask[w]) {
-                    unsigned char* p = p0 + (i - ext[0]) * incX + (j - ext[2]) * incY + (k - ext[4]) * incZ;
-                    *p = 0u;
-                }
-            }
-}
-
-void ToolsRemoveConnected::recoveryDilate(std::vector<uint8_t>& mask,
-    const std::vector<uint8_t>& selMask,
-    const int ext[6],
-    int iters) const
-{
-    const int nx = ext[1] - ext[0] + 1, ny = ext[3] - ext[2] + 1, nz = ext[5] - ext[4] + 1;
-    static const int N6[6][3] = { {+1,0,0},{-1,0,0},{0,+1,0},{0,-1,0},{0,0,+1},{0,0,-1} };
-    auto inExt = [&](int i, int j, int k)->bool {
-        return (i >= ext[0] && i <= ext[1] && j >= ext[2] && j <= ext[3] && k >= ext[4] && k <= ext[5]);
-        };
-
-    for (int r = 0; r < iters; ++r) {
-        std::vector<size_t> toOne;
-        for (int k = ext[4]; k <= ext[5]; ++k)
-            for (int j = ext[2]; j <= ext[3]; ++j)
-                for (int i = ext[0]; i <= ext[1]; ++i) {
-                    const size_t w = linearIdx(i, j, k, ext, nx, ny);
-                    if (mask[w]) continue;
-                    if (!selMask[w]) continue; // расти только внутри исходной выбранной компоненты
-
-                    for (auto& d : N6) {
-                        const int ni = i + d[0], nj = j + d[1], nk = k + d[2];
-                        if (!inExt(ni, nj, nk)) continue;
-                        if (mask[linearIdx(ni, nj, nk, ext, nx, ny)]) { toOne.push_back(w); break; }
-                    }
-                }
-        if (toOne.empty()) break;
-        for (auto w : toOne) mask[w] = 1;
     }
 }

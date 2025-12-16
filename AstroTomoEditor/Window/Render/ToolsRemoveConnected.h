@@ -10,6 +10,7 @@
 #include "U8Span.h"
 #include <vtkSphereSource.h>
 #include <vtkImplicitPolyDataDistance.h>
+#include <QPolygon.h>
 
 class QWidget;
 class QVTKOpenGLNativeWidget;
@@ -26,6 +27,10 @@ struct ShellVoxelInfo
     double n[3];     // нормаль (единичный вектор)
 };
 
+enum class HoverMode {
+    Default,
+    None
+};
 
 // Клик по объекту => оставить (или удалить) только его связную компоненту.
 class ToolsRemoveConnected : public QObject
@@ -77,8 +82,7 @@ protected:
 
 private:
     void onLeftClick(const QPoint& pDevice);
-    void start(Action a);
-    void startnohover(Action a);
+    void start(Action a, HoverMode hm);
     void redraw();
 
     // ядро
@@ -86,6 +90,7 @@ private:
     void makeBinaryMask(vtkImageData* image);  // uchar 0/1
     bool screenToSeedIJK(const QPoint& pDevice, int ijk[3]) const;
     int  floodFill6(const Volume& bin, const int seed[3], std::vector<uint8_t>& mark) const;
+    int floodFill6MultiSeed(const Volume& bin, const std::vector<size_t>& seeds, std::vector<uint8_t>& mark) const;
     void applyKeepOnlySelected(const std::vector<uint8_t>& mark);
     void applyRemoveSelected(const std::vector<uint8_t>& mark);
     void applyVoxelErase(const int seed[3]);
@@ -107,38 +112,6 @@ private:
     // world-ijk
     bool worldToIJK(const double world[3], int ijk[3]) const;
     void displayToWorld(double xd, double yd, double z01, double out[3]) const;
-   
-    void AddBaseTopZ();
-
-    // Удалить несвязанные области (оставить только выбранную компоненту)
-    void removeUnconnected(const std::vector<uint8_t>& selMask);
-
-    // Снять «кожуру» за один шаг (обнулить граничные воксели mask). Возвращает число единиц в outMask после шага.
-    int peelOnce(const std::vector<uint8_t>& inMask,
-        std::vector<uint8_t>& outMask,
-        const int                   ext[6]) const;
-
-    // Оставить только часть маски, связанную с seed (через floodFill6)
-    int keepOnlyConnectedFromSeed(std::vector<uint8_t>& mask,
-        const int             ext[6],
-        const int             seed[3]) const;
-
-    // Умное снятие кожуры (итерации + порог «резкого падения»). Возвращает число выполненных итераций.
-    int smartPeel(std::vector<uint8_t>& mask,
-        const std::vector<uint8_t>& selMask,
-        const int                   ext[6],
-        const int                   seed[3],
-        double                      dropFrac,
-        int                         maxIters) const;
-
-    // «Recovery»: дилатация внутри исходной выбранной компоненты
-    void recoveryDilate(std::vector<uint8_t>& mask,
-        const std::vector<uint8_t>& selMask,
-        const int                   ext[6],
-        int                         iters) const;
-
-    // Применить бинарную маску к изображению: 0 — обнулить, 1 — оставить
-    void applyKeepMask(vtkImageData* image, const std::vector<uint8_t>& keepMask) const;
 
     // быстрый поиск ближайшего непустого соседа
     bool findNearestNonEmptyConnectedVoxel(vtkImageData* image,
@@ -174,6 +147,7 @@ private:
     Volume        m_bin;
 
     Action m_mode{};
+    HoverMode m_hm{ HoverMode::None };
 
     Volume m_orig;
     bool   m_hasOrig{ false };

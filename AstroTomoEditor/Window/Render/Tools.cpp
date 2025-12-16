@@ -47,13 +47,13 @@ namespace Tools
         switch (a) 
         {
         case Action::Scissors:        return QObject::tr("Scissors");
-        case Action::InverseScissors: return QObject::tr("Inverse scissors");
-        case Action::RemoveUnconnected:return QObject::tr("Remove unconnected");
-        case Action::RemoveSelected: return QObject::tr("Remove selected");
-        case Action::RemoveConnected: return QObject::tr("Remove connected");
-        case Action::SmartDeleting: return QObject::tr("Smart deleting");
-        case Action::VoxelEraser: return QObject::tr("VoxelEraser");
-        case Action::VoxelRecovery: return QObject::tr("VoxelRecovery");
+        case Action::InverseScissors: return QObject::tr("Inverse Scissors");
+        case Action::RemoveUnconnected:return QObject::tr("Remove Unconnected");
+        case Action::RemoveSelected: return QObject::tr("Remove Selected");
+        case Action::RemoveConnected: return QObject::tr("Remove Connected");
+        case Action::SmartDeleting: return QObject::tr("Smart Deleting");
+        case Action::VoxelEraser: return QObject::tr("Voxel Eraser");
+        case Action::VoxelRecovery: return QObject::tr("Voxel Recovery");
         }
         return QObject::tr("Edit");
     }
