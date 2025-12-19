@@ -17,6 +17,7 @@
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Filename).moc</QtMocFileName>
     </ClCompile>
+    <ClCompile Include="Services\AppConfig.cpp" />
     <ClCompile Include="Services\ContentFilterProxy.cpp">
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Filename).moc</QtMocFileName>
@@ -26,15 +27,19 @@
     <ClCompile Include="Services\CornerGrip.cpp" />
     <ClCompile Include="Services\DicomRange.cpp" />
     <ClCompile Include="Services\DicomSniffer.cpp" />
+    <ClCompile Include="Services\LanguageManager.cpp" />
     <ClCompile Include="Services\Save3DR.cpp" />
     <ClCompile Include="Services\VolumeFix3DR.cpp" />
     <ClCompile Include="Window\Explorer\ExplorerDialog.cpp" />
     <ClCompile Include="Window\MainWindow\AsyncProgressBar.cpp" />
     <ClCompile Include="Window\MainWindow\DialogShell.cpp" />
     <ClCompile Include="Window\MainWindow\PatientDialog.cpp" />
+    <ClCompile Include="Window\MainWindow\SettingsDialog.cpp" />
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
     <ClCompile Include="Window\MainWindow\MainWindow.cpp" />
     <ClCompile Include="Window\MainWindow\PlanarView.cpp" />
+    <ClCompile Include="Window\Render\FaceOnlyBoxRepresentation.cpp" />
+    <ClCompile Include="Window\Render\FaceOnlyBoxWidget.cpp" />
     <ClCompile Include="Window\Render\WheelSpinButton.cpp" />
     <QtMoc Include="Window\MainWindow\SeriesListPanel.cpp">
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
@@ -61,7 +66,9 @@
     <ClInclude Include="resource.h" />
     <QtMoc Include="Window\Render\WheelSpinButton.h" />
     <QtMoc Include="Services\CornerGrip.h" />
+    <ClInclude Include="Services\AppConfig.h" />
     <ClInclude Include="Services\DicomRange.h" />
+    <QtMoc Include="Services\LanguageManager.h" />
     <ClInclude Include="Services\PatientInfo.h" />
     <ClInclude Include="Services\Save3DR.h" />
     <ClInclude Include="Services\VolumeFix3DR.h" />
@@ -69,6 +76,9 @@
     <QtMoc Include="Window\MainWindow\AsyncProgressBar.h" />
     <ClInclude Include="Window\MainWindow\DialogShell.h" />
     <QtMoc Include="Window\MainWindow\PatientDialog.h" />
+    <QtMoc Include="Window\MainWindow\SettingsDialog.h" />
+    <ClInclude Include="Window\Render\FaceOnlyBoxRepresentation.h" />
+    <ClInclude Include="Window\Render\FaceOnlyBoxWidget.h" />
     <ClInclude Include="Window\Render\HoverDelegate.h" />
     <ClInclude Include="Window\Render\Tools.h" />
     <QtMoc Include="Window\Render\ToolsScissors.h" />
@@ -92,6 +102,7 @@
     <QtMoc Include="Window\Explorer\ExplorerDialog.h" />
   </ItemGroup>
   <ItemGroup>
+    <QtRcc Include="..\i18n\i18n.qrc" />
     <QtRcc Include="Resource.qrc">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
     </QtRcc>

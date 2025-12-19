@@ -3,12 +3,14 @@
 #include <QStyle>
 #include <QMouseEvent>
 
-TitleBar::TitleBar(QWidget* parent, int typeofwindow, const QString titlename) : QWidget(parent)
+
+TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlename) : QWidget(parent)
 {
     if (typeofwindow)
     {
-        buildnondefaulttitlebar(titlename);
+        buildnondefaulttitlebar(titlename, typeofwindow);
         initDragFilters();
+        retranslateUi();
         return;
     }
 
@@ -130,6 +132,11 @@ TitleBar::TitleBar(QWidget* parent, int typeofwindow, const QString titlename) :
         };
 
 
+    mBtnSettings = makeBtn(mRight);
+    mBtnSettings->setIcon(QIcon(":/icons/Resources/settings.svg"));
+    mBtnSettings->setIconSize(QSize(18, 18));
+    r->addWidget(mBtnSettings);
+
     mBtnMax = makeBtn(mRight);
     mBtnMax->setIcon(QIcon(":/icons/Resources/fullscreen.svg"));
     mBtnMax->setIconSize(QSize(15, 15));
@@ -182,6 +189,7 @@ TitleBar::TitleBar(QWidget* parent, int typeofwindow, const QString titlename) :
     connect(mPatientBtn, &QToolButton::clicked, this, &TitleBar::patientClicked);
     connect(mBtn3D, &QToolButton::clicked, this, &TitleBar::volumeClicked);
     connect(mBtn2D, &QToolButton::clicked, this, &TitleBar::planarClicked);
+    connect(mBtnSettings, &QToolButton::clicked, this, &TitleBar::settingsClicked);
     connect(mBtnMax, &QToolButton::clicked, this, [this] {
         if (!window()) return;
         window()->isMaximized() ? window()->showNormal() : window()->showMaximized();
@@ -196,6 +204,8 @@ TitleBar::TitleBar(QWidget* parent, int typeofwindow, const QString titlename) :
     QTimer::singleShot(0, this, [this] { updateMaximizeIcon(); });
 
     initDragFilters();
+
+    retranslateUi();
 }
 
 void TitleBar::initDragFilters()
@@ -206,7 +216,7 @@ void TitleBar::initDragFilters()
     // все дочерние виджеты, кроме «кнопочных», тоже вешаем на фильтр
     const auto kids = findChildren<QWidget*>();
     for (QWidget* w : kids) {
-        if (w == mBtnClose || w == mBtnMax ||
+        if (w == mBtnClose || w == mBtnMax || w == mBtnSettings ||
             w == mPatientBtn || w == mBtn2D ||
             w == mBtn3D || w == mBtnSave3DR)
         {
@@ -217,7 +227,7 @@ void TitleBar::initDragFilters()
 }
 
 
-void TitleBar::buildnondefaulttitlebar(const QString titlename)
+void TitleBar::buildnondefaulttitlebar(const QString titlename, const int typeofwindow)
 {
         setFixedHeight(30);
         setObjectName("TitleBar");
@@ -268,6 +278,18 @@ void TitleBar::buildnondefaulttitlebar(const QString titlename)
             );
             return b;
             };
+
+        if (typeofwindow == WindowType::Explorer)
+        {
+            mBtnSettings = makeSmallBtn(mRight);
+            mBtnSettings->setIcon(QIcon(":/icons/Resources/settings.svg"));
+            mBtnSettings->setIconSize(QSize(18, 18));
+            r->addWidget(mBtnSettings);
+
+            connect(mBtnSettings, &QPushButton::clicked, this, [this] {
+                emit settingsClicked();
+                });
+        }
 
         mBtnClose = makeSmallBtn(mRight);
         mBtnClose->setIcon(QIcon(":/icons/Resources/close.svg"));
@@ -411,7 +433,7 @@ void TitleBar::setPatientInfo(const PatientInfo& info)
     auto formatName = [](const QString& fullName) -> QString {
         QStringList parts = fullName.split(' ', Qt::SkipEmptyParts);
         if (parts.isEmpty())
-            return QStringLiteral("No Patient");
+            return QStringLiteral("No patient");
 
         QString fam = parts.value(0);
         QString ini;
@@ -424,7 +446,7 @@ void TitleBar::setPatientInfo(const PatientInfo& info)
         };
 
     const QString line = info.patientName.isEmpty()
-        ? tr("No Patient")
+        ? tr("No patient")
         : tr("Patient: %1").arg(formatName(info.patientName));
 
     mPatientBtn->setText(line);
@@ -484,4 +506,24 @@ void TitleBar::updateMaximizeIcon() {
     if (!w || !style()) return;
     const bool maxed = w->isMaximized();
     mBtnMax->setIcon(maxed ? QIcon(":/icons/Resources/fullscreen-exit.svg") : QIcon(":/icons/Resources/fullscreen.svg"));
+}
+
+
+void TitleBar::changeEvent(QEvent* e)
+{
+    QWidget::changeEvent(e);
+    if (e->type() == QEvent::LanguageChange)
+        retranslateUi();
+}
+
+void TitleBar::retranslateUi()
+{
+    if (mBtnSave3DR) {
+        mBtnSave3DR->setToolTip(tr("Save 3DR (Ctrl+S)"));
+        mBtnSave3DR->setText(tr("Save 3DR"));
+    }
+
+    if (mBtnSettings) mBtnSettings->setToolTip(tr("Settings"));
+    if (mBtnClose)    mBtnClose->setToolTip(tr("Close"));
+    if (mBtnMax)      mBtnMax->setToolTip(window() && window()->isMaximized() ? tr("Restore") : tr("Maximize"));
 }

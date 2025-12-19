@@ -620,7 +620,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         pump();
 
         if (errObs1->hasError || !mdReader->GetMetaData()) {
-            emit showWarning(tr("DICOM metadata read failed."));
+            emit showWarning(tr("DICOM metadata read failed"));
             mScroll->setRange(0, 0);
             emit loadFinished(0);
             return;
@@ -652,7 +652,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             pump();
 
             if (errObs2->hasError || !pixReader->GetOutput()) {
-                emit showWarning(tr("DICOM read failed."));
+                emit showWarning(tr("DICOM read failed"));
                 mScroll->setRange(0, 0);
                 emit loadFinished(0);
                 return;
@@ -700,7 +700,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             pump();
 
             if (errObs2->hasError || !gdcm->GetOutput()) {
-                emit showWarning(tr("GDCM decode failed."));
+                emit showWarning(tr("GDCM decode failed"));
                 mScroll->setRange(0, 0);
                 emit loadFinished(0);
                 return;
@@ -1096,7 +1096,6 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
     }
 }
 
-
 void PlanarView::setSlice(int i)
 {
     if (mSlices.isEmpty()) return;
@@ -1164,7 +1163,7 @@ bool PlanarView::readPixelKeyQuick(const QString& file, DicomPixelKey& out, QStr
 
     vtkDICOMMetaData* meta = r->GetMetaData();
     if (!meta) {
-        if (errMsg) *errMsg = tr("No metadata.");
+        if (errMsg) *errMsg = tr("No metadata");
         return false;
     }
 
@@ -1179,7 +1178,7 @@ bool PlanarView::readPixelKeyQuick(const QString& file, DicomPixelKey& out, QStr
     out.photometric = QString::fromStdString(val(Tag(0x0028, 0x0004)).AsString());
 
     if (out.rows <= 0 || out.cols <= 0) {
-        if (errMsg) *errMsg = tr("Invalid pixel geometry.");
+        if (errMsg) *errMsg = tr("Invalid pixel geometry");
         return false;
     }
     return true;
@@ -1223,7 +1222,7 @@ PlanarView::filterSeriesByConsistency(const QVector<QString>& files)
     ValidationReport rep;
     if (bestSize <= 0) {
         rep.bad = files;
-        rep.reason = QObject::tr("No consistent pixel geometry in series.");
+        rep.reason = QObject::tr("No consistent pixel geometry in series");
         return rep;
     }
 
@@ -1235,7 +1234,7 @@ PlanarView::filterSeriesByConsistency(const QVector<QString>& files)
     rep.bad += failed;
 
     if (!rep.bad.isEmpty())
-        rep.reason = QObject::tr("Filtered %1 inconsistent file(s) by pixel geometry.")
+        rep.reason = QObject::tr("Filtered %1 inconsistent file(s) by pixel geometry")
         .arg(rep.bad.size());
     return rep;
 }

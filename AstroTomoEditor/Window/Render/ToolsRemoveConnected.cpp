@@ -65,6 +65,9 @@ void ToolsRemoveConnected::attach(QVTKOpenGLNativeWidget* vtk,
     m_image = image;
     m_volume = volume;
 
+    mHistLo = HistMin;
+    mHistHi = HistMax;
+
     rebuildVisibilityLUT();
     onViewResized();
 }
@@ -2150,7 +2153,7 @@ void ToolsRemoveConnected::RecoveryNonVisibleVoxels(Volume& volume)
     volume = refvol;
 }
 
-bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
+bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume, uint8_t fillVal)
 {
     const auto& S = volume.u8();
     if (!S.valid || !volume.raw())
@@ -2164,28 +2167,6 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
     const size_t total = slice * nz;
     if (total == 0)
         return false;
-
-    // 1. Обнуляем границы (X/Y/Z)
-    for (int j = 0; j < ny; ++j)
-        for (int i = 0; i < nx; ++i)
-        {
-            volume.at(size_t(j) * nx + i) = 0u;  // Z = 0
-            volume.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u; // Z = nz-1
-        }
-
-    for (int k = 0; k < nz; ++k)
-        for (int i = 0; i < nx; ++i)
-        {
-            volume.at(size_t(k) * slice + i) = 0u; // Y = 0
-            volume.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u; // Y = ny-1
-        }
-
-    for (int k = 0; k < nz; ++k)
-        for (int j = 0; j < ny; ++j)
-        {
-            volume.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;      // X = 0
-            volume.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
-        }
 
     // 2. Отмечаем НУЛИ, которые рядом с ненулевыми (6-соседство)
     std::vector<uint8_t> toFill(total, 0);
@@ -2209,20 +2190,6 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
                 const size_t n3 = idx + nx;
                 const size_t n4 = idx - slice;
                 const size_t n5 = idx + slice;
-                const size_t n6 = idx - nx - 1;
-                const size_t n7 = idx - nx + 1;
-                const size_t n8 = idx + nx - 1;
-                const size_t n9 = idx + nx + 1;
-
-                const size_t n10 = idx - slice - 1;
-                const size_t n11 = idx - slice + 1;
-                const size_t n12 = idx + slice - 1;
-                const size_t n13 = idx + slice + 1;
-
-                const size_t n14 = idx - slice - nx;
-                const size_t n15 = idx - slice + nx;
-                const size_t n16 = idx + slice - nx;
-                const size_t n17 = idx + slice + nx;
 
                 toFill[n0] = 1;
                 toFill[n1] = 1;
@@ -2230,28 +2197,14 @@ bool ToolsRemoveConnected::AddBy6Neighbors(Volume& volume)
                 toFill[n3] = 1;
                 toFill[n4] = 1;
                 toFill[n5] = 1;
-                toFill[n6] = 1;
-                toFill[n7] = 1;
-                toFill[n8] = 1;
-                toFill[n9] = 1;
-                toFill[n12] = 1;
-                toFill[n10] = 1;
-                toFill[n11] = 1;
-                toFill[n13] = 1;
-                toFill[n14] = 1;
-                toFill[n15] = 1;
-                toFill[n16] = 1;
-                toFill[n17] = 1;
             }
         }
     }
 
-    // 3. Чем заполняем — среднее между mHistLo и mHistHi
-    const uint8_t average = GetAverageVisibleValue();
 
     for (size_t idx = 0; idx < total; ++idx)
-        if (toFill[idx] && !volume.at(idx))
-            volume.at(idx) = average;
+        if (toFill[idx] == 1 && !volume.at(idx))
+            volume.at(idx) = fillVal;
 
     return true;
 }
@@ -2278,17 +2231,19 @@ void ToolsRemoveConnected::MinusVoxels()
 void ToolsRemoveConnected::PlusVoxels()
 {
     if (!m_vol.u8().valid || !m_vol.raw()) return;
-    if (CountNonZero(m_vol) == 0) return; // нет видимых вокселей — нечего расширять
+    if (CountNonZero(m_bin) == 0) return;
 
     const size_t total = m_vol.u8().size();
 
-    Volume volNew;
-    volNew.copy(m_vol.raw());
-
-    if (!AddBy6Neighbors(volNew))
+    // расширяем МАСКУ строго единицами
+    if (!AddBy6Neighbors(m_bin, 1u))
         return;
 
-    m_vol = volNew;
+    const uint8_t fillVal = GetAverageVisibleValue();
+
+    for (size_t n = 0; n < total; ++n)
+        if (m_bin.at(n) && !m_vol.at(n))
+            m_vol.at(n) = fillVal;
 }
 
 void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fillVal)
@@ -3533,9 +3488,10 @@ void ToolsRemoveConnected::PeelRecoveryVolume()
         if (!m_bin.at(n))
             volNew.at(n) = 0;
 
-    if (!AddBy6Neighbors(volNew))
-        return;
+    const uint8_t fillVal = GetAverageVisibleValue();
 
+    if (!AddBy6Neighbors(volNew, fillVal))
+        return;
 
     if (m_hasOrig)
     {

@@ -315,7 +315,7 @@ void RenderView::buildOverlay()
     th->setContentsMargins(12, 8, 0, 0);
     th->setSpacing(6);
 
-    mBtnTF = makeBigBtn(topPanel, "Transfer Function");
+    mBtnTF = makeBigBtn(topPanel, "Transfer function");
     mTfMenu = TF::CreateMenu(mTopOverlay, [this](TFPreset p) { applyPreset(p); });
     applyMenuStyle(mTfMenu, mBtnTF->width());
     QAction* actCustom = mTfMenu->addAction(tr("Custom…"));
@@ -933,7 +933,7 @@ void RenderView::onStlSimplify()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
-        emit showWarning(tr("Ready Volume"));
+        emit showWarning(tr("Ready volume"));
         QApplication::restoreOverrideCursor();
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         return;
@@ -945,7 +945,7 @@ void RenderView::onStlSimplify()
     mBtnSTLSave->setEnabled(true);
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
-    emit showWarning(tr("Ready Surface"));
+    emit showWarning(tr("Ready surface"));
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -981,7 +981,7 @@ void RenderView::onBuildStl()
         if (mVtk && mVtk->renderWindow())
             mVtk->renderWindow()->Render();
 
-        emit showWarning(tr("Ready Volume"));
+        emit showWarning(tr("Ready volume"));
         return;
     }
 
@@ -1007,7 +1007,7 @@ void RenderView::onBuildStl()
     mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxels(mImage, opt);
     if (isCtrlDown())
     {
-        emit showInfo(tr("Simplify Surface"));
+        emit showInfo(tr("Simplify surface"));
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.70, /*smoothIter=*/20, /*passBand=*/0.1);
     }
@@ -1019,7 +1019,7 @@ void RenderView::onBuildStl()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
-        emit showInfo(tr("Ready Volume"));
+        emit showInfo(tr("Ready volume"));
         QApplication::restoreOverrideCursor();
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         return;
@@ -1031,7 +1031,7 @@ void RenderView::onBuildStl()
     mBtnSTLSave->setEnabled(true);
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
-    emit showInfo(tr("Ready Surface"));
+    emit showInfo(tr("Ready surface"));
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -1039,7 +1039,7 @@ void RenderView::onBuildStl()
 void RenderView::onSaveBuiltStl()
 {
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) {
-        emit showWarning(tr("Nothing to save — build STL first"));
+        emit showWarning(tr("Nothing to save - build STL first"));
         return;
     }
     const QString filePath = QFileDialog::getSaveFileName(
@@ -1049,7 +1049,7 @@ void RenderView::onSaveBuiltStl()
 
     const bool ok = VolumeStlExporter::SaveStl(mIsoMesh, filePath, true);
     if (ok) emit showInfo(tr("Saved STL: %1").arg(filePath));
-    else    emit showWarning(tr("Save failed."));
+    else    emit showWarning(tr("Save failed"));
 }
 
 void RenderView::setImage(vtkSmartPointer<vtkImageData> img)
@@ -1440,7 +1440,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     int ext[6]; image->GetExtent(ext);
     auto* scal = image->GetPointData() ? image->GetPointData()->GetScalars() : nullptr;
     if (ext[1] < ext[0] || ext[3] < ext[2] || ext[5] < ext[4] || !scal) {
-        emit showWarning(tr("Invalid image: empty extent or no scalars."));
+        emit showWarning(tr("Invalid image: empty extent or no scalars"));
         return;
     }
     pump(12);

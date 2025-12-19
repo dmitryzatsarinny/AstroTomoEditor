@@ -125,6 +125,21 @@
     <ClCompile Include="Window\MainWindow\AsyncProgressBar.cpp">
       <Filter>Source Files\Window\MainWindow</Filter>
     </ClCompile>
+    <ClCompile Include="Window\Render\FaceOnlyBoxRepresentation.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\FaceOnlyBoxWidget.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\MainWindow\SettingsDialog.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\LanguageManager.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\AppConfig.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -174,6 +189,15 @@
     </ClInclude>
     <ClInclude Include="Window\MainWindow\DialogShell.h">
       <Filter>Header Files\Window\MainWindow</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\FaceOnlyBoxRepresentation.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\FaceOnlyBoxWidget.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\AppConfig.h">
+      <Filter>Header Files\Services</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -231,9 +255,18 @@
     <QtMoc Include="Window\MainWindow\AsyncProgressBar.h">
       <Filter>Header Files\Window\MainWindow</Filter>
     </QtMoc>
+    <QtMoc Include="Window\MainWindow\SettingsDialog.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Services\LanguageManager.h">
+      <Filter>Header Files\Services</Filter>
+    </QtMoc>
   </ItemGroup>
   <ItemGroup>
     <QtRcc Include="Resource.qrc">
+      <Filter>Resource Files</Filter>
+    </QtRcc>
+    <QtRcc Include="..\i18n\i18n.qrc">
       <Filter>Resource Files</Filter>
     </QtRcc>
   </ItemGroup>

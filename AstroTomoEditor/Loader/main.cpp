@@ -5,6 +5,9 @@
 #include <QSurfaceFormat>
 #include <QVTKOpenGLNativeWidget.h>
 #include <QStyleFactory>
+#include <QSettings>
+#include <Services/LanguageManager.h>
+#include <Services/AppConfig.h>
 
 static void ConfigureDllSearch()
 {
@@ -19,16 +22,26 @@ int main(int argc, char* argv[])
 {
     ConfigureDllSearch();
 
+    QCoreApplication::setOrganizationName("Astrocard");
+    QCoreApplication::setApplicationName("AstroDicomEditor");
+
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-    //vtkNew<vtkFileOutputWindow> fow;
-    //fow->SetFileName("vtk.log");
-    //vtkOutputWindow::SetInstance(fow);
     vtkOutputWindow::SetGlobalWarningDisplay(false);
 
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication app(argc, argv);
 
     app.setStyle(QStyleFactory::create("Fusion"));
+
+
+    // === загрузка XML-конфига ===
+    const QString cfgPath =
+        QCoreApplication::applicationDirPath() + "/settings.xml";
+
+    const AppConfig cfg = AppConfig::loadOrCreateDefault(cfgPath);
+
+    // === установка языка ДО создания окон ===
+    LanguageManager::instance().setLanguage(cfg.language);
 
     // --- если есть аргумент пути ---
     QString argPath;

@@ -5,11 +5,12 @@
 #include "..\..\Services\Pool.h"
 #include "..\..\Services\PatientInfo.h"
 #include <QToolButton>
+#include "DialogShell.h"
 
 class TitleBar : public QWidget {
     Q_OBJECT
 public:
-    explicit TitleBar(QWidget* parent = nullptr, int typeofwindow = 0, const QString titlename = "AstroDicomEditor");
+    explicit TitleBar(QWidget* parent = nullptr, const int typeofwindow = WindowType::Main, const QString titlename = "AstroDicomEditor");
     void setPatientInfo(const PatientInfo& info);
     const PatientInfo& info() const { return mInfo; }
     void set2DChecked(bool on);
@@ -19,12 +20,14 @@ public:
     void setSaveVisible(bool on);
     bool is2DVisible() { return mBtn2D->isVisible(); }
     bool is3DVisible() { return mBtn3D->isVisible(); }
+    void retranslateUi();
 
 signals:
     void patientClicked();
     void volumeClicked();
     void planarClicked();
     void save3DRRequested();
+    void settingsClicked();
 
 protected:
     void mousePressEvent(QMouseEvent* e) override;
@@ -34,14 +37,15 @@ protected:
     void resizeEvent(QResizeEvent* e) override;
     void showEvent(QShowEvent* e) override;
     bool eventFilter(QObject* obj, QEvent* ev) override;
+    void changeEvent(QEvent* e) override;
 
 private:
     bool isOverNonDraggableChild(const QPoint& pos) const;
     void updateMaximizeIcon();
     void updateOverlayGeometry();
-    void buildnondefaulttitlebar(const QString titlename);
+    void buildnondefaulttitlebar(const QString titlename, const int typeofwindow);
     void initDragFilters();
-
+    
 
     PatientInfo mInfo;
     QWidget* mLeft = nullptr;
@@ -55,6 +59,7 @@ private:
     QToolButton* mBtnMax = nullptr;
     QToolButton* mBtnClose = nullptr;
     QToolButton* mPatientBtn = nullptr;
+    QToolButton* mBtnSettings = nullptr;
     QButtonGroup* mViewGroup = nullptr;
 
     bool          mDragging = false;

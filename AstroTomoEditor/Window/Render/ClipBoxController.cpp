@@ -1,7 +1,5 @@
 ﻿#include "ClipBoxController.h"
 
-#include <vtkBoxWidget2.h>
-#include <vtkBoxRepresentation.h>
 #include <vtkCallbackCommand.h>
 #include <vtkRenderer.h>
 #include <vtkRenderWindow.h>
@@ -22,68 +20,107 @@
 #include <vtkPlane.h>
 #include <vtkPlaneCollection.h>
 #include <array>
+#include <vtkProperty.h>
+#include <QDebug.h>
+#include <vtkSmartPointer.h>
 
-// -- ВСПОМОГАТЕЛЬНОЕ --
-// Конверсия AABB в мире -> IJK (по данным vtkImageData),
-// учитывая матрицу актёра (Volume). Бокс должен быть осевой.
-static inline void WorldBoundsToIJK_WithActor(
-    vtkImageData* img,
-    vtkVolume* volume,
-    const double worldBounds[6],
-    int ijkOut[6])
+static inline int iFloor(double x) { return static_cast<int>(std::floor(x)); }
+static inline int iCeil(double x) { return static_cast<int>(std::ceil(x)); }
+
+static void WorldBoundsToIJK_WithActor(vtkImageData* img, vtkVolume* vol, const double wb[6], int outIJK[6])
 {
-    // Готовим World->Actor матрицу
-    vtkNew<vtkMatrix4x4> actorToWorld;
-    volume->GetMatrix(actorToWorld); // Actor->World
-    vtkNew<vtkMatrix4x4> worldToActor;
-    vtkMatrix4x4::Invert(actorToWorld, worldToActor); // World->Actor
-
-    // 8 углов мирового AABB
-    const double cornersW[8][3] = {
-        {worldBounds[0], worldBounds[2], worldBounds[4]},
-        {worldBounds[1], worldBounds[2], worldBounds[4]},
-        {worldBounds[0], worldBounds[3], worldBounds[4]},
-        {worldBounds[1], worldBounds[3], worldBounds[4]},
-        {worldBounds[0], worldBounds[2], worldBounds[5]},
-        {worldBounds[1], worldBounds[2], worldBounds[5]},
-        {worldBounds[0], worldBounds[3], worldBounds[5]},
-        {worldBounds[1], worldBounds[3], worldBounds[5]},
-    };
-
-    double ijkMin[3] = { +1e300, +1e300, +1e300 };
-    double ijkMax[3] = { -1e300, -1e300, -1e300 };
-
-    for (int c = 0; c < 8; ++c)
-    {
-        // Переводим угол из мира в локальные координаты актёра
-        double pW[4] = { cornersW[c][0], cornersW[c][1], cornersW[c][2], 1.0 };
-        double pA[4] = { 0,0,0,1 };
-        worldToActor->MultiplyPoint(pW, pA);
-
-        // ActorLocal для vtkImageData — это физическое пространство данных
-        double ijk[3];
-        img->TransformPhysicalPointToContinuousIndex(pA, ijk);
-
-        for (int a = 0; a < 3; ++a) {
-            ijkMin[a] = std::min(ijkMin[a], ijk[a]);
-            ijkMax[a] = std::max(ijkMax[a], ijk[a]);
-        }
-    }
-
-    // Преобразуем в целочисленные индексы (включительно)
-    ijkOut[0] = static_cast<int>(std::floor(ijkMin[0]));
-    ijkOut[1] = static_cast<int>(std::ceil(ijkMax[0]));
-    ijkOut[2] = static_cast<int>(std::floor(ijkMin[1]));
-    ijkOut[3] = static_cast<int>(std::ceil(ijkMax[1]));
-    ijkOut[4] = static_cast<int>(std::floor(ijkMin[2]));
-    ijkOut[5] = static_cast<int>(std::ceil(ijkMax[2]));
-
+    // fallback: если что-то не так, пусть будет весь объём
     int ext[6]; img->GetExtent(ext);
-    for (int a = 0; a < 3; ++a) {
-        ijkOut[2 * a + 0] = std::clamp(ijkOut[2 * a + 0], ext[2 * a + 0], ext[2 * a + 1]);
-        ijkOut[2 * a + 1] = std::clamp(ijkOut[2 * a + 1], ext[2 * a + 0], ext[2 * a + 1]);
-        if (ijkOut[2 * a + 0] > ijkOut[2 * a + 1]) std::swap(ijkOut[2 * a + 0], ijkOut[2 * a + 1]);
+    outIJK[0] = ext[0]; outIJK[1] = ext[1];
+    outIJK[2] = ext[2]; outIJK[3] = ext[3];
+    outIJK[4] = ext[4]; outIJK[5] = ext[5];
+
+    if (!img) return;
+
+    // 1) матрица world->actorLocal (actorLocal = physical space изображения, если volume не переопределял scale/origin)
+    vtkSmartPointer<vtkMatrix4x4> worldToActor = vtkSmartPointer<vtkMatrix4x4>::New();
+    worldToActor->Identity();
+
+    if (vol)
+    {
+        vtkSmartPointer<vtkMatrix4x4> actorToWorld = vtkSmartPointer<vtkMatrix4x4>::New();
+        actorToWorld->Identity();
+        vol->GetMatrix(actorToWorld);                 // Actor(local)->World
+        vtkMatrix4x4::Invert(actorToWorld, worldToActor); // World->Actor(local)
     }
+
+    // 2) 8 углов bounds в world
+    const double xs[2]{ wb[0], wb[1] };
+    const double ys[2]{ wb[2], wb[3] };
+    const double zs[2]{ wb[4], wb[5] };
+
+    // будем считать continuous indices
+    double ciMin[3]{ 1e300,  1e300,  1e300 };
+    double ciMax[3]{ -1e300, -1e300, -1e300 };
+
+    auto Accum = [&](const double worldP[3])
+        {
+            // world -> actorLocal(=physical)
+            double p4[4]{ worldP[0], worldP[1], worldP[2], 1.0 };
+            double a4[4];
+            worldToActor->MultiplyPoint(p4, a4);
+
+            double phys[3]{ a4[0], a4[1], a4[2] };
+
+            // physical -> continuous index
+            double cidx[3]{ 0,0,0 };
+
+#if VTK_MAJOR_VERSION >= 9
+            // В VTK 9 это есть и учитывает origin/spacing/direction
+            img->TransformPhysicalPointToContinuousIndex(phys, cidx);
+#else
+            // более старый fallback (без direction может быть криво)
+            double origin[3], spacing[3];
+            img->GetOrigin(origin);
+            img->GetSpacing(spacing);
+            cidx[0] = (phys[0] - origin[0]) / spacing[0];
+            cidx[1] = (phys[1] - origin[1]) / spacing[1];
+            cidx[2] = (phys[2] - origin[2]) / spacing[2];
+#endif
+
+            for (int ax = 0; ax < 3; ++ax)
+            {
+                ciMin[ax] = std::min(ciMin[ax], cidx[ax]);
+                ciMax[ax] = std::max(ciMax[ax], cidx[ax]);
+            }
+        };
+
+    for (int ix = 0; ix < 2; ++ix)
+        for (int iy = 0; iy < 2; ++iy)
+            for (int iz = 0; iz < 2; ++iz)
+            {
+                double p[3]{ xs[ix], ys[iy], zs[iz] };
+                Accum(p);
+            }
+
+    // 3) continuous -> ijk (целые, расширяем наружу)
+    int ijk[6];
+    ijk[0] = iFloor(ciMin[0]);
+    ijk[1] = iCeil(ciMax[0]);
+    ijk[2] = iFloor(ciMin[1]);
+    ijk[3] = iCeil(ciMax[1]);
+    ijk[4] = iFloor(ciMin[2]);
+    ijk[5] = iCeil(ciMax[2]);
+
+    // 4) clamp в extent
+    ijk[0] = std::max(ext[0], std::min(ext[1], ijk[0]));
+    ijk[1] = std::max(ext[0], std::min(ext[1], ijk[1]));
+    ijk[2] = std::max(ext[2], std::min(ext[3], ijk[2]));
+    ijk[3] = std::max(ext[2], std::min(ext[3], ijk[3]));
+    ijk[4] = std::max(ext[4], std::min(ext[5], ijk[4]));
+    ijk[5] = std::max(ext[4], std::min(ext[5], ijk[5]));
+
+    // на всякий: порядок
+    if (ijk[0] > ijk[1]) std::swap(ijk[0], ijk[1]);
+    if (ijk[2] > ijk[3]) std::swap(ijk[2], ijk[3]);
+    if (ijk[4] > ijk[5]) std::swap(ijk[4], ijk[5]);
+
+    for (int i = 0; i < 6; ++i) outIJK[i] = ijk[i];
 }
 
 static void ComputeAABB(const std::array<double, 24>& pts, double outB[6])
@@ -107,50 +144,47 @@ static inline void MxP(const vtkMatrix4x4* m, const double in[3], double out[3])
 }
 
 static vtkSmartPointer<vtkPlaneCollection>
-MakePlaneCollectionFromBox(vtkBoxRepresentation* rep, bool flipNormals)
+MakePlaneCollectionFromAABB(const double b[6], bool flipNormals)
 {
-    vtkNew<vtkPlanes> boxPlanes;
-    rep->GetPlanes(boxPlanes);
-
-    auto normals = vtkDoubleArray::SafeDownCast(boxPlanes->GetNormals());
-    auto points = boxPlanes->GetPoints();
     auto out = vtkSmartPointer<vtkPlaneCollection>::New();
 
-    double n[3], p[3];
-    for (int i = 0; i < 6; ++i) {
-        normals->GetTuple(i, n);
-        points->GetPoint(i, p);
+    const double normals[6][3] = {
+        {-1,0,0}, {+1,0,0},
+        {0,-1,0}, {0,+1,0},
+        {0,0,-1}, {0,0,+1}
+    };
+
+    const double origins[6][3] = {
+        {b[0], 0, 0}, {b[1], 0, 0},
+        {0, b[2], 0}, {0, b[3], 0},
+        {0, 0, b[4]}, {0, 0, b[5]}
+    };
+
+    for (int i = 0; i < 6; ++i)
+    {
+        double n[3] = { normals[i][0], normals[i][1], normals[i][2] };
+        double o[3] = { origins[i][0], origins[i][1], origins[i][2] };
 
         if (flipNormals) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
 
         vtkNew<vtkPlane> pl;
         pl->SetNormal(n);
-        pl->SetOrigin(p);
+        pl->SetOrigin(o);
         out->AddItem(pl);
     }
     return out;
 }
 
-// ----------------------
-
 ClipBoxController::ClipBoxController(QObject* parent)
     : QObject(parent)
 {
-    // Репрезентация и настройки поведения
-    mRep = vtkSmartPointer<vtkBoxRepresentation>::New();
-    mRep->SetPlaceFactor(1.0);
-    mRep->HandlesOn();
-    mRep->SetOutlineFaceWires(false);
-    mRep->SetOutlineCursorWires(false);
-    mRep->SetHandleSize(10);
-    
-    // Виджет
-    mWidget = vtkSmartPointer<vtkBoxWidget2>::New();
-    mWidget->SetRepresentation(mRep);
-    mWidget->RotationEnabledOff();
+    mRep = vtkSmartPointer<FaceOnlyBoxRepresentation>::New();
+
+    mWidget = vtkSmartPointer<FaceOnlyBoxWidget>::New();
+    mWidget->SetRepresentation(mRep); // важно: теперь без кастов
+
     mWidget->EnabledOff();
 
-    // Колбэк на движение/перетаскивание ручек
     mCb = vtkSmartPointer<vtkCallbackCommand>::New();
     mCb->SetClientData(this);
     mCb->SetCallback(&ClipBoxController::onInteraction);
@@ -158,7 +192,6 @@ ClipBoxController::ClipBoxController(QObject* parent)
     mWidget->AddObserver(vtkCommand::StartInteractionEvent, mCb);
     mWidget->AddObserver(vtkCommand::InteractionEvent, mCb);
     mWidget->AddObserver(vtkCommand::EndInteractionEvent, mCb);
-    mWidget->SetPriority(1.0);
 }
 
 void ClipBoxController::setRenderer(vtkRenderer* ren)
@@ -176,26 +209,24 @@ void ClipBoxController::setInteractor(vtkRenderWindowInteractor* iren)
 void ClipBoxController::attachToVolume(vtkVolume* vol)
 {
     mVolume = vol;
+    mSurface = nullptr;
+
     if (!mVolume) { setEnabled(false); return; }
 
-    // Поставить бокс по границам объёма (в МИРОВЫХ координатах сцены)
-    double vb[6]; 
+    double vb[6];
     if (mEnabled && mWidget && mWidget->GetEnabled())
     {
-        const double* rb = mRep->GetBounds();
-        std::copy(rb, rb + 6, vb);
-        mRep->PlaceWidget(vb);
+        mRep->GetBounds(vb);
+        mRep->PlaceBox(vb);
     }
     else
     {
         mVolume->GetBounds(vb);
-        mRep->PlaceWidget(vb);
+        mRep->PlaceBox(vb);
     }
 
-    // Сбросить любые старые клипы/кропы
-    if (auto* mapper = mVolume->GetMapper()) {
-        if (auto* am = vtkPolyDataMapper::SafeDownCast(mapper))
-            am->RemoveAllClippingPlanes();        // ← корректный сброс
+    if (auto* mapper = mVolume->GetMapper())
+    {
         if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mapper))
             gm->SetCropping(0);
     }
@@ -204,54 +235,37 @@ void ClipBoxController::attachToVolume(vtkVolume* vol)
     if (auto* rw = mRenderer ? mRenderer->GetRenderWindow() : nullptr) rw->Render();
 }
 
-void ClipBoxController::applyNow()
-{
-    if (!mEnabled) return;
-
-    // переиспользуем твою логику
-    applyClippingFromBox();
-
-    if (mRenderer) mRenderer->ResetCameraClippingRange();
-    if (auto* rw = mRenderer ? mRenderer->GetRenderWindow() : nullptr)
-        rw->Render();
-}
-
 void ClipBoxController::attachToSTL(vtkActor* actor)
 {
     mSurface = actor;
-    // Разрываем связь с объёмом, чтобы не мешать
     mVolume = nullptr;
 
     if (!mSurface) { setEnabled(false); return; }
 
-    // Поставить бокс по границам актёра (мир)
     double vb[6];
     if (mEnabled && mWidget && mWidget->GetEnabled())
     {
-        const double* rb = mRep->GetBounds();
-        std::copy(rb, rb + 6, vb);
-        mRep->PlaceWidget(vb);
+        mRep->GetBounds(vb);
+        mRep->PlaceBox(vb);
     }
     else
     {
         mSurface->GetBounds(vb);
-        mRep->PlaceWidget(vb);
+        mRep->PlaceBox(vb);
     }
 
-    // Сбросить прежние клип-плоскости на мэппере
-    if(auto* mapper = mSurface->GetMapper()) {
-        if (auto* pm = vtkPolyDataMapper::SafeDownCast(mapper)) {
+    if (auto* mapper = mSurface->GetMapper())
+    {
+        if (auto* pm = vtkPolyDataMapper::SafeDownCast(mapper))
+        {
             pm->RemoveAllClippingPlanes();
             pm->Modified();
         }
     }
 
-    // (на всякий случай) если до этого был включён кроп у volume-мэппера — выключим
-    if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mVolume ? mVolume->GetMapper() : nullptr))
-        gm->SetCropping(0);
-
+    if (mRenderer) mRenderer->ResetCameraClippingRange();
+    if (auto* rw = mRenderer ? mRenderer->GetRenderWindow() : nullptr) rw->Render();
 }
-
 
 void ClipBoxController::setEnabled(bool on)
 {
@@ -259,180 +273,130 @@ void ClipBoxController::setEnabled(bool on)
     const bool want = on && hasTarget;
     if (mEnabled == want) return;
 
-    mEnabled = want;
-    if (mWidget) mWidget->SetEnabled(mEnabled ? 1 : 0);
-
-    // объём
-    if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mVolume ? mVolume->GetMapper() : nullptr)) 
+    // --- ВЫКЛЮЧЕНИЕ CLIP ---
+    if (mEnabled && !want)
     {
-        if (mEnabled)
-        {
-            applyClippingFromBox();
-        }
-        else          
-            gm->SetCropping(0);
-    }
+        // 1. вернуть бокс в full bounds (XYZ, без поворотов)
+        resetToBounds();
 
-    // поверхность
-    if (auto* pm = vtkPolyDataMapper::SafeDownCast(mSurface ? mSurface->GetMapper() : nullptr)) {
-        if (mEnabled) 
+        // 2. быстро применить клип по full bounds
+        applyClippingFromBox();
+
+        // 3. теперь безопасно выключаем клип
+        if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(
+            mVolume ? mVolume->GetMapper() : nullptr))
         {
-            applyClippingFromBox();
+            gm->SetCropping(false);
+            gm->Modified();
         }
-        else 
+
+        if (auto* pm = vtkPolyDataMapper::SafeDownCast(
+            mSurface ? mSurface->GetMapper() : nullptr))
         {
             pm->RemoveAllClippingPlanes();
             pm->Modified();
         }
     }
 
+    mEnabled = want;
 
-    if (mRenderer) mRenderer->ResetCameraClippingRange();
+    if (mWidget)
+        mWidget->SetEnabled(mEnabled ? 1 : 0);
+
+    // --- ВКЛЮЧЕНИЕ CLIP ---
+    if (mEnabled)
+    {
+        // всегда стартуем из ровного XYZ-бокса
+        resetToBounds();
+        applyClippingFromBox();
+    }
+
+    if (mRenderer)
+        mRenderer->ResetCameraClippingRange();
+
     if (auto* rw = mRenderer ? mRenderer->GetRenderWindow() : nullptr)
         rw->Render();
 }
 
 void ClipBoxController::resetToBounds()
 {
-    // 1) если режем поверхность — всё просто
     if (mSurface) {
-        double b[6];
-        mSurface->GetBounds(b);
-        mRep->PlaceWidget(b);
+        double b[6]; mSurface->GetBounds(b);
+        mRep->PlaceBox(b);
         return;
     }
 
-    // 2) объём
     if (mVolume) {
-        auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(
-            mVolume->GetMapper());
-
-        // 2a) если клип-бокс включён прямо сейчас — используем его текущие границы
-        //     (они в мировых координатах и соответствуют "видимому" региону)
-        if (mEnabled && mWidget && mWidget->GetEnabled()) 
-        {
-            double wb[6];
-            const double* rb = mRep->GetBounds();   // ← без аргументов
-            std::copy(rb, rb + 6, wb);
-            mRep->PlaceWidget(wb);
-            return;
-        }
-
-        // 2b) если у volume включён кроп — ставим бокс по CroppingRegionPlanes
-        if (gm && gm->GetCropping()) {
-            double region[6];
-            gm->GetCroppingRegionPlanes(region);
-
-            // region уже в координатах данных (мм), переведём 8 углов в мир актёра
-            const double corners[8][3] = {
-                {region[0], region[2], region[4]},
-                {region[1], region[2], region[4]},
-                {region[0], region[3], region[4]},
-                {region[1], region[3], region[4]},
-                {region[0], region[2], region[5]},
-                {region[1], region[2], region[5]},
-                {region[0], region[3], region[5]},
-                {region[1], region[3], region[5]},
-            };
-
-            vtkMatrix4x4* M = mVolume->GetMatrix();
-            double wb[6] = { +DBL_MAX, -DBL_MAX, +DBL_MAX, -DBL_MAX, +DBL_MAX, -DBL_MAX };
-            for (int i = 0; i < 8; i++) {
-                double w[3];
-                w[0] = M->GetElement(0, 0) * corners[i][0] + M->GetElement(0, 1) * corners[i][1] + M->GetElement(0, 2) * corners[i][2] + M->GetElement(0, 3);
-                w[1] = M->GetElement(1, 0) * corners[i][0] + M->GetElement(1, 1) * corners[i][1] + M->GetElement(1, 2) * corners[i][2] + M->GetElement(1, 3);
-                w[2] = M->GetElement(2, 0) * corners[i][0] + M->GetElement(2, 1) * corners[i][1] + M->GetElement(2, 2) * corners[i][2] + M->GetElement(2, 3);
-                wb[0] = std::min(wb[0], w[0]); wb[1] = std::max(wb[1], w[0]);
-                wb[2] = std::min(wb[2], w[1]); wb[3] = std::max(wb[3], w[1]);
-                wb[4] = std::min(wb[4], w[2]); wb[5] = std::max(wb[5], w[2]);
-            }
-            mRep->PlaceWidget(wb);
-            return;
-        }
-
-        // 2c) по умолчанию — весь объём
-        double b[6];
-        mVolume->GetBounds(b);
-        mRep->PlaceWidget(b);
+        double b[6]; mVolume->GetBounds(b);
+        mRep->PlaceBox(b);
         return;
     }
 }
+
+void ClipBoxController::applyNow()
+{
+    if (!mEnabled) return;
+    applyClippingFromBox();
+
+    if (mRenderer) mRenderer->ResetCameraClippingRange();
+    if (auto* rw = mRenderer ? mRenderer->GetRenderWindow() : nullptr)
+        rw->Render();
+}
+#include <vtkVolumeMapper.h> 
 
 void ClipBoxController::applyClippingFromBox()
 {
     if (!mEnabled) return;
+    if (!mRep) return;
 
-    // 1) берём текущие плоскости из box-rep в МИРОВЫХ координатах
-    auto* rep = vtkBoxRepresentation::SafeDownCast(mRep);
-    if (!rep) return;
-
-    vtkNew<vtkPlanes> planes;
-    rep->GetPlanes(planes); // ← готовая шестерка плоскостей в world-space
-
-    // 2a) Если клипим объём — переводим в IJK и включаем кроп (как у тебя было)
-    if (mVolume) {
+    // --- volume: НЕ через cropping, а через 6 плоскостей (поддерживает поворот) ---
+    if (mVolume)
+    {
         auto* mapper = mVolume->GetMapper();
         auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mapper);
-        auto* img = vtkImageData::SafeDownCast(mapper ? mapper->GetInputDataObject(0, 0) : nullptr);
-        if (!gm || !img) return;
+        if (!gm) return;
 
-        // берём границы коробки и твой существующий путь World→Actor→IJK
-        double wb[6];
-        const double* rb = rep->GetBounds();
-        std::copy(rb, rb + 6, wb);
+        // важно: если раньше включали cropping, он будет мешать и создавать ощущение "не режется"
+        gm->SetCropping(false);
 
-        int ijk[6];
-        WorldBoundsToIJK_WithActor(img, mVolume, wb, ijk);
+        // сбросим старые плоскости
+        gm->RemoveAllClippingPlanes();
 
-        double origin[3], spacing[3];
-        img->GetOrigin(origin);
-        img->GetSpacing(spacing);
+        // плоскости берем из репрезентации (OBB)
+        auto planes = mRep->MakeClippingPlanes();     // <-- метод в FaceOnlyBoxRepresentation
+        gm->SetClippingPlanes(planes);
 
-        double region[6]{
-            origin[0] + spacing[0] * ijk[0], origin[0] + spacing[0] * ijk[1],
-            origin[1] + spacing[1] * ijk[2], origin[1] + spacing[1] * ijk[3],
-            origin[2] + spacing[2] * ijk[4], origin[2] + spacing[2] * ijk[5]
-        };
-
-        gm->SetCroppingRegionFlagsToSubVolume();
-        gm->SetCroppingRegionPlanes(region);
-        gm->SetCropping(1);
         gm->Modified();
-        return;
     }
 
-    // 2b) Если клипим поверхность — просто задаём плоскости на мэппер
-    if (mSurface) 
+    // --- surface: тоже лучше резать теми же плоскостями, а не AABB ---
+    if (mSurface)
     {
-        if (auto* pm = vtkPolyDataMapper::SafeDownCast(mSurface->GetMapper())) 
+        if (auto* pm = vtkPolyDataMapper::SafeDownCast(mSurface->GetMapper()))
         {
-            auto pc = MakePlaneCollectionFromBox(rep, /*flipNormals=*/true);
-            pm->SetClippingPlanes(pc);
+            auto planes = mRep->MakeClippingPlanes();
+            pm->SetClippingPlanes(planes);
             pm->Modified();
         }
     }
 
-    if (mRenderer) mRenderer->ResetCameraClippingRange();
+    if (mRenderer && mRenderer->GetRenderWindow())
+        mRenderer->GetRenderWindow()->Render();
 }
 
-void ClipBoxController::onInteraction(vtkObject* caller, unsigned long evId, void* cd, void*)
+void ClipBoxController::onInteraction(vtkObject*, unsigned long evId, void* cd, void*)
 {
     auto* self = static_cast<ClipBoxController*>(cd);
     if (!self) return;
 
-    // Всегда обновляем planes (дешёво)
     self->applyClippingFromBox();
 
-    // Тяжёлый пересчёт клиппинг-рейнджа и отрисовка — только в конце драга
-    if (evId == vtkCommand::EndInteractionEvent) 
+    if (evId == vtkCommand::EndInteractionEvent)
     {
         if (self->mRenderer) self->mRenderer->ResetCameraClippingRange();
-        if (self->mInteractor && self->mInteractor->GetRenderWindow()) 
-        {
+        if (self->mInteractor && self->mInteractor->GetRenderWindow())
             self->mInteractor->GetRenderWindow()->Render();
-        }
-        else if (self->mRenderer && self->mRenderer->GetRenderWindow()) {
+        else if (self->mRenderer && self->mRenderer->GetRenderWindow())
             self->mRenderer->GetRenderWindow()->Render();
-        }
     }
 }

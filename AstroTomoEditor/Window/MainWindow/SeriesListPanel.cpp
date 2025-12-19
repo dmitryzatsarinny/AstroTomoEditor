@@ -1033,7 +1033,7 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
             QString mod = pickMeta.modality;
             QString sn = pickMeta.seriesNumber;
             desc = (mod.isEmpty() && sn.isEmpty())
-                ? QObject::tr("No Name")
+                ? QObject::tr("No name")
                 : QStringLiteral("%1 %2").arg(mod, sn);
         }
         s.description = desc;

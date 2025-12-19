@@ -5,6 +5,7 @@
 #include "..\..\Services\Pool.h"
 #include "..\MainWindow\DialogShell.h"
 #include "..\MainWindow\AsyncProgressBar.h"
+#include <Window/MainWindow/SettingsDialog.h>
 
 class QComboBox;                                                // Предварительные объявления (forward declarations) Qt-классов.
 class QTreeView;                                                // Они уменьшают связность/время сборки: нам нужна только ссылка/указатель,
@@ -45,6 +46,7 @@ public:
     enum class SelectionKind { None, DicomFile, DicomDir, File3DR, DicomFolder };
     SelectionKind selectedKind() const;
     QString selectedPath() const; // файл или папка, в зависимости от kind
+    void retranslateUi();
 
 private slots:                                                  // Раздел слотов Qt — методы, на которые можно "подписывать" сигналы.
     void onDriveChanged(int index);                             // Реакция на смену диска в combo: перестраиваем корень и путь.
@@ -73,6 +75,7 @@ private:
     void setStatus(LoadState st, const QString& text = {});
     void showBusy(const QString& text);
     void hideBusy();
+    void showSettings();
 
     // помощник: путь по индексу из вида (нужно мэппить через прокси)
     QString filePathFromViewIndex(const QModelIndex& viewIdx) const;
@@ -100,6 +103,7 @@ private:
     QTimer* mBusyDelayTimer = nullptr;
     QTimer* mOpenTimeout = nullptr;   // страховка «на всякий случай»
     LoadState     mState = LoadState::Ready;
+    SettingsDialog* mSettingsDlg{ nullptr };
 
     QString       mPendingPath;
     QString       mCurrentRootPath;

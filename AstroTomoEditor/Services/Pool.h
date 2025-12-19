@@ -105,4 +105,118 @@
 #endif
 
 
+#include <QScrollBar>
+#include <qstyleditemdelegate.h>
+
+namespace {
+    class FixedDownComboBox : public QComboBox {
+    public:
+        using QComboBox::QComboBox;
+
+    protected:
+        void showPopup() override {
+            QComboBox::showPopup();
+
+            QAbstractItemView* v = view();
+            if (!v) return;
+
+            QWidget* popup = v->window();
+            if (!popup) popup = v;
+
+            // ---------- палитра попапа + списка ----------
+            QPalette pal = popup->palette();
+            pal.setColor(QPalette::Window, QColor("#1f2023"));           // фон окна
+            pal.setColor(QPalette::Base, QColor("#1f2023"));          // фон списка
+            pal.setColor(QPalette::Text, QColor("#f0f0f0"));          // текст
+            pal.setColor(QPalette::Highlight, QColor(80, 150, 255));    // фон выделения
+            pal.setColor(QPalette::HighlightedText, Qt::white);       // текст в выделении
+
+            popup->setPalette(pal);
+            popup->setAutoFillBackground(true);
+
+            v->setPalette(pal);
+            if (auto* vp = v->viewport()) {
+                vp->setPalette(pal);
+                vp->setAutoFillBackground(true);
+            }
+
+            // на всякий — убираем рамку у контейнера
+            if (auto* fr = qobject_cast<QFrame*>(popup))
+                fr->setFrameStyle(QFrame::NoFrame);
+
+            // высота строки
+            int rowH = v->sizeHintForRow(0);
+            if (rowH <= 0)
+                rowH = v->fontMetrics().height() + 6;
+
+            const int visibleCount = qMax(1, count());
+            const int totalH = rowH * visibleCount;
+            const int totalW = width();
+
+            // точка ПОД комбобоксом
+            const QPoint globalPos = mapToGlobal(QPoint(0, height()));
+
+            // ставим контейнер попапа
+            popup->setGeometry(QRect(globalPos, QSize(totalW, totalH)));
+            if (auto* lay = popup->layout())
+                lay->setContentsMargins(0, 0, 0, 0);
+
+            // растягиваем список на весь popup
+            v->setGeometry(popup->rect());
+            v->setMinimumHeight(totalH);
+            v->setMaximumHeight(totalH);
+
+            // рубим скроллбары
+            v->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            v->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+            if (auto* sb = v->verticalScrollBar()) {
+                sb->setVisible(false);
+                sb->setEnabled(false);
+                sb->setMaximum(0);
+            }
+            if (auto* sb = v->horizontalScrollBar()) {
+                sb->setVisible(false);
+                sb->setEnabled(false);
+                sb->setMaximum(0);
+            }
+
+            v->setMouseTracking(true);
+
+
+        }
+    };
+
+    class FlatTreeView : public QTreeView
+    {
+    public:
+        using QTreeView::QTreeView;
+
+    protected:
+        void drawRow(QPainter* painter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override
+        {
+            QStyleOptionViewItem opt(option);
+            opt.state &= ~QStyle::State_HasFocus;
+            QTreeView::drawRow(painter, opt, index);
+        }
+    };
+
+    class NoFocusDelegate : public QStyledItemDelegate
+    {
+    public:
+        using QStyledItemDelegate::QStyledItemDelegate;
+
+        void paint(QPainter* painter,
+            const QStyleOptionViewItem& option,
+            const QModelIndex& index) const override
+        {
+            QStyleOptionViewItem opt(option);
+            // убираем фокус с отдельной ячейки
+            opt.state &= ~QStyle::State_HasFocus;
+            QStyledItemDelegate::paint(painter, opt, index);
+        }
+    };
+}
+
 #endif

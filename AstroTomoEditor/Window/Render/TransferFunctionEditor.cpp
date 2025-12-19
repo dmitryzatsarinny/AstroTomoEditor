@@ -328,7 +328,7 @@ static QString sliderCss(const QColor& color)
 }
 
 TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* imgU8)
-    : DialogShell(parent, tr("Transfer Function"))
+    : DialogShell(parent, tr("Transfer function"), WindowType::TranferFunction)
 {
     setModal(true);
 
@@ -461,7 +461,7 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
                 P.points.push_back(q);
             }
             if (!TF::SaveCustomPreset(P))
-                QMessageBox::warning(this, tr("Save preset"), tr("Failed to save preset file."));
+                QMessageBox::warning(this, tr("Save preset"), tr("Failed to save preset file"));
             else
                 emit presetSaved();
         });

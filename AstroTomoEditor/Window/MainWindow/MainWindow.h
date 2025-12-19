@@ -10,6 +10,7 @@
 #include <Services/CornerGrip.h>
 #include "PatientDialog.h"
 #include "AsyncProgressBar.h"
+#include "SettingsDialog.h"
 
 class QSplitter;
 class QStackedWidget;
@@ -56,7 +57,7 @@ private slots:
 
     // окно с данными пациента
     void showPatientDetails();
-
+    void showSettings();
     void onSave3DR();
 
 protected:
@@ -72,9 +73,9 @@ private:
     void wireSignals();
     void startScan(); // запускает сканирование по mDicomPath/mKind
     void applyMaximizedUi(bool maximized);
-    void ensurePatientDialog();
     void showInfo(const QString& text);
     void positionCornerGrip();
+    void retranslateUi();
 
 private:
     // --- данные контекста ---
@@ -93,17 +94,18 @@ private:
     QStackedWidget* mViewerStack{ nullptr };  // справа: 2D и 3D стеки
     PlanarView* mPlanar{ nullptr };  // 2D просмотр
     RenderView* mRenderView{ nullptr };  // 3D просмотр (лениво создаём)
-    PatientDialog* mPatientDlg = nullptr;
+    PatientDialog* mPatientDlg{ nullptr };
+    SettingsDialog* mSettingsDlg{ nullptr };
 
     // --- нижняя панель / статус ---
     QWidget* mFooter{ nullptr };
     QLabel* mStatusText{ nullptr };
     QWidget* mProgBox{ nullptr };
     AsyncProgressBar* mProgress{ nullptr };
-    CornerGrip* mCornerGrip = nullptr;
+    CornerGrip* mCornerGrip{ nullptr };
 
     bool mLoading = false;
-    QWidget* mUiToDisable = nullptr;
+    QWidget* mUiToDisable{ nullptr };
 };
 
 #endif // MAINWINDOW_h

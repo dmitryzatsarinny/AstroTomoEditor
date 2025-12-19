@@ -119,7 +119,7 @@ static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
 }
 
 HistogramDialog::HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* image)
-    : DialogShell(parent, tr("Histogram")), mImage(image)
+    : DialogShell(parent, tr("Histogram"), WindowType::Histogram), mImage(image)
 {
     autoleft = -1;
     autoright = -1;
@@ -153,7 +153,7 @@ void HistogramDialog::buildUi()
     v->addWidget(mCanvas, 1);
 
     // === кнопка прямо на canvas ===
-    mBtnAuto = new QPushButton(tr("Auto Range"), mCanvas);
+    mBtnAuto = new QPushButton(tr("Auto range"), mCanvas);
     mBtnAuto->setFixedSize(90, 28);   // аккуратный, стабильный размер
     mBtnAuto->raise();
 

@@ -5,7 +5,7 @@
 #include <QLabel>
 
 PatientDialog::PatientDialog(QWidget* parent)
-    : DialogShell(parent, QObject::tr("Patient Data"))
+    : DialogShell(parent, QObject::tr("Patient data"), WindowType::Patient)
 {
     setWindowFlag(Qt::Tool);
     setFixedSize(mCompactSize);

@@ -7,22 +7,32 @@
 class QWidget;
 class TitleBar;
 
+enum WindowType
+{
+    Main = 0,
+    Explorer = 1,
+    Settings = 2,
+    Patient = 3,
+    Histogram = 4,
+    TranferFunction = 5
+};
+
 class DialogShell : public QDialog
 {
 public:
     explicit DialogShell(QWidget* parent = nullptr,
-        const QString& title = QString());
+        const QString& title = QString(), const int typeofwindow = WindowType::Main);
     ~DialogShell() override;
 
     QWidget* contentWidget() const { return mContent; }
     TitleBar* titleBar() const { return mTitleBar; }
-
+    void retranslateUi();
 private:
     QWidget* mCard = nullptr;
     QWidget* mContent = nullptr;
     TitleBar* mTitleBar = nullptr;
 
-    void buildUi(const QString& title);
+    void buildUi(const QString& title, const int typeofwindow = WindowType::Main);
     void applyStyle();
 };
 

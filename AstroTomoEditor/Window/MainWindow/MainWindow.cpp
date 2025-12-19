@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QEvent>
 #include <QElapsedTimer>
+#include <Services/LanguageManager.h>
 
 namespace 
 {
@@ -33,10 +34,10 @@ MainWindow::MainWindow(QWidget* parent,
     if (auto* mb = menuBar()) mb->setNativeMenuBar(false);
 #endif
 
-    qApp->installEventFilter(this);
+    //qApp->installEventFilter(this);
 
     buildUi();
-    mUiToDisable = centralWidget();
+    mUiToDisable = mSplit;
     buildStyles();
     wireSignals();
 
@@ -177,7 +178,6 @@ void MainWindow::buildUi()
 
     mCornerGrip = new CornerGrip(mFooter);
     mCornerGrip->raise();
-    //QTimer::singleShot(0, this, [this] { positionCornerGrip(); });
 
     outer->addWidget(central);
     mOuter = outer;
@@ -192,7 +192,44 @@ void MainWindow::buildUi()
     sb->setStyleSheet("QStatusBar{ background:transparent; border:0; margin:0; padding:0; }");
     setStatusBar(sb);
     sb->hide(); 
+
+    if (!mPatientDlg)
+        mPatientDlg = new PatientDialog(this);
+    mPatientDlg->hide();
+
+    if (!mSettingsDlg)
+        mSettingsDlg = new SettingsDialog(this);
+    mSettingsDlg->hide();
+
+    connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
+        {
+            LanguageManager::instance().setLanguage(code);
+        });
+
+    retranslateUi();
+    connect(&LanguageManager::instance(), &LanguageManager::languageChanged,
+        this, [this] { retranslateUi(); });
 }
+
+void MainWindow::retranslateUi()
+{
+    setWindowTitle(tr("Astrocard DICOM Editor"));
+
+    if (mStatusText)
+        mStatusText->setText(tr("Ready"));
+
+    if (mTitle)
+        mTitle->retranslateUi();   // добавим ниже
+
+
+    // и чтобы "Patient: %1" пересобралось через tr()
+    if (mTitle)
+        mTitle->setPatientInfo(mCurrentPatient);
+
+    if(mSettingsDlg)
+        mSettingsDlg->retranslateUi();
+}
+
 
 void MainWindow::showEvent(QShowEvent* e) {
     QMainWindow::showEvent(e);
@@ -359,6 +396,9 @@ void MainWindow::wireSignals()
     // TitleBar
     connect(mTitle, &TitleBar::patientClicked,
         this, &MainWindow::showPatientDetails);
+
+    connect(mTitle, &TitleBar::settingsClicked,
+        this, &MainWindow::showSettings);
 
     // Series panel → header / viewer / scan progress
     connect(mSeries, &SeriesListPanel::patientInfoChanged,
@@ -527,7 +567,7 @@ void MainWindow::wireSignals()
     connect(mTitle, &TitleBar::save3DRRequested, this, &MainWindow::onSave3DR);
 
     // Горячая клавиша Ctrl+S (по желанию)
-    auto* actSave = new QAction(tr("Сохранить 3DR"), this);
+    auto* actSave = new QAction(tr("Save 3DR"), this);
     actSave->setShortcut(QKeySequence::Save);
     connect(actSave, &QAction::triggered, this, &MainWindow::onSave3DR);
     addAction(actSave);
@@ -565,7 +605,7 @@ void MainWindow::onSave3DR()
 
     auto vol = mRenderView->image();
     if (!vol) {
-        QMessageBox::warning(this, tr("Сохранение 3DR"), tr("Нет объёма для сохранения."));
+        QMessageBox::warning(this, tr("Save 3DR"), tr("No volume to save"));
         return;
     }
 
@@ -579,6 +619,7 @@ void MainWindow::StartLoading()
         return;
 
     mLoading = true;
+    mUiToDisable = centralWidget();
 
     QObject* src = sender();
     std::optional<QSignalBlocker> blocker;
@@ -645,6 +686,7 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* event)
         case QEvent::Wheel:
         case QEvent::KeyPress:
         case QEvent::KeyRelease:
+        case QEvent::DragMove:
         case QEvent::TouchBegin:
         case QEvent::TouchUpdate:
         case QEvent::TouchEnd:
@@ -689,6 +731,13 @@ void MainWindow::startScan()
 void MainWindow::changeEvent(QEvent* e)
 {
     QMainWindow::changeEvent(e);
+
+    if (e->type() == QEvent::LanguageChange)
+    {
+        retranslateUi();
+        return;
+    }
+
     if (e->type() == QEvent::WindowStateChange)
     {
         applyMaximizedUi(isMaximized());
@@ -760,14 +809,6 @@ void MainWindow::onSeriesActivated(const QString& /*seriesUID*/, const QVector<Q
     mStatusText->setText(tr("Series loading…"));
 }
 
-void MainWindow::ensurePatientDialog()
-{
-    if (mPatientDlg)
-        return;
-
-    mPatientDlg = new PatientDialog(this);
-}
-
 void MainWindow::onShowVolume3D()
 {
     if (!mPlanar) return;
@@ -788,7 +829,7 @@ void MainWindow::onShowVolume3D()
     mViewerStack->setCurrentWidget(mRenderView);
 
     if (mTitle) { mTitle->set3DChecked(true); mTitle->set2DChecked(false); }
-    mStatusText->setText(tr("Ready Volume"));
+    mStatusText->setText(tr("Ready volume"));
 
     mTitle->setSaveVisible(true);
 }
@@ -818,7 +859,8 @@ void MainWindow::showPatientDetails()
     if (mCurrentPatient.patientName.isEmpty())
         return;
 
-    ensurePatientDialog();
+    if (!mPatientDlg)
+        mPatientDlg = new PatientDialog(this);
 
     mPatientDlg->setInfo(mCurrentPatient);
 
@@ -830,4 +872,20 @@ void MainWindow::showPatientDetails()
     const QRect r = geometry();
     const QSize s = mPatientDlg->size();
     mPatientDlg->move(r.center() - QPoint(s.width() / 2, s.height() / 2 + 40));
+}
+
+void MainWindow::showSettings()
+{
+    if (!mSettingsDlg)
+        mSettingsDlg = new SettingsDialog(this);
+
+
+    mSettingsDlg->show();
+    mSettingsDlg->raise();
+    mSettingsDlg->activateWindow();
+
+    // Центрируем относительно главного окна
+    const QRect r = geometry();
+    const QSize s = mSettingsDlg->size();
+    mSettingsDlg->move(r.center() - QPoint(s.width() / 2, s.height() / 2 + 40));
 }

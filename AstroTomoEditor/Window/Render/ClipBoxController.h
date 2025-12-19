@@ -5,13 +5,15 @@
 #include <QObject>
 #include <vtkSmartPointer.h>
 #include <vtkObject.h>
+
 #include <vtkRenderer.h>
 #include <vtkVolume.h>
-#include <vtkImageData.h>
+
+#include "FaceOnlyBoxRepresentation.h"
+#include "FaceOnlyBoxWidget.h"
 
 class vtkRenderer;
 class vtkRenderWindowInteractor;
-class vtkBoxWidget2;
 class vtkBoxRepresentation;
 class vtkCallbackCommand;
 class vtkImageData;
@@ -42,7 +44,6 @@ public:
     // Положить коробку заново по границам объёма
     void resetToBounds();
     void applyNow();
-
 private:
     // применяет текущие границы виджета как planes в мэппер
     void applyClippingFromBox();
@@ -52,13 +53,14 @@ private:
 
 private:
     bool mEnabled{ false };
+    int mPrevProcessEvents = 1;
 
     vtkSmartPointer<vtkRenderer>                mRenderer;
     vtkSmartPointer<vtkRenderWindowInteractor>  mInteractor;
     vtkSmartPointer<vtkVolume>                  mVolume;
     vtkSmartPointer<vtkActor>                   mSurface;
-    vtkSmartPointer<vtkBoxWidget2>              mWidget;
-    vtkSmartPointer<vtkBoxRepresentation>       mRep;
+    vtkSmartPointer<FaceOnlyBoxWidget>          mWidget;
+    vtkSmartPointer<FaceOnlyBoxRepresentation>  mRep;
     vtkSmartPointer<vtkCallbackCommand>         mCb;
 };
 

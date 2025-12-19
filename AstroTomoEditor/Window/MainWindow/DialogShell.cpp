@@ -5,8 +5,10 @@
 #include <QWidget>
 #include <QIcon>
 
+
+
 DialogShell::DialogShell(QWidget* parent,
-    const QString& title)
+    const QString& title, const int typeofwindow)
     : QDialog(parent)
 {
     // Без рамки, с нашим собственным заголовком
@@ -22,13 +24,18 @@ DialogShell::DialogShell(QWidget* parent,
     // Иконка приложения (можешь убрать, если нужно)
     setWindowIcon(QIcon(":/icons/Resources/dicom_heart.ico"));
 
-    buildUi(title);
+    buildUi(title, typeofwindow);
     applyStyle();
 }
 
 DialogShell::~DialogShell() = default;
 
-void DialogShell::buildUi(const QString& title)
+void DialogShell::retranslateUi()
+{
+    mTitleBar->retranslateUi();
+}
+
+void DialogShell::buildUi(const QString& title, const int typeofwindow)
 {
     // Внешний отступ от прозрачного фона до карточки
     auto* outer = new QVBoxLayout(this);
@@ -46,7 +53,7 @@ void DialogShell::buildUi(const QString& title)
     cardLayout->setSpacing(0);
 
     // TitleBar сверху
-    mTitleBar = new TitleBar(this, 1, title);
+    mTitleBar = new TitleBar(this, typeofwindow, title);
     mTitleBar->setObjectName("TitleBar");
     cardLayout->addWidget(mTitleBar, 0);
 

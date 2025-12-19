@@ -18,15 +18,15 @@ bool Save3DR::saveWithDialog(QWidget* parent, vtkImageData* img, const DicomInfo
 {
     if (!img) 
     {
-        QMessageBox::warning(parent, QObject::tr("Сохранение 3DR"),
-            QObject::tr("Нет загруженного объёма."));
+        QMessageBox::warning(parent, QObject::tr("Save 3DR"),
+            QObject::tr("No loaded volume"));
         return false;
     }
 
     const QString defDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
     const QString path = QFileDialog::getSaveFileName(
         parent,
-        QObject::tr("Сохранить как 3DR"),
+        QObject::tr("Save as 3DR"),
         defDir + "/volume.3dr",
         QObject::tr("Astro 3DR (*.3dr)")
     );
@@ -34,8 +34,8 @@ bool Save3DR::saveWithDialog(QWidget* parent, vtkImageData* img, const DicomInfo
 
     QString err;
     if (!Save3DR::write(path, img, dicom, &err)) {
-        QMessageBox::critical(parent, QObject::tr("Сохранение 3DR"),
-            QObject::tr("Не удалось сохранить файл:\n%1").arg(err));
+        QMessageBox::critical(parent, QObject::tr("Save 3DR"),
+            QObject::tr("Failed to save file:\n%1").arg(err));
         return false;
     }
     return true;

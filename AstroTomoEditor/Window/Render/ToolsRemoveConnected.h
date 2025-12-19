@@ -101,7 +101,7 @@ private:
     void PlusVoxels();
     void AddBaseToBounds(const std::vector<uint8_t>& mark, const int seedIn[3]);
     void ErodeBy6Neighbors(Volume& volume);
-    bool AddBy6Neighbors(Volume& volume);
+    bool AddBy6Neighbors(Volume& volume, uint8_t fillVal);
     void FillEmptyRegions(const std::vector<uint8_t>& mark, const int seedIn[3]);
     void TotalSmoothingVolume();
     void PeelRecoveryVolume();

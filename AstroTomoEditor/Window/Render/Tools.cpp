@@ -20,21 +20,21 @@ namespace Tools
         auto* menu = new QMenu(parent);
 
         QObject::connect(menu->addAction(QObject::tr("Scissors")), &QAction::triggered, [onAction] { onAction(Action::Scissors); });
-        QObject::connect(menu->addAction(QObject::tr("InverseScissors")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors); });
+        QObject::connect(menu->addAction(QObject::tr("Inverse scissors")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors); });
         menu->addSeparator();
-        QObject::connect(menu->addAction(QObject::tr("RemoveUnconnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveUnconnected); });
-        QObject::connect(menu->addAction(QObject::tr("RemoveSelected")), &QAction::triggered, [onAction] { onAction(Action::RemoveSelected); });
-        QObject::connect(menu->addAction(QObject::tr("RemoveConnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveConnected); });
-        QObject::connect(menu->addAction(QObject::tr("SmartDeleting")), &QAction::triggered, [onAction] { onAction(Action::SmartDeleting); });
+        QObject::connect(menu->addAction(QObject::tr("Remove unconnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveUnconnected); });
+        QObject::connect(menu->addAction(QObject::tr("Remove selected")), &QAction::triggered, [onAction] { onAction(Action::RemoveSelected); });
+        QObject::connect(menu->addAction(QObject::tr("Remove connected")), &QAction::triggered, [onAction] { onAction(Action::RemoveConnected); });
+        QObject::connect(menu->addAction(QObject::tr("Smart deleting")), &QAction::triggered, [onAction] { onAction(Action::SmartDeleting); });
         menu->addSeparator();
-        QObject::connect(menu->addAction(QObject::tr("VoxelEraser")), &QAction::triggered, [onAction] { onAction(Action::VoxelEraser); });
-        QObject::connect(menu->addAction(QObject::tr("VoxelRecovery")), &QAction::triggered, [onAction] { onAction(Action::VoxelRecovery); });
+        QObject::connect(menu->addAction(QObject::tr("Voxel eraser")), &QAction::triggered, [onAction] { onAction(Action::VoxelEraser); });
+        QObject::connect(menu->addAction(QObject::tr("Voxel recovery")), &QAction::triggered, [onAction] { onAction(Action::VoxelRecovery); });
         menu->addSeparator();
-        QObject::connect(menu->addAction(QObject::tr("AddBase")), &QAction::triggered, [onAction] { onAction(Action::AddBase); });
-        QObject::connect(menu->addAction(QObject::tr("FillEmpty")), &QAction::triggered, [onAction] { onAction(Action::FillEmpty); });
-        QObject::connect(menu->addAction(QObject::tr("TotalSmoothing")), &QAction::triggered, [onAction] { onAction(Action::TotalSmoothing); });
-        QObject::connect(menu->addAction(QObject::tr("SurfaceMapping")), &QAction::triggered, [onAction] { onAction(Action::SurfaceMapping); });
-        QObject::connect(menu->addAction(QObject::tr("PeelRecovery")), &QAction::triggered, [onAction] { onAction(Action::PeelRecovery); });
+        QObject::connect(menu->addAction(QObject::tr("Add base")), &QAction::triggered, [onAction] { onAction(Action::AddBase); });
+        QObject::connect(menu->addAction(QObject::tr("Fill the void")), &QAction::triggered, [onAction] { onAction(Action::FillEmpty); });
+        QObject::connect(menu->addAction(QObject::tr("Total smoothing")), &QAction::triggered, [onAction] { onAction(Action::TotalSmoothing); });
+        QObject::connect(menu->addAction(QObject::tr("Surface mapping")), &QAction::triggered, [onAction] { onAction(Action::SurfaceMapping); });
+        QObject::connect(menu->addAction(QObject::tr("Peel recovery")), &QAction::triggered, [onAction] { onAction(Action::PeelRecovery); });
         menu->addSeparator();
         QObject::connect(menu->addAction(QObject::tr("Plus")), &QAction::triggered, [onAction] { onAction(Action::Plus); });
         QObject::connect(menu->addAction(QObject::tr("Minus")), &QAction::triggered, [onAction] { onAction(Action::Minus); });
@@ -47,13 +47,13 @@ namespace Tools
         switch (a) 
         {
         case Action::Scissors:        return QObject::tr("Scissors");
-        case Action::InverseScissors: return QObject::tr("Inverse Scissors");
-        case Action::RemoveUnconnected:return QObject::tr("Remove Unconnected");
-        case Action::RemoveSelected: return QObject::tr("Remove Selected");
-        case Action::RemoveConnected: return QObject::tr("Remove Connected");
-        case Action::SmartDeleting: return QObject::tr("Smart Deleting");
-        case Action::VoxelEraser: return QObject::tr("Voxel Eraser");
-        case Action::VoxelRecovery: return QObject::tr("Voxel Recovery");
+        case Action::InverseScissors: return QObject::tr("Inverse scissors");
+        case Action::RemoveUnconnected:return QObject::tr("Remove unconnected");
+        case Action::RemoveSelected: return QObject::tr("Remove selected");
+        case Action::RemoveConnected: return QObject::tr("Remove connected");
+        case Action::SmartDeleting: return QObject::tr("Smart deleting");
+        case Action::VoxelEraser: return QObject::tr("Voxel eraser");
+        case Action::VoxelRecovery: return QObject::tr("Voxel recovery");
         }
         return QObject::tr("Edit");
     }

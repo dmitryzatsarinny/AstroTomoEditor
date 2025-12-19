@@ -6,7 +6,7 @@
 CornerGrip::CornerGrip(QWidget* parent) : QWidget(parent) {
     setFixedSize(22, 22);
     setCursor(Qt::SizeFDiagCursor); 
-    setToolTip(tr("Change Size"));
+    setToolTip(tr("Change size"));
     setAttribute(Qt::WA_NoMousePropagation);
     setAttribute(Qt::WA_TransparentForMouseEvents, false);
     setStyleSheet("background: transparent;");
