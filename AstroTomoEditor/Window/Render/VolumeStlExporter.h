@@ -27,11 +27,12 @@ struct VisibleExportOptions
 
     bool   binaryStl = true;
 
-    std::function<void(int, const char*)> progress;
+    std::function<void(int, const QString&)> progress;
 };
 
 class VolumeStlExporter
 {
+
 public:
     static vtkSmartPointer<vtkPolyData> BuildFromVisible(
         vtkImageData* image,

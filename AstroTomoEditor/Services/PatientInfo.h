@@ -10,4 +10,21 @@ struct PatientInfo
 	QString Mode;
 	QString Description;
 	QString Sequence;
+
+	QString RepetitionTime;
+	QString EchoTime;
+	QString InversionTime;
+	QString FlipAngle;
+	QString ScanningSequence;
+	QString ImageType;
+
+	QString MagneticFieldStrength;
+	QString ScanOptions;
+	QString Manufacturer;
+
+	QString ContrastBolusAgent;
+	QString ContrastBolusStartTime;
+
+	QString DicomPath;
+	QString SeriesNumber;
 };

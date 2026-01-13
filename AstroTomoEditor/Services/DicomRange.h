@@ -24,6 +24,14 @@ struct DicomInfo
     QString YTitle = "Voxel count";
     QString XLable = "HU";
     QString YLable = "N";
+
+    quint16 Sex = 0;
+    QString patientName = "Null";
+    QString patientId = "0";
+    QString Description = "Null";
+    QString Sequence = "Null";
+    QString SeriesNumber = "0";
+    QString DicomPath = "C:\\";
 };
 
 

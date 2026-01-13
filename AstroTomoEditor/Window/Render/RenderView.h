@@ -23,6 +23,7 @@
 #include <QSpinBox>
 #include "WheelSpinButton.h"
 #include "U8Span.h"
+#include "TemplateDialog.h"
 
 class QVTKOpenGLNativeWidget;
 class vtkRenderer;
@@ -38,8 +39,16 @@ class TransferFunctionEditor;
 class vtkActor;
 class HistogramDialog;
 class VolumeSurfaceFinder;
+class vtkPolyData;
+class vtkColorTransferFunction;
+class vtkPiecewiseFunction;
+class vtkVolumeProperty;
+class TemplateDialog;
 
 enum class ViewPreset { AP, PA, LAO, RAO, L, R };
+
+static constexpr const char* kGradOpacityKey = "render/gradientOpacity";
+static constexpr const char* kInterpKey = "render/volumeInterpolation"; // 0 nearest, 1 linear
 
 class RenderView : public QWidget
 {
@@ -47,7 +56,7 @@ class RenderView : public QWidget
 public:
     explicit RenderView(QWidget* parent = nullptr);
     ~RenderView() override;
-    void setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom);
+    void setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom, PatientInfo info);
     void setViewPreset(ViewPreset v);
     void centerOnVolume();
     void hideOverlays();
@@ -60,16 +69,25 @@ public:
     void setImage(vtkSmartPointer<vtkImageData> img);
     DicomInfo GetDicomInfo() const { return DI; };
 
+    enum class VolumeInterpolation { Nearest = 0, Linear = 1 };
+
+    void setGradientOpacityEnabled(bool on);
+    void setVolumeInterpolation(VolumeInterpolation m);
+    void saveTemplates(QString savedir);
+
 signals:
     void renderStarted();
     void renderProgress(int processed);
+    void Progress(int p);
     void renderFinished();
     void showInfo(const QString& text);
     void showWarning(const QString& text);
+    void gradientOpacityChanged(bool on);
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
     void showEvent(QShowEvent* e) override;
+    void changeEvent(QEvent* e) override;
 
 private slots:
     void onBuildStl();
@@ -78,7 +96,13 @@ private slots:
     void onUndo();
     void onRedo();
     void openHistogram();
+    void openTemplate();
     void onShiftChanged(int val);
+    void onTemplateCapture(TemplateId id);
+    void onTemplateSetVisible(TemplateId id, bool on);
+    void onTemplateClear(TemplateId id);
+    void onTemplateClearAll();
+    void onTemplateClearScene();
 
 private:
     vtkSmartPointer<vtkImageData> mImage;
@@ -88,6 +112,7 @@ private:
     vtkSmartPointer<vtkVolume> mVolume;
     vtkSmartPointer<vtkOrientationMarkerWidget> mOrMarker;
     vtkSmartPointer<vtkAxesActor> mAxes;
+    vtkSmartPointer<vtkImageData> mVisibleMask;
 
     QWidget* mRightOverlay{ nullptr };
 
@@ -112,10 +137,10 @@ private:
     vtkSmartPointer<vtkVolumeProperty> mProp;
     QToolButton* mBtnTF{ nullptr };
     QPointer<TransferFunctionEditor>   mTfEditor;
-
     QVector<TF::CustomPreset> mCustom;
     void reloadTfMenu();
     void reloadHistogram();
+    void reloadTemplate();
     void updateAfterImageChange(bool reattachTools);
 
     bool mOverlaysBuilt{ false };
@@ -138,6 +163,9 @@ private:
     bool applyPreset(TFPreset p);
     bool ToolModeChanged(Action a);
     bool AppModeChanged(App a);
+
+    void ensureTemplateDialog();
+    void rebuildVisibleMaskFromImage(vtkImageData* src);
 
     bool mToolActive{ false };
     Action mCurrentTool{};
@@ -165,6 +193,12 @@ private:
     QPointer<HistogramDialog> mHistDlg;
     vtkSmartPointer<vtkColorTransferFunction> mBaseCTF;
     vtkSmartPointer<vtkPiecewiseFunction>     mBaseOTF;
+
+    QPointer<TemplateDialog> mTemplateDlg;
+    std::unordered_map<TemplateId, Volume> mTemplateVolumes;
+    void applyTemplateLayer(TemplateId id, bool visible);
+    void removeTemplateLayer(TemplateId id);
+    void removeAllTemplateLayers();
 
     WheelSpinButton* mBtnShift{ nullptr };
     int mShiftValue = 3;
@@ -194,4 +228,14 @@ private:
 
     bool mGradientOpacityOn = false;
     void updateGradientOpacity();
+    
+    void retranslateUi();
+    void reloadToolsMenu();
+    void reloadAppsMenu();
+    void updateToolCaptionFromState();
+    void updateAppCaptionFromState();
+
+    void loadRenderSettings();
+    void saveRenderSettings();
+    VolumeInterpolation mInterpolation = VolumeInterpolation::Nearest;
 };

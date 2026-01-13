@@ -6,7 +6,7 @@
 
 namespace DicomParcer
 {
-    QString normalizePN(QString pn)
+    inline QString normalizePN(QString pn)
     {
         QStringList parts = pn.split('^', Qt::KeepEmptyParts);
         for (QString& p : parts) p = p.trimmed();
@@ -16,7 +16,7 @@ namespace DicomParcer
         return parts.join(' ').trimmed();
     }
 
-    QString normalizeDicomDate(QString s)
+    inline QString normalizeDicomDate(QString s)
     {
         s = s.trimmed();
         if (s.isEmpty()) return s;
@@ -47,14 +47,21 @@ namespace DicomParcer
         return s;
     }
 
-    QString mapSex(QString sx)
+    inline QString mapSex(QString sx)
     {
         sx = sx.trimmed().toUpper();
-        if (sx == "M") return "Male";
-        if (sx == "F") return "Female";
-        if (sx == "O") return "Other";
-        if (sx == "U") return "No";
+        if (sx == "M") return QObject::tr("Male");
+        if (sx == "F") return QObject::tr("Female");
+        if (sx == "O") return QObject::tr("Other");
+        if (sx == "U") return QObject::tr("Unknown"); // лучше так, чем "No"
         return sx;
+    }
+
+    inline QString mapSex(quint16 uix)
+    {
+        if (uix == 1) return QObject::tr("Male");
+        if (uix == 2) return QObject::tr("Female");
+        return QObject::tr("Unknown");
     }
 
     static bool looksLikeDicomDirDataset(const QString& file)
@@ -106,7 +113,7 @@ namespace DicomParcer
             (quint32(p[3]) << 24);
     }
 
-    QStringList dicomFoldersFromDicomdir(const QString& dicomdirPath)
+    inline QStringList dicomFoldersFromDicomdir(const QString& dicomdirPath)
     {
         QStringList result;
         QSet<QString> dirs;

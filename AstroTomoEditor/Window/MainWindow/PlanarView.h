@@ -5,6 +5,7 @@
 #include "..\..\Services\Pool.h"
 #include "vtkMatrix3x3.h"
 #include "..\..\Services/DicomRange.h"
+#include "SeriesListPanel.h"
 
 class QGraphicsPixmapItem;
 class QGraphicsScene;
@@ -35,7 +36,7 @@ public:
     void fitToWindow();
     void resetZoom();
     void rebuildPixmap();
-    
+    void retranslateUi();
 
     QVector3D voxelSpacing() const { return { float(mSpX), float(mSpY), float(mSpZ) }; }
 
@@ -56,6 +57,7 @@ public:
         QString reason;
     };
     static ValidationReport filterSeriesByConsistency(const QVector<QString>& files);
+    static ValidationReport filterSeriesByConsistency(const QVector<SeriesScanResult::QuickDicomFile>& entries);
 
 signals:
     void loadStarted(int total);
@@ -72,7 +74,8 @@ public slots:
 protected:
     void resizeEvent(QResizeEvent* e) override;
     bool eventFilter(QObject* obj, QEvent* ev) override;
-    
+    void changeEvent(QEvent* e) override;
+
 private:
     // UI/overlay
     void initUi();

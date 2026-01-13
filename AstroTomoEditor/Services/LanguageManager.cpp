@@ -1,6 +1,9 @@
 ﻿#include "LanguageManager.h"
+
 #include <QApplication>
-#include <qfile.h>
+#include <QTranslator>
+#include <QDebug>
+#include <QLibraryInfo>
 
 LanguageManager& LanguageManager::instance()
 {
@@ -10,8 +13,10 @@ LanguageManager& LanguageManager::instance()
 
 bool LanguageManager::setLanguage(const QString& code)
 {
+    const QString lang = (code == "ru" || code == "en") ? code : "ru";
+
     const bool alreadyInstalled = (mAppTr && mQtTr);
-    if (code == mLang && alreadyInstalled)
+    if (lang == mLang && alreadyInstalled)
         return true;
 
     if (mAppTr) qApp->removeTranslator(mAppTr.get());
@@ -20,13 +25,27 @@ bool LanguageManager::setLanguage(const QString& code)
     mAppTr = std::make_unique<QTranslator>();
     mQtTr = std::make_unique<QTranslator>();
 
-    const bool okApp = mAppTr->load(":/i18n/AstroDicomEditor_" + code + ".qm");
-    const bool okQt = mQtTr->load(":/i18n/qtbase_" + code + ".qm");
+    // --- Qt base (для QFileSystemModel, стандартных диалогов и т.п.)
+    bool okQt = mQtTr->load(":/i18n/qtbase_" + lang + ".qm");
+    if (!okQt) {
+        // fallback: dev-среда
+        okQt = mQtTr->load("qtbase_" + lang, QLibraryInfo::path(QLibraryInfo::TranslationsPath));
+    }
+
+    // --- App translations
+    const bool okApp = mAppTr->load(":/i18n/AstroDicomEditor_" + lang + ".qm"); // или AstroTomoEditor_
+    // ^ проверь имя!
+
+    qDebug() << "LanguageManager::setLanguage"
+        << "lang=" << lang
+        << "okQt=" << okQt
+        << "okApp=" << okApp;
 
     if (okQt)  qApp->installTranslator(mQtTr.get());
     if (okApp) qApp->installTranslator(mAppTr.get());
 
-    mLang = code;
+    mLang = lang;
     emit languageChanged();
     return okApp;
 }
+

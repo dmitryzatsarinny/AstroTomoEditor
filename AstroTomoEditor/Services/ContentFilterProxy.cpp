@@ -20,6 +20,43 @@ ContentFilterProxy::ContentFilterProxy(QObject* parent)
         });
 }
 
+QVariant ContentFilterProxy::data(const QModelIndex& index, int role) const
+{
+    if (!index.isValid())
+        return {};
+
+    // подмена отображаемого типа
+    if (role == Qt::DisplayRole && index.column() == 2)
+    {
+        const QModelIndex src = mapToSource(index);
+
+        auto* fsm = qobject_cast<QFileSystemModel*>(sourceModel());
+        if (fsm)
+        {
+            const QString path = fsm->filePath(src);
+            const QFileInfo fi(path);
+
+#ifdef Q_OS_WIN
+            // корень диска
+            if (fi.isDir() && fi.isRoot())
+                return tr("Drive");   // переведёшь как "Диск"
+#endif
+            if (fi.isDir())
+                return tr("Folder");  // "Папка"
+
+            // для файлов можно:
+            // 1) пусто (как проводник иногда)
+            // 2) расширение
+            // 3) просто "File"
+            if (fi.isFile())
+                return tr("File");
+        }
+    }
+
+    return QSortFilterProxyModel::data(index, role);
+}
+
+
 void ContentFilterProxy::scheduleInvalidate()
 {
     if (!refilterTimer_)

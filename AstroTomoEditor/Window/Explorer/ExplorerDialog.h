@@ -18,6 +18,7 @@ class QCheckBox;
 class TitleBar;
 class AsyncProgressBar;
 
+
 class ExplorerDialog : public DialogShell
 {
     Q_OBJECT                                                    // Макрос Qt MOC: включает мета-информацию (RTTI Qt), поддержку сигналов/слотов и dynamic cast внутри Qt.

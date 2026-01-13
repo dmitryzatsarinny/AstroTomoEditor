@@ -11,5 +11,6 @@
         <file>Resources/fullscreen-exit.svg</file>
         <file>Resources/ref.obj</file>
         <file>Resources/settings.svg</file>
+        <file>Resources/diskette-save.svg</file>
     </qresource>
 </RCC>

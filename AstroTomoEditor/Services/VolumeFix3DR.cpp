@@ -3,6 +3,7 @@
 #include <vtkImagePermute.h>
 #include <vtkImageFlip.h>
 #include <vtkImageAlgorithm.h>  // важно!
+#include "PatientInfo.h"
 
 inline uint16_t bswap16(uint16_t v) { return (uint16_t)((v >> 8) | ((v & 0xFF) << 8)); }
 

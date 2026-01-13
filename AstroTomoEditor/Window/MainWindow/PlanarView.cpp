@@ -47,7 +47,7 @@ static std::vector<int> buildSampleIndices(int first, int last, int step)
 // minWidth  — минимальная ширина пика (в бинах) по FWHM
 // minPromFrac — минимальная проминентность как доля от глобального максимума
 // Первый осмысленный пик справа от threshold (берём самый первый, а не "лучший")
-static bool detectFirstPeakAfter(const QVector<quint64>& mH,
+static bool detectFirstPeakAfter(const QVector<uint32_t>& mH,
     int threshold,
     int& outPeak,
     double minFrac = 0.05,
@@ -136,6 +136,7 @@ PlanarView::PlanarView(QWidget* parent) : QWidget(parent)
 {
     initUi();
     connect(mScroll, &QSlider::valueChanged, this, &PlanarView::setSlice);
+    retranslateUi();
 }
 
 void PlanarView::initUi()
@@ -234,6 +235,7 @@ void PlanarView::initUi()
 #include <vtkImageShrink3D.h>
 #include <cmath> 
 #include <algorithm> 
+#include <Services/PerfScan.h>
 
 vtkSmartPointer<vtkImageData> shrinkAlongAxis(vtkImageData* src, int axis, int factor)
 {
@@ -306,10 +308,10 @@ vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
     double sp[3]{};
     vol->GetSpacing(sp);
 
-    constexpr double minSliceThickness = 0.9; // мм
+    const double minSliceThickness = std::min(sp[0], sp[1]); // мм
 
     if (sp[2] > 0.0 && sp[2] < minSliceThickness && d > 1) {
-        // во сколько раз нужно утолщить, чтобы >= 0.9 мм
+        // во сколько раз нужно утолщить, чтобы >= minSliceThickness мм
         int factor = static_cast<int>(std::ceil(minSliceThickness / sp[2]));
         if (factor < 2) factor = 2;          // смысл есть только при factor >= 2
 
@@ -317,8 +319,8 @@ vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
         int maxFactor = std::max(2, d / 2);  // оставим хотя бы половину срезов
         factor = std::min(factor, maxFactor);
 
-        if (factor > 1) {
-            // axis = 2 → Z
+        if (factor > 1) 
+        {
             return shrinkAlongAxis(vol, /*axis=*/2, factor);
         }
     }
@@ -515,16 +517,29 @@ static bool canReconstructVolume(const QVector<QString>& files)
 
 void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 {
-    // --- сброс UI/состояния ---
-    emit loadStarted(0);
-    emit showInfo(tr("Preparing…"));
-    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    // ЛОКАЛЬНЫЙ помощник для «фазового» прогресса(до известного Z)
-        auto pump = [] {
-        // не чаще, чем ~каждые 12–16 мс, чтобы не душить UI
+#ifdef QT_DEBUG
+    PerfScan::reset();
+#endif
+    PERF_SCOPE(PerfScan::Id::PV_Total);
+
+    {
+        PERF_SCOPE(PerfScan::Id::PV_UiReset);
+        emit loadStarted(0);
+        emit showInfo(tr("Preparing…"));
+        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+    }
+
+    auto pump = [] {
         static QElapsedTimer t; if (!t.isValid()) t.start();
-        if (t.elapsed() > 12) { qApp->processEvents(QEventLoop::ExcludeUserInputEvents); t.restart(); }
+        if (t.elapsed() > 12) {
+            QElapsedTimer tt; tt.start();
+            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+#ifdef QT_DEBUG
+            PerfScan::addNs(PerfScan::Id::PV_Pump_ProcessEvents, tt.nsecsElapsed());
+#endif
+            t.restart();
+        }
         };
 
     auto phaseStart = [&](const QString& msg, int total = 100) {
@@ -599,15 +614,19 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     }
     else
     {
-        // 0) имена
         phaseStart(tr("Reading file list…"));
         auto names = vtkSmartPointer<vtkStringArray>::New();
-        names->SetNumberOfValues(files.size());
-        for (vtkIdType i = 0; i < static_cast<vtkIdType>(files.size()); ++i) {
-            names->SetValue(i, files[int(i)].toUtf8().constData());
-            if ((i & 31) == 0) phaseStep(int((100ll * (i + 1)) / std::max<vtkIdType>(1, files.size())));
+        {
+            PERF_SCOPE(PerfScan::Id::PV_BuildNames);
+
+            names->SetNumberOfValues(files.size());
+            for (vtkIdType i = 0; i < static_cast<vtkIdType>(files.size()); ++i) {
+                names->SetValue(i, files[int(i)].toUtf8().constData());
+                if ((i & 31) == 0) phaseStep(int((100ll * (i + 1)) / std::max<vtkIdType>(1, files.size())));
+            }
         }
         phaseDone();
+
 
         // 1) метаданные/сортировка
         phaseStart(tr("Reading DICOM metadata…"));
@@ -615,7 +634,10 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         auto errObs1 = vtkSmartPointer<VtkErrorCatcher>::New();
         mdReader->AddObserver(vtkCommand::ErrorEvent, errObs1);
         mdReader->SetFileNames(names);
-        mdReader->UpdateInformation();               // может занять время
+        {
+            PERF_SCOPE(PerfScan::Id::PV_md_UpdateInformation);
+            mdReader->UpdateInformation();
+        }
         phaseStep(60, tr("Parsing metadata…"));
         pump();
 
@@ -632,7 +654,11 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             const std::string ts = m->Get(DC::TransferSyntaxUID).AsString();
             return ts.rfind("1.2.840.10008.1.2.4.", 0) == 0 || ts == "1.2.840.10008.1.2.5";
             };
-        bool isCompressed = isCompressedTS(md);
+        bool isCompressed = false;
+        {
+            PERF_SCOPE(PerfScan::Id::PV_CheckTransferSyntax);
+            isCompressed = isCompressedTS(md);   // БЕЗ bool
+        }
         phaseDone();
 
         // 2a) Если НЕ сжато — обычный vtkDICOMReader
@@ -643,11 +669,17 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             pixReader->AddObserver(vtkCommand::ErrorEvent, errObs2);
             pixReader->SetFileNames(names);
 
-            pixReader->UpdateInformation();          // долгая точка №1
+            {
+                PERF_SCOPE(PerfScan::Id::PV_Pix_UpdateInformation);
+                pixReader->UpdateInformation();
+            }
             phaseStep(40, tr("Allocating image…"));
             pump();
 
-            pixReader->Update();                     // долгая точка №2
+            {
+                PERF_SCOPE(PerfScan::Id::PV_Pix_Update);
+                pixReader->Update();
+            }
             phaseStep(90, tr("Preparing geometry…"));
             pump();
 
@@ -659,28 +691,32 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             }
             volume = pixReader->GetOutput();
             srcPort = pixReader->GetOutputPort();
-
-            // Геометрия LPS
-            double iop[6]{ 1,0,0, 0,1,0 };
-            if (md->Has(DC::ImageOrientationPatient)) {
-                const auto v = md->Get(DC::ImageOrientationPatient);
-                for (int i = 0; i < 6 && i < v.GetNumberOfValues(); ++i) iop[i] = v.GetDouble(i);
+            {
+                PERF_SCOPE(PerfScan::Id::PV_Geometry);
+                // Геометрия LPS
+                double iop[6]{ 1,0,0, 0,1,0 };
+                if (md->Has(DC::ImageOrientationPatient)) {
+                    const auto v = md->Get(DC::ImageOrientationPatient);
+                    for (int i = 0; i < 6 && i < v.GetNumberOfValues(); ++i) iop[i] = v.GetDouble(i);
+                }
+                const QVector3D RR(iop[0], iop[1], iop[2]);
+                const QVector3D CC(iop[3], iop[4], iop[5]);
+                const QVector3D NN = QVector3D::crossProduct(RR, CC);
+                mDir = QMatrix3x3();
+                mDir(0, 0) = RR.x(); mDir(1, 0) = RR.y(); mDir(2, 0) = RR.z();
+                mDir(0, 1) = CC.x(); mDir(1, 1) = CC.y(); mDir(2, 1) = CC.z();
+                mDir(0, 2) = NN.x(); mDir(1, 2) = NN.y(); mDir(2, 2) = NN.z();
+                if (md->Has(DC::ImagePositionPatient)) {
+                    const auto ipp = md->Get(DC::ImagePositionPatient);
+                    mOrg[0] = ipp.GetDouble(0); mOrg[1] = ipp.GetDouble(1); mOrg[2] = ipp.GetDouble(2);
+                }
             }
-            const QVector3D RR(iop[0], iop[1], iop[2]);
-            const QVector3D CC(iop[3], iop[4], iop[5]);
-            const QVector3D NN = QVector3D::crossProduct(RR, CC);
-            mDir = QMatrix3x3();
-            mDir(0, 0) = RR.x(); mDir(1, 0) = RR.y(); mDir(2, 0) = RR.z();
-            mDir(0, 1) = CC.x(); mDir(1, 1) = CC.y(); mDir(2, 1) = CC.z();
-            mDir(0, 2) = NN.x(); mDir(1, 2) = NN.y(); mDir(2, 2) = NN.z();
-            if (md->Has(DC::ImagePositionPatient)) {
-                const auto ipp = md->Get(DC::ImagePositionPatient);
-                mOrg[0] = ipp.GetDouble(0); mOrg[1] = ipp.GetDouble(1); mOrg[2] = ipp.GetDouble(2);
-            }
-
             // DICOM-диапазоны/VOI
             phaseDone();
-            Dicom = GetDicomRangesVTK(pixReader);
+            {
+                PERF_SCOPE(PerfScan::Id::PV_GetDicomRanges);
+                Dicom = GetDicomRangesVTK(pixReader);
+            }
             pump();
         }
         // 2b) Если СЖАТО — декодируем через vtkGDCMImageReader
@@ -769,11 +805,11 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
                 mSpX = (sp[0] > 0) ? sp[0] : 1.0;
                 mSpY = (sp[1] > 0) ? sp[1] : 1.0;
                 mSpZ = (sp[2] > 0) ? sp[2] : 1.0;
-            };
+                };
 
             // DICOM-диапазоны/VOI — считаем по mdReader, он одинаков для обоих путей
             Dicom = GetDicomRangesVTK(mdReader);
-            
+
             if (!Dicom.SpCreated)
             {
                 Dicom.SpCreated = true;
@@ -804,31 +840,31 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         if (modalityStr == "CT") {
             Dicom.TypeOfRecord = CT;
             if (Dicom.intercept < -1000)
-            { 
+            {
                 Dicom.physicalMin = 0;
                 Dicom.physicalMax = 2048;
             }
-            else 
-            { 
+            else
+            {
                 Dicom.physicalMin = -1024;
                 Dicom.physicalMax = 1024;
             }
             Dicom.RealMin = -1000;
             Dicom.RealMax = 1000;
-            Dicom.XTitle = "Hounsfield Units";
-            Dicom.YTitle = "Voxel count";
-            Dicom.XLable = "HU";
-            Dicom.YLable = "N";
+            Dicom.XTitle = tr("Hounsfield Units");
+            Dicom.YTitle = tr("Voxel count");
+            Dicom.XLable = tr("HU");
+            Dicom.YLable = tr("N");
         }
         else if (modalityStr == "MR" || modalityStr == "MRI")
         {
             Dicom.TypeOfRecord = MRI;
             Dicom.physicalMin = 0; Dicom.physicalMax = 255;
             Dicom.RealMin = 0; Dicom.RealMax = 255;
-            Dicom.XTitle = "MRI intensity";
-            Dicom.YTitle = "Voxel count";
-            Dicom.XLable = "AU";
-            Dicom.YLable = "N";
+            Dicom.XTitle = tr("MRI intensity");
+            Dicom.YTitle = tr("Voxel count");
+            Dicom.XLable = tr("AU");
+            Dicom.YLable = tr("N");
         }
         phaseDone();
     }
@@ -852,8 +888,10 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     emit showInfo(tr("Caching slices… 0/%1").arg(Z));
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    buildCache(volume, srcPort, invertMono1, Dicom);
-
+    {
+        PERF_SCOPE(PerfScan::Id::PV_BuildCache);
+        buildCache(volume, srcPort, invertMono1, Dicom);
+    }
     avalibletoreconstruction = (Z > 1) && !mSlices.isEmpty();
 
     // --- UI финализация ---
@@ -875,6 +913,10 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         mScroll->show();
     else
         mScroll->hide();
+
+#ifdef QT_DEBUG
+    PerfScan::dumpTop(25);
+#endif
 }
 
 // ===== cache / display ======================================================
@@ -911,29 +953,175 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
     return static_cast<uchar>(bin);
 }
 
-
-//static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, bool invMono1)
+//void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, bool invertMono1, DicomInfo Dicom)
 //{
-//    int window = max - min;
-//    if (TypeOfRecord == CT)
-//    {
-//        if (v > max + window)
-//            v = max;
-//        else if (v > max - window / 20)
-//            v = max - window / 20;
+//    if (!volume) {
+//        mSlices.clear();
+//        emit loadProgress(0, 0);
+//        return;
 //    }
-//    double x = (v - min) * static_cast<double>(HistScale) / window;
-//    int y = static_cast<int>(std::floor(x));
-//    if (y < HistMin + 1)
-//        y = HistMin;
-//    if (y > HistMax)
-//        y = HistMax;
-//    if (invMono1) y = HistMax - y;
-//    return static_cast<uchar>(y);
+//
+//    PERF_SCOPE(PerfScan::Id::BC_Total);
+//
+//    int ext[6]; volume->GetExtent(ext);
+//    const int x0 = ext[0], x1 = ext[1];
+//    const int y0 = ext[2], y1 = ext[3];
+//    const int z0 = ext[4], z1 = ext[5];
+//
+//    const int w = x1 - x0 + 1;
+//    const int h = y1 - y0 + 1;
+//    const int total = z1 - z0 + 1;
+//
+//    if (w <= 0 || h <= 0 || total <= 0) {
+//        mSlices.clear();
+//        emit loadProgress(0, 0);
+//        return;
+//    }
+//
+//    // --- Универсальный вход: ВСЕГДА от готового vtkImageData ---
+//    vtkNew<vtkImageCast> cast;
+//    cast->SetInputData(volume);
+//    cast->SetOutputScalarTypeToDouble();
+//    cast->Update();
+//
+//    vtkImageData* imgD = cast->GetOutput();
+//    if (!imgD) {
+//        mSlices.clear();
+//        emit loadProgress(0, 0);
+//        return;
+//    }
+//
+//    mSlices.clear();
+//    mSlices.reserve(total);
+//
+//    if (Dicom.TypeOfRecord == CT)
+//    {
+//        QVector<uint32_t> mH(HistScale, 0);
+//
+//        // Приведём к double, чтобы не париться с типами
+//        vtkNew<vtkImageCast> cast;
+//        cast->SetInputData(volume);
+//        cast->SetOutputScalarTypeToDouble();
+//        cast->Update();
+//        vtkImageData* imgD = cast->GetOutput();
+//
+//        const double minPhys = Dicom.physicalMin;
+//        const double maxPhys = Dicom.physicalMax;
+//        const double window = std::max(1.0, maxPhys - minPhys);
+//
+//        for (int z = z1; z >= z0; --z)
+//        {
+//            // Определяем фактические инкременты по X/Y как разницу указателей
+//            auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
+//            auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
+//            auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
+//            if (!p00 || !p10 || !p01) continue;
+//
+//            const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
+//            const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
+//            const bool xPositive = (incXb_raw >= 0);
+//            const bool yPositive = (incYb_raw >= 0);
+//            const int  xStart = xPositive ? x0 : x1;
+//            const int  yStart = yPositive ? y0 : y1;
+//            const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
+//
+//            for (int yy = 0; yy < h; ++yy)
+//            {
+//                const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
+//                auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
+//                if (!row0) continue;
+//
+//                for (int xx = 0; xx < w; ++xx)
+//                {
+//                    const double raw = *reinterpret_cast<const double*>(row0 + stepXb * xx);
+//                    const double vHU = raw * Dicom.slope - Dicom.intercept;
+//
+//                    double x = (vHU - minPhys) * static_cast<double>(HistScale) / window;
+//                    int y = static_cast<int>(std::floor(x));
+//                    if (y < HistMin + 1)
+//                        y = HistMin;
+//                    if (y > HistMax)
+//                        y = HistMax;
+//                    mH[y]++;
+//                }
+//            }
+//            mH[0] = 0;
+//        }
+//
+//        int peakHU = 0;
+//
+//        if (detectFirstPeakAfter(mH, HistScale / 4, peakHU))
+//        {
+//            const double vHU = window / 2 - peakHU / static_cast<double>(HistScale) * window;
+//            int y = static_cast<int>(std::floor(vHU));
+//            int x = 0;
+//            Dicom.physicalMax -= (2 * y);
+//        }
+//    }
+//
+//    // Идём сверху вниз (как у тебя было: z = z1..z0), с периодической прокачкой прогресса
+//    for (int z = z1, idx = 0; z >= z0; --z, ++idx)
+//    {
+//        // Измеряем реальные байтовые шаги по X/Y, чтобы корректно читать даже при инвертированных stride
+//        auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
+//        auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
+//        auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
+//
+//        // Если что-то пошло не так — перестраховка
+//        if (!p00 || !p10 || !p01) {
+//            // попытаемся мягко пропустить этот срез
+//            QImage empty(w, h, QImage::Format_Grayscale8);
+//            empty.fill(0);
+//            mSlices.push_back(std::move(empty));
+//            continue;
+//        }
+//
+//        const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
+//        const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
+//
+//        const bool xPositive = (incXb_raw >= 0);
+//        const bool yPositive = (incYb_raw >= 0);
+//
+//        const int  xStart = xPositive ? x0 : x1;
+//        const int  yStart = yPositive ? y0 : y1;
+//        const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
+//
+//        QImage q(w, h, QImage::Format_Grayscale8);
+//
+//        for (int yy = 0; yy < h; ++yy)
+//        {
+//            const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
+//            auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
+//            uchar* dst = q.scanLine(yy);
+//
+//            // safety
+//            if (!row0 || !dst) {
+//                std::memset(dst, 0, size_t(w));
+//                continue;
+//            }
+//
+//            for (int xx = 0; xx < w; ++xx)
+//            {
+//                auto* p = reinterpret_cast<const double*>(row0 + stepXb * xx);
+//                const double vHU = (*p * Dicom.slope) - Dicom.intercept;
+//                dst[xx] = wl8(vHU, Dicom.physicalMin, Dicom.physicalMax, Dicom.TypeOfRecord, invertMono1);
+//            }
+//        }
+//
+//        q = q.mirrored();
+//        mSlices.push_back(std::move(q));
+//
+//        if (((idx + 1) % 8) == 0 || idx + 1 == total) {
+//            emit loadProgress(idx + 1, total);
+//            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+//        }
+//    }
 //}
 
-
-void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, bool invertMono1, DicomInfo Dicom)
+void PlanarView::buildCache(vtkImageData* volume,
+    vtkAlgorithmOutput* /*srcPort*/,
+    bool invertMono1,
+    DicomInfo Dicom)
 {
     if (!volume) {
         mSlices.clear();
@@ -956,137 +1144,173 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
         return;
     }
 
-    // --- Универсальный вход: ВСЕГДА от готового vtkImageData ---
-    vtkNew<vtkImageCast> cast;
-    cast->SetInputData(volume);
-    cast->SetOutputScalarTypeToDouble();
-    cast->Update();
+    // --- 1) ЕДИНСТВЕННЫЙ унифицированный вход: float (быстрее и достаточно) ---
+    vtkImageData* img = volume;
+    vtkSmartPointer<vtkImageCast> castF;
 
-    vtkImageData* imgD = cast->GetOutput();
-    if (!imgD) {
-        mSlices.clear();
-        emit loadProgress(0, 0);
-        return;
+    if (volume->GetScalarType() != VTK_FLOAT) {
+        castF = vtkSmartPointer<vtkImageCast>::New();
+        castF->SetInputData(volume);
+        castF->SetOutputScalarTypeToFloat();
+        {
+            // каст может быть заметным, но это ОДИН раз
+            castF->Update();
+        }
+        img = castF->GetOutput();
+        if (!img) {
+            mSlices.clear();
+            emit loadProgress(0, 0);
+            return;
+        }
     }
 
     mSlices.clear();
     mSlices.reserve(total);
 
+    // --- 2) CT: быстрый пик по подвыборке, без полного прохода по объему ---
     if (Dicom.TypeOfRecord == CT)
     {
-        QVector<quint64> mH(HistScale, 0);
 
-        // Приведём к double, чтобы не париться с типами
-        vtkNew<vtkImageCast> cast;
-        cast->SetInputData(volume);
-        cast->SetOutputScalarTypeToDouble();
-        cast->Update();
-        vtkImageData* imgD = cast->GetOutput();
+        const int maxZSlices = 64;
+        const int zStep = std::max(1, total / maxZSlices);
+        const int xyStep = 3;
 
-        const double minPhys = Dicom.physicalMin;
-        const double maxPhys = Dicom.physicalMax;
-        const double window = std::max(1.0, maxPhys - minPhys);
+        QVector<uint32_t> hist(HistScale, 0u);
 
-        for (int z = z1; z >= z0; --z)
+        const float minPhys = float(Dicom.physicalMin);
+        const float maxPhys = float(Dicom.physicalMax);
+        const float window = std::max(1.0f, maxPhys - minPhys);
+
+        const float slopeF = float(Dicom.slope);
+        const float interF = float(Dicom.intercept);
+
+        const float scale = float(HistScale) / window;   // (vHU - minPhys) * scale
+        const float bias = -minPhys * scale;
+
+        auto fastFloorToInt = [](float x) -> int {
+            int i = int(x);
+            return (x < float(i)) ? (i - 1) : i;
+            };
+
+        for (int z = z1; z >= z0; z -= zStep)
         {
-            // Определяем фактические инкременты по X/Y как разницу указателей
-            auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
-            auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
-            auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
-            if (!p00 || !p10 || !p01) continue;
+            char* p00 = static_cast<char*>(img->GetScalarPointer(x0, y0, z));
+            if (!p00) continue;
 
-            const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
-            const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
-            const bool xPositive = (incXb_raw >= 0);
-            const bool yPositive = (incYb_raw >= 0);
-            const int  xStart = xPositive ? x0 : x1;
-            const int  yStart = yPositive ? y0 : y1;
-            const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
+            // шаг по X: либо через p10-p00 (если w>1), либо sizeof(float)
+            ptrdiff_t stepXb = ptrdiff_t(sizeof(float));
+            if (w > 1) {
+                char* p10 = static_cast<char*>(img->GetScalarPointer(x0 + 1, y0, z));
+                if (p10) stepXb = (p10 - p00);
+            }
 
-            for (int yy = 0; yy < h; ++yy)
+            // шаг по Y: через p01-p00 (если h>1)
+            ptrdiff_t stepYb = ptrdiff_t(w) * stepXb;
+            if (h > 1) {
+                char* p01 = static_cast<char*>(img->GetScalarPointer(x0, y0 + 1, z));
+                if (p01) stepYb = (p01 - p00);
+            }
+
+            for (int yy = 0; yy < h; yy += xyStep)
             {
-                const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
-                auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
-                if (!row0) continue;
+                char* row0 = p00 + stepYb * yy;
 
-                for (int xx = 0; xx < w; ++xx)
+                for (int xx = 0; xx < w; xx += xyStep)
                 {
-                    const double raw = *reinterpret_cast<const double*>(row0 + stepXb * xx);
-                    const double vHU = raw * Dicom.slope - Dicom.intercept;
+                    const float raw = *reinterpret_cast<const float*>(row0 + stepXb * xx);
+                    const float vHU = raw * slopeF - interF;
 
-                    double x = (vHU - minPhys) * static_cast<double>(HistScale) / window;
-                    int y = static_cast<int>(std::floor(x));
-                    if (y < HistMin + 1)
-                        y = HistMin;
-                    if (y > HistMax)
-                        y = HistMax;
-                    mH[y]++;
+                    int bin = fastFloorToInt(vHU * scale + bias);
+                    if (bin < HistMin + 1) bin = HistMin;
+                    else if (bin > HistMax) bin = HistMax;
+
+                    hist[bin] += 1u;
                 }
             }
-            mH[0] = 0;
         }
 
-        int peakHU = 0;
+        hist[0] = 0;
 
-        if (detectFirstPeakAfter(mH, HistScale / 4, peakHU))
+        int peakHU = 0;
+        if (detectFirstPeakAfter(hist, HistScale / 4, peakHU))
         {
-            const double vHU = window / 2 - peakHU / static_cast<double>(HistScale) * window;
-            int y = static_cast<int>(std::floor(vHU));
-            int x = 0;
+            const float vHU = window * (0.5f - float(peakHU) / float(HistScale));
+            const int y = fastFloorToInt(vHU);
             Dicom.physicalMax -= (2 * y);
         }
     }
 
-    // Идём сверху вниз (как у тебя было: z = z1..z0), с периодической прокачкой прогресса
-    for (int z = z1, idx = 0; z >= z0; --z, ++idx)
-    {
-        // Измеряем реальные байтовые шаги по X/Y, чтобы корректно читать даже при инвертированных stride
-        auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
-        auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
-        auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
+    flipZ = false;
+    flipY = true;
+    flipX = false;
 
-        // Если что-то пошло не так — перестраховка
-        if (!p00 || !p10 || !p01) {
-            // попытаемся мягко пропустить этот срез
+    // --- 3) Основной кеш: QImage без mirrored(), флипы через индексы ---
+    // --- 3) Основной кеш: максимально быстро, флипы только через индексы dst/z ---
+    for (int idx = 0; idx < total; ++idx)
+    {
+        const int z = flipZ ? (z0 + idx) : (z1 - idx);
+
+        char* p00 = static_cast<char*>(img->GetScalarPointer(x0, y0, z));
+        if (!p00) {
             QImage empty(w, h, QImage::Format_Grayscale8);
             empty.fill(0);
             mSlices.push_back(std::move(empty));
             continue;
         }
 
-        const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
-        const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
+        // stepX: либо по p10-p00, либо sizeof(float)
+        ptrdiff_t stepXb = ptrdiff_t(sizeof(float));
+        if (w > 1) {
+            char* p10 = static_cast<char*>(img->GetScalarPointer(x0 + 1, y0, z));
+            if (p10) stepXb = (p10 - p00);
+        }
 
-        const bool xPositive = (incXb_raw >= 0);
-        const bool yPositive = (incYb_raw >= 0);
-
-        const int  xStart = xPositive ? x0 : x1;
-        const int  yStart = yPositive ? y0 : y1;
-        const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
+        // stepY: либо по p01-p00, либо w*stepX
+        ptrdiff_t stepYb = ptrdiff_t(w) * stepXb;
+        if (h > 1) {
+            char* p01 = static_cast<char*>(img->GetScalarPointer(x0, y0 + 1, z));
+            if (p01) stepYb = (p01 - p00);
+        }
 
         QImage q(w, h, QImage::Format_Grayscale8);
 
-        for (int yy = 0; yy < h; ++yy)
         {
-            const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
-            auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
-            uchar* dst = q.scanLine(yy);
+            const double slope = Dicom.slope;
+            const double inter = Dicom.intercept;
 
-            // safety
-            if (!row0 || !dst) {
-                std::memset(dst, 0, size_t(w));
-                continue;
-            }
-
-            for (int xx = 0; xx < w; ++xx)
+            for (int yy = 0; yy < h; ++yy)
             {
-                auto* p = reinterpret_cast<const double*>(row0 + stepXb * xx);
-                const double vHU = (*p * Dicom.slope) - Dicom.intercept;
-                dst[xx] = wl8(vHU, Dicom.physicalMin, Dicom.physicalMax, Dicom.TypeOfRecord, invertMono1);
+                // читаем src-строку линейно
+                char* row0 = p00 + stepYb * yy;
+
+                // пишем либо в yy, либо в flipped строку
+                const int yDst = flipY ? (h - 1 - yy) : yy;
+                uchar* dst = q.scanLine(yDst);
+                if (!dst) continue;
+
+                if (!flipX)
+                {
+                    // самый быстрый путь: без разворота по X
+                    for (int xx = 0; xx < w; ++xx)
+                    {
+                        const float raw = *reinterpret_cast<const float*>(row0 + stepXb * xx);
+                        const double vHU = (double(raw) * slope) - inter;
+                        dst[xx] = wl8(vHU, Dicom.physicalMin, Dicom.physicalMax, Dicom.TypeOfRecord, invertMono1);
+                    }
+                }
+                else
+                {
+                    // flipX: пишем в обратный столбец
+                    for (int xx = 0; xx < w; ++xx)
+                    {
+                        const float raw = *reinterpret_cast<const float*>(row0 + stepXb * xx);
+                        const double vHU = (double(raw) * slope) - inter;
+                        dst[w - 1 - xx] = wl8(vHU, Dicom.physicalMin, Dicom.physicalMax, Dicom.TypeOfRecord, invertMono1);
+                    }
+                }
             }
         }
 
-        q = q.mirrored();
         mSlices.push_back(std::move(q));
 
         if (((idx + 1) % 8) == 0 || idx + 1 == total) {
@@ -1094,6 +1318,7 @@ void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, b
             qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         }
     }
+
 }
 
 void PlanarView::setSlice(int i)
@@ -1143,6 +1368,39 @@ void PlanarView::resetZoom()
 void PlanarView::rebuildPixmap()
 {
     setSlice(mIndex);
+}
+
+void PlanarView::retranslateUi()
+{
+    if (mView)
+    {
+        mView->setWhatsThis(tr("DICOM slice viewer."));
+        mView->setAccessibleName(tr("Slice viewer"));
+    }
+
+    if (mScroll)
+    {
+        mScroll->setToolTip(tr("Slice"));
+        mScroll->setWhatsThis(tr("Vertical slice scrollbar."));
+        mScroll->setAccessibleName(tr("Slice slider"));
+    }
+
+    if (Dicom.TypeOfRecord == CT || Dicom.TypeOfRecord == CT3DR)
+    {
+        Dicom.XTitle = tr("Hounsfield Units");
+        Dicom.YTitle = tr("Voxel count");
+        Dicom.XLable = tr("HU");
+        Dicom.YLable = tr("N");
+    }
+    else if (Dicom.TypeOfRecord == MRI || Dicom.TypeOfRecord == MRI3DR)
+    {
+        Dicom.XTitle = tr("MRI intensity");
+        Dicom.YTitle = tr("Voxel count");
+        Dicom.XLable = tr("AU");
+        Dicom.YLable = tr("N");
+    }
+
+    setAccessibleName(tr("PlanarView"));
 }
 
 // ===== validation/filtering ==================================================
@@ -1237,4 +1495,73 @@ PlanarView::filterSeriesByConsistency(const QVector<QString>& files)
         rep.reason = QObject::tr("Filtered %1 inconsistent file(s) by pixel geometry")
         .arg(rep.bad.size());
     return rep;
+}
+
+PlanarView::ValidationReport
+PlanarView::filterSeriesByConsistency(const QVector<SeriesScanResult::QuickDicomFile>& entries)
+{
+    QHash<QString, QVector<QString>> buckets; // key -> paths
+    QVector<QString> failed;
+
+    auto keyToString = [](const SeriesScanResult::QuickDicomFile& e) {
+        return QString("%1x%2|b%3|s%4|pr%5|pi%6")
+            .arg(e.rows).arg(e.cols)
+            .arg(e.bitsAllocated)
+            .arg(e.samplesPerPixel)
+            .arg(e.pixelRepresentation)
+            .arg(e.photometric);
+        };
+
+    for (const auto& e : entries)
+    {
+        if (!e.hasPixelKey) {
+            failed.push_back(e.path);
+            continue;
+        }
+        buckets[keyToString(e)].push_back(e.path);
+    }
+
+    QString bestKey;
+    int bestSize = -1;
+    for (auto it = buckets.begin(); it != buckets.end(); ++it) {
+        if (it.value().size() > bestSize) {
+            bestSize = it.value().size();
+            bestKey = it.key();
+        }
+    }
+
+    ValidationReport rep;
+    if (bestSize <= 0) {
+        // entries -> paths
+        rep.bad.reserve(entries.size());
+        for (const auto& e : entries) rep.bad.push_back(e.path);
+        rep.reason = QObject::tr("No consistent pixel geometry in series");
+        return rep;
+    }
+
+    rep.good = buckets[bestKey];
+    for (auto it = buckets.begin(); it != buckets.end(); ++it) {
+        if (it.key() == bestKey) continue;
+        rep.bad += it.value();
+    }
+    rep.bad += failed;
+
+    if (!rep.bad.isEmpty())
+        rep.reason = QObject::tr("Filtered %1 inconsistent file(s) by pixel geometry")
+        .arg(rep.bad.size());
+    return rep;
+}
+
+void PlanarView::changeEvent(QEvent* e)
+{
+    QWidget::changeEvent(e);
+
+    if (e->type() == QEvent::LanguageChange)
+    {
+        retranslateUi();
+
+        // если подписи отрисовываются где-то в сцене/кэше — попросим перерисовку
+        if (mView) mView->viewport()->update();
+        update();
+    }
 }

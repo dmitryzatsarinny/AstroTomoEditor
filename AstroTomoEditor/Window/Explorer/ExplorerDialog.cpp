@@ -158,7 +158,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
         this, &ExplorerDialog::showSettings);
 
     if (!mSettingsDlg)
-        mSettingsDlg = new SettingsDialog(this);
+        mSettingsDlg = new SettingsDialog(this, false);
     mSettingsDlg->hide();
 
     connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
@@ -295,13 +295,18 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
         "}"
     );
 
+    retranslateUi();
 }
 
 ExplorerDialog::~ExplorerDialog() = default;
 
 void ExplorerDialog::retranslateUi()
 {
-    setWindowTitle(tr("Astrocard DICOM Explorer"));
+    const QString title = tr("Astrocard DICOM Explorer");
+    setWindowTitle(title);
+    if (titleBar())
+        titleBar()->setTitle(title);
+
 
     if (m_buttons) 
     {
@@ -698,7 +703,7 @@ void ExplorerDialog::setStatus(LoadState st, const QString& text)
 void ExplorerDialog::showSettings()
 {
     if (!mSettingsDlg)
-        mSettingsDlg = new SettingsDialog(this);
+        mSettingsDlg = new SettingsDialog(this, false);
 
 
     mSettingsDlg->show();

@@ -23,7 +23,7 @@ MainWindow::MainWindow(QWidget* parent,
     , mKind(kind)
 {
     setWindowTitle(tr("Astrocard DICOM Editor"));
-    setMinimumSize(960, 640);
+    setMinimumSize(1069, 640);
     resize(1280, 800);
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
     setAttribute(Qt::WA_TranslucentBackground);
@@ -198,7 +198,7 @@ void MainWindow::buildUi()
     mPatientDlg->hide();
 
     if (!mSettingsDlg)
-        mSettingsDlg = new SettingsDialog(this);
+        mSettingsDlg = new SettingsDialog(this, true);
     mSettingsDlg->hide();
 
     connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
@@ -206,12 +206,23 @@ void MainWindow::buildUi()
             LanguageManager::instance().setLanguage(code);
         });
 
-    retranslateUi();
+
+    connect(mSettingsDlg, &SettingsDialog::volumeInterpolationChanged,
+        this, [this](int mode)
+        {
+            if (!mRenderView) return;
+
+            mRenderView->setVolumeInterpolation(
+                mode == 1 ? RenderView::VolumeInterpolation::Linear
+                : RenderView::VolumeInterpolation::Nearest);
+        });
+
+    retranslateUi(true);
     connect(&LanguageManager::instance(), &LanguageManager::languageChanged,
-        this, [this] { retranslateUi(); });
+        this, [this] { retranslateUi(false); });
 }
 
-void MainWindow::retranslateUi()
+void MainWindow::retranslateUi(bool loading)
 {
     setWindowTitle(tr("Astrocard DICOM Editor"));
 
@@ -222,9 +233,20 @@ void MainWindow::retranslateUi()
         mTitle->retranslateUi();   // добавим ниже
 
 
-    // и чтобы "Patient: %1" пересобралось через tr()
     if (mTitle)
+    {
+        if (!loading)
         mTitle->setPatientInfo(mCurrentPatient);
+    }
+
+    if (mPatientDlg)
+        mPatientDlg->retranslateUi();
+
+    if (mPlanar)
+        mPlanar->retranslateUi();
+
+    if (mSeries)
+        mSeries->retranslateUi();
 
     if(mSettingsDlg)
         mSettingsDlg->retranslateUi();
@@ -372,17 +394,6 @@ void MainWindow::buildStyles()
                     );
                 }
             )";
-    /*ss += R"(
-        #StatusProgress {
-            background: rgba(255,255,255,0.10);
-            border: none;
-            border-radius: 2px;
-        }
-        #StatusProgress::chunk {
-            background: rgba(255,255,255,0.70);
-            border-radius: 2px;
-        }
-    )";*/
 
     // Если окно развёрнуто — без радиусов
     ss += "#CentralCard[maxed=\"true\"] { border-radius:0; }"
@@ -442,6 +453,41 @@ void MainWindow::wireSignals()
                 mProgress->setRange(0, std::max(1, 100));
                 mProgress->setValue(std::clamp(processed, 0, 100));
             }
+        });
+
+    connect(mRenderView, &RenderView::Progress, this,
+        [this](int processed) {
+            if (processed == 0)
+            {
+                StartLoading();
+                mProgBox->setVisible(true);
+                if (mProgress) 
+                {
+                    mProgress->setVisible(true);
+                    mProgress->startLoading();
+                    mProgress->setRange(0, 100);
+                    mProgress->setValue(0);
+                }
+            }
+            else if (processed < 100)
+            {
+                if (mProgress)
+                {
+                    mProgress->setRange(0, 100);
+                    mProgress->setValue(processed);
+                }
+            }
+            else
+            {
+                if (mProgress) 
+                {
+                    mProgress->setValue(mProgress->maximum());
+                    mProgress->hideBar();
+                    mProgress->setVisible(false);
+                }
+                StopLoading();
+            }
+            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         });
 
     connect(mRenderView, &RenderView::renderFinished, this,
@@ -559,6 +605,11 @@ void MainWindow::wireSignals()
                 });
         });
 
+    connect(mSettingsDlg, &SettingsDialog::gradientOpacityChanged,
+        mRenderView, &RenderView::setGradientOpacityEnabled);
+
+    connect(mRenderView, &RenderView::gradientOpacityChanged,
+        mSettingsDlg, &SettingsDialog::syncGradientOpacityUi);
 
     connect(mTitle, &TitleBar::volumeClicked, this, &MainWindow::onShowVolume3D);
     connect(mTitle, &TitleBar::planarClicked, this, &MainWindow::onShowPlanar2D);
@@ -604,13 +655,16 @@ void MainWindow::onSave3DR()
     if (!mRenderView) return;
 
     auto vol = mRenderView->image();
-    if (!vol) {
+    if (!vol) 
+    {
         QMessageBox::warning(this, tr("Save 3DR"), tr("No volume to save"));
         return;
     }
 
+    QString filename = "NULL";
     DicomInfo di = mRenderView->GetDicomInfo();
-    Save3DR::saveWithDialog(this, mRenderView->image(), &di);
+    if (Save3DR::saveWithDialog(this, mRenderView->image(), &di, filename))
+        mRenderView->saveTemplates(filename);
 }
 
 void MainWindow::StartLoading()
@@ -734,7 +788,7 @@ void MainWindow::changeEvent(QEvent* e)
 
     if (e->type() == QEvent::LanguageChange)
     {
-        retranslateUi();
+        retranslateUi(false);
         return;
     }
 
@@ -819,13 +873,7 @@ void MainWindow::onShowVolume3D()
         return;
     }
 
-    if (!mRenderView)
-    {
-        mRenderView = new RenderView(mViewerStack);
-        mViewerStack->addWidget(mRenderView);
-    }
-
-    mRenderView->setVolume(vtkVol, mPlanar->GetDicomInfo());
+    mRenderView->setVolume(vtkVol, mPlanar->GetDicomInfo(), mCurrentPatient);
     mViewerStack->setCurrentWidget(mRenderView);
 
     if (mTitle) { mTitle->set3DChecked(true); mTitle->set2DChecked(false); }
@@ -877,7 +925,7 @@ void MainWindow::showPatientDetails()
 void MainWindow::showSettings()
 {
     if (!mSettingsDlg)
-        mSettingsDlg = new SettingsDialog(this);
+        mSettingsDlg = new SettingsDialog(this, true);
 
 
     mSettingsDlg->show();

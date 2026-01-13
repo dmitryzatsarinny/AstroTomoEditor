@@ -42,6 +42,7 @@ private slots:
 
 private:
     void scheduleInvalidate();
+    QVariant data(const QModelIndex& index, int role) const;
 
     Mode mode_ = DicomFiles;
     bool checkMagic_ = false;

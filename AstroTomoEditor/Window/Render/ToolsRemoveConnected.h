@@ -32,6 +32,7 @@ enum class HoverMode {
     None
 };
 
+
 // Клик по объекту => оставить (или удалить) только его связную компоненту.
 class ToolsRemoveConnected : public QObject
 {
@@ -51,6 +52,7 @@ public:
 
     // коллбэки на замену изображения (DeepCopy внутрь) и завершение инструмента
     void setOnImageReplaced(std::function<void(vtkImageData*)> cb) { m_onImageReplaced = std::move(cb); }
+    void Unsuccessful(std::function<void(vtkImageData*)> cb) { m_Unsuccessful = std::move(cb); }
     void setOnFinished(std::function<void()> cb) { m_onFinished = std::move(cb); }
 
     // запуск инструмента выбранным действием
@@ -76,7 +78,11 @@ public:
     void EnsureOriginalSnapshot(vtkImageData* _image);
     void ClearOriginalSnapshot();
     uint8_t ReturnAverageVisibleValue() { return AverageVisibleValue; }
-    
+    using StatusFn = std::function<void(const QString&)>;
+    using ProgressFn = std::function<void(const int)>;
+    void setStatusCallback(StatusFn fn) { mStatus = std::move(fn); }
+    void setProgressCallback(ProgressFn fn) { mProgress = std::move(fn); }
+
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
 
@@ -95,7 +101,7 @@ private:
     void applyRemoveSelected(const std::vector<uint8_t>& mark);
     void applyVoxelErase(const int seed[3]);
     void applyVoxelRecover(const int seed[3]);
-    void RemoveConnectedRegions(const std::vector<uint8_t>& mark, const int seed[3]);
+    void RemoveConnectedRegions(const std::vector<uint8_t>& mark, const int seed[3], int steps = 1);
     void SmartDeleting(const int seed[3]);
     void MinusVoxels();
     void PlusVoxels();
@@ -105,8 +111,11 @@ private:
     void FillEmptyRegions(const std::vector<uint8_t>& mark, const int seedIn[3]);
     void TotalSmoothingVolume();
     void PeelRecoveryVolume();
-    int FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& mark);
-    void ConnectSurfaceToVolume(Volume& volNew, const std::vector<uint8_t>& mark, int shift, uint8_t fillVal);
+    void FindSurf(Volume& volNew, std::vector<uint8_t>& mark);
+    void ConnectSurfaceToVolume(Volume& volNew, const std::vector<uint8_t>& mark, int shift);
+    void SurfaceMappingVolume();
+    bool pickSeedNearScreenPoint(const QPoint& p0, int outSeed[3]) const;
+
     uint8_t GetAverageVisibleValue();
 
     // world-ijk
@@ -153,8 +162,9 @@ private:
     bool   m_hasOrig{ false };
 
     std::function<void(vtkImageData*)> m_onImageReplaced;
+    std::function<void(vtkImageData*)> m_Unsuccessful;
     std::function<void()>              m_onFinished;
-
+    
     bool m_allowNav{ true }; // по умолчанию — включено
     void forwardMouseToVtk(QEvent* e); // проброс в QVTK
     void ijkToWorld(const int ijk[3], double world[3]) const;
@@ -194,12 +204,49 @@ private:
     void ensureHoverPipeline();
     void updateHover(const QPoint& pDevice);
     void setHoverVisible(bool on);
-    void AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fillVal);
-    void AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillVal);
-    void AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fillVal);
-    void AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fillVal);
-    void AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fillVal);
-    void AddBaseBackY(Volume& vol, uint8_t shift, uint8_t fillVal);
+    void AddBaseBottomZ(Volume& vol, uint8_t shift);
+    void AddBaseTopZ(Volume& vol, uint8_t shift);
+    void AddBaseRightX(Volume& vol, uint8_t shift);
+    void AddBaseLeftX(Volume& vol, uint8_t shift);
+    void AddBaseFrontY(Volume& vol, uint8_t shift);
+    void AddBaseBackY(Volume& vol, uint8_t shift);
 
     uint8_t AverageVisibleValue = 0;
+
+    void status(const QString& s)
+    {
+        if (mStatus) mStatus(s);
+    }
+    void progress(const int p)
+    {
+        if (mProgress)
+        {
+            currentprogress = p;
+            mProgress(currentprogress);
+        }
+    }
+    void addprogress(const int p)
+    {
+        if (mProgress)
+        {
+            currentprogress += p;
+            if (currentprogress >= 100)
+                currentprogress = 99;
+            mProgress(currentprogress);
+        }
+    }
+    void addprogresstomax(const int p, const int max)
+    {
+        if (mProgress)
+        {
+            currentprogress += p;
+            if (currentprogress >= max && max < 100)
+                currentprogress = max;
+            mProgress(currentprogress);
+        }
+    }
+
+    int currentprogress = 0;
+    StatusFn mStatus;
+    ProgressFn mProgress;
 };

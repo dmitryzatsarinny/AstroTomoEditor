@@ -457,6 +457,12 @@ void TitleBar::setPatientInfo(const PatientInfo& info)
     mPatientBtn->setFixedWidth(w);
 }
 
+void TitleBar::setTitle(const QString& title)
+{
+    if (mAppTitle)
+        mAppTitle->setText(title);
+}
+
 bool TitleBar::isOverNonDraggableChild(const QPoint& pos) const
 {
     QWidget* w = childAt(pos);

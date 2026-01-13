@@ -75,7 +75,7 @@ private:
     void applyMaximizedUi(bool maximized);
     void showInfo(const QString& text);
     void positionCornerGrip();
-    void retranslateUi();
+    void retranslateUi(bool loading);
 
 private:
     // --- данные контекста ---

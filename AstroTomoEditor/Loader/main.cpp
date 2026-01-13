@@ -8,6 +8,7 @@
 #include <QSettings>
 #include <Services/LanguageManager.h>
 #include <Services/AppConfig.h>
+#include <Services/TooltipsFilter.h>
 
 static void ConfigureDllSearch()
 {
@@ -42,6 +43,8 @@ int main(int argc, char* argv[])
 
     // === установка языка ДО создания окон ===
     LanguageManager::instance().setLanguage(cfg.language);
+    TooltipsFilter::instance().setEnabled(cfg.showTooltips);
+    app.installEventFilter(&TooltipsFilter::instance());
 
     // --- если есть аргумент пути ---
     QString argPath;

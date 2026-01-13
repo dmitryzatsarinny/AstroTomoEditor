@@ -6,6 +6,14 @@
 #include <QXmlStreamWriter>
 #include <QDir>
 
+static bool parseBoolLoose(const QString& s, bool def)
+{
+    const auto t = s.trimmed().toLower();
+    if (t == "1" || t == "true" || t == "yes" || t == "on")  return true;
+    if (t == "0" || t == "false" || t == "no" || t == "off") return false;
+    return def;
+}
+
 AppConfig AppConfig::loadOrCreateDefault(const QString& filePath)
 {
     AppConfig cfg;
@@ -22,7 +30,7 @@ AppConfig AppConfig::loadOrCreateDefault(const QString& filePath)
 
     QXmlStreamReader xr(&f);
 
-    // ищем <language> внутри <ui>
+    // ищем элементы внутри <ui>
     bool inUi = false;
 
     while (!xr.atEnd())
@@ -40,6 +48,10 @@ AppConfig AppConfig::loadOrCreateDefault(const QString& filePath)
             else if (inUi && name == u"language")
             {
                 cfg.language = xr.readElementText().trimmed().toLower();
+            }
+            else if (inUi && name == u"showTooltips")
+            {
+                cfg.showTooltips = parseBoolLoose(xr.readElementText(), /*def=*/true);
             }
         }
         else if (xr.isEndElement())
@@ -69,6 +81,7 @@ bool AppConfig::save(const QString& filePath) const
 
     xw.writeStartElement("ui");
     xw.writeTextElement("language", language);
+    xw.writeTextElement("showTooltips", showTooltips ? "true" : "false");
     xw.writeEndElement(); // ui
 
     xw.writeEndElement(); // AstroTomoEditor

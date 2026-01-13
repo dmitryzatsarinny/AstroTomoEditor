@@ -140,6 +140,15 @@
     <ClCompile Include="Services\AppConfig.cpp">
       <Filter>Source Files\Services</Filter>
     </ClCompile>
+    <ClCompile Include="Services\TooltipsFilter.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Services\FastDicomHeaderReader.cpp">
+      <Filter>Source Files\Services</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\Render\TemplateDialog.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -197,6 +206,12 @@
       <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
     <ClInclude Include="Services\AppConfig.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\PerfScan.h">
+      <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Services\FastDicomHeaderReader.h">
       <Filter>Header Files\Services</Filter>
     </ClInclude>
   </ItemGroup>
@@ -260,6 +275,12 @@
     </QtMoc>
     <QtMoc Include="Services\LanguageManager.h">
       <Filter>Header Files\Services</Filter>
+    </QtMoc>
+    <QtMoc Include="Services\TooltipsFilter.h">
+      <Filter>Header Files\Services</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\TemplateDialog.h">
+      <Filter>Header Files\Window\Render</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>

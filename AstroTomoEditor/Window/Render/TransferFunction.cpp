@@ -43,17 +43,17 @@ namespace {
 
 QMenu* TF::CreateMenu(QWidget* parent, std::function<void(TFPreset)> onChosen) {
     auto* m = new QMenu(parent);
-    QObject::connect(m->addAction("Grayscale"), &QAction::triggered, [onChosen] { onChosen(TFPreset::Grayscale); });
-    QObject::connect(m->addAction("Rainbow"), &QAction::triggered, [onChosen] { onChosen(TFPreset::Rainbow);   });
-    QObject::connect(m->addAction("Bone"), &QAction::triggered, [onChosen] { onChosen(TFPreset::Bone);      });
-    QObject::connect(m->addAction("Angio"), &QAction::triggered, [onChosen] { onChosen(TFPreset::Angio);      });
-    QObject::connect(m->addAction("SoftTissue"), &QAction::triggered, [onChosen] { onChosen(TFPreset::SoftTissue);      });
-    QObject::connect(m->addAction("Lungs"), &QAction::triggered, [onChosen] { onChosen(TFPreset::Lungs);      });
+    QObject::connect(m->addAction(QObject::tr("Grayscale")), &QAction::triggered, [onChosen] { onChosen(TFPreset::Grayscale); });
+    QObject::connect(m->addAction(QObject::tr("Rainbow")), &QAction::triggered, [onChosen] { onChosen(TFPreset::Rainbow);   });
+    QObject::connect(m->addAction(QObject::tr("Bone")), &QAction::triggered, [onChosen] { onChosen(TFPreset::Bone);      });
+    QObject::connect(m->addAction(QObject::tr("Angio")), &QAction::triggered, [onChosen] { onChosen(TFPreset::Angio);      });
+    QObject::connect(m->addAction(QObject::tr("SoftTissue")), &QAction::triggered, [onChosen] { onChosen(TFPreset::SoftTissue);      });
+    QObject::connect(m->addAction(QObject::tr("Lungs")), &QAction::triggered, [onChosen] { onChosen(TFPreset::Lungs);      });
 
-    QObject::connect(m->addAction("Skin"), &QAction::triggered, [onChosen] { onChosen(TFPreset::Skin);      });
-    QObject::connect(m->addAction("Hot Metal"), &QAction::triggered, [onChosen] { onChosen(TFPreset::HotMetal);  });
+    QObject::connect(m->addAction(QObject::tr("Skin")), &QAction::triggered, [onChosen] { onChosen(TFPreset::Skin);      });
+    QObject::connect(m->addAction(QObject::tr("Hot Metal")), &QAction::triggered, [onChosen] { onChosen(TFPreset::HotMetal);  });
     m->addSeparator();
-    QObject::connect(m->addAction("Invert current"), &QAction::triggered, [onChosen] { onChosen(TFPreset::InvertCurrent); });
+    QObject::connect(m->addAction(QObject::tr("Invert current")), &QAction::triggered, [onChosen] { onChosen(TFPreset::InvertCurrent); });
     return m;
 }
 

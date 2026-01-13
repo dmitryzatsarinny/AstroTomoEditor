@@ -42,6 +42,7 @@
 #include <vtkImageMask.h>
 
 
+
 ToolsRemoveConnected::ToolsRemoveConnected(QWidget* hostParent)
     : QObject(nullptr)
 {
@@ -413,9 +414,6 @@ void ToolsRemoveConnected::onViewResized()
 
 void ToolsRemoveConnected::cancel()
 {
-    const bool wasActive = (m_state != State::Off);
-    if (!wasActive) return;
-
     m_state = State::Off;
     m_pts.clear();
     m_hasHover = false;
@@ -573,6 +571,9 @@ void ToolsRemoveConnected::start(Action a, HoverMode hm)
     {
     case HoverMode::None:
     {
+        currentprogress = 0;
+        progress(0);
+
         switch (m_mode)
         {
         case Action::Plus:
@@ -587,6 +588,9 @@ void ToolsRemoveConnected::start(Action a, HoverMode hm)
         case Action::PeelRecovery:
             PeelRecoveryVolume();
             break;
+        case Action::SurfaceMapping:
+            SurfaceMappingVolume();
+            break;
         default:
             break;
         }
@@ -599,14 +603,11 @@ void ToolsRemoveConnected::start(Action a, HoverMode hm)
         if (m_vtk && m_vtk->renderWindow())
             m_vtk->renderWindow()->Render();
 
-        const bool wasActive = (m_state != State::Off);
-        if (!wasActive) return;
-
         m_state = State::Off;
         m_bin.clear();
         m_vol.clear();
 
-        if (m_onFinished) m_onFinished();
+        cancel();
     }
     break;
     case HoverMode::Default:
@@ -647,71 +648,83 @@ void ToolsRemoveConnected::onLeftClick(const QPoint& pDevice)
     m_bin.clear();
     onViewResized();
     makeBinaryMask(m_image);
+    progress(0);
+
+    bool successfulfunc = false;
 
     int seed[3]{ 0,0,0 };
-    if (!screenToSeedIJK(pDevice, seed))
+    if (screenToSeedIJK(pDevice, seed))
     {
-        QApplication::beep();
-        return;
+        // === кисти работают без floodFill ===
+        if (m_mode == Action::VoxelEraser)
+        {
+            applyVoxelErase(seed);
+            successfulfunc = true;
+        }
+        else if (m_mode == Action::VoxelRecovery)
+        {
+            applyVoxelRecover(seed);
+            successfulfunc = true;
+        }
+        else
+        {
+            std::vector<uint8_t> mark;
+            const int cnt = floodFill6(m_bin, seed, mark);
+            if (cnt > 0)
+            {
+                progress(10);
+                status(tr("Find avarege visible value"));
+                AverageVisibleValue = GetAverageVisibleValue();
+
+                switch (m_mode)
+                {
+                case Action::RemoveUnconnected:
+                    applyKeepOnlySelected(mark);
+                    break;
+                case Action::RemoveSelected:
+                    applyRemoveSelected(mark);
+                    break;
+                case Action::RemoveConnected:
+                    RemoveConnectedRegions(mark, seed);
+                    break;
+                case Action::SmartDeleting:
+                    RemoveConnectedRegions(mark, seed);
+                    SmartDeleting(seed);
+                    break;
+                case Action::AddBase:
+                    AddBaseToBounds(mark, seed);
+                    break;
+                case Action::FillEmpty:
+                    FillEmptyRegions(mark, seed);
+                    break;
+                default:
+                    break;
+                }
+
+                successfulfunc = true;
+            }
+        }
     }
 
-    // === кисти работают без floodFill ===
-    if (m_mode == Action::VoxelEraser)
+    if (successfulfunc)
     {
-        applyVoxelErase(seed);
-    }
-    else if (m_mode == Action::VoxelRecovery)
-    {
-        applyVoxelRecover(seed);
+        if (m_vol.raw())
+            m_vol.raw()->Modified();
+
+        if (m_onImageReplaced)
+            m_onImageReplaced(m_vol.raw());
+
+        if (m_vtk && m_vtk->renderWindow())
+            m_vtk->renderWindow()->Render();
+
+        if (m_mode != Action::VoxelEraser && m_mode != Action::VoxelRecovery)
+            cancel();
     }
     else
     {
-        std::vector<uint8_t> mark;
-        const int cnt = floodFill6(m_bin, seed, mark);
-        if (cnt <= 0)
-        {
-            QApplication::beep();
-            return;
-        }
-
-        AverageVisibleValue = GetAverageVisibleValue();
-
-        switch (m_mode)
-        {
-        case Action::RemoveUnconnected:
-            applyKeepOnlySelected(mark);
-            break;
-        case Action::RemoveSelected:
-            applyRemoveSelected(mark);
-            break;
-        case Action::RemoveConnected:
-            RemoveConnectedRegions(mark, seed);
-            break;
-        case Action::SmartDeleting:
-            RemoveConnectedRegions(mark, seed);
-            SmartDeleting(seed);
-            break;
-        case Action::AddBase:
-            AddBaseToBounds(mark, seed);
-            break;
-        case Action::FillEmpty:
-            FillEmptyRegions(mark, seed);
-            break;
-        default:
-            break;
-        }
+        if (m_Unsuccessful)
+            m_Unsuccessful(m_vol.raw());
     }
-
-    if (m_vol.raw())
-        m_vol.raw()->Modified();
-    if (m_onImageReplaced)
-        m_onImageReplaced(m_vol.raw());
-
-    if (m_vtk && m_vtk->renderWindow())
-        m_vtk->renderWindow()->Render();
-
-    if (m_mode != Action::VoxelEraser && m_mode != Action::VoxelRecovery)
-        cancel();
 }
 
 static inline size_t linearIdx(int i, int j, int k, const int ext[6], int nx, int ny) {
@@ -773,7 +786,8 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
     vtkImageData* im = m_vol.raw();
     if (!im) return;
 
-
+    addprogress(25);
+    status(tr("Voxel Erase"));
 
     int ext[6]; im->GetExtent(ext);
 
@@ -799,6 +813,8 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
     im->GetIncrements(incX, incY, incZ);
 
     for (int k = k0; k <= k1; ++k)
+    {
+        addprogresstomax(1, 75);
         for (int j = j0; j <= j1; ++j)
             for (int i = i0; i <= i1; ++i)
             {
@@ -817,7 +833,7 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
 
                 const unsigned char v = *p;
                 if (!v) continue;
-                
+
                 if (v > 240) qDebug() << "BIG V =" << int(v)
                     << "at" << i << j << k;
 
@@ -825,6 +841,8 @@ void ToolsRemoveConnected::applyVoxelErase(const int seed[3])
 
                 *p = 0u;
             }
+    }
+    progress(90);
 }
 
 void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
@@ -834,6 +852,9 @@ void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
     if (!curIm || !origIm) return;
 
     int ext[6]; curIm->GetExtent(ext);
+
+    addprogress(25);
+    status(tr("Voxel Recovery"));
 
     auto inExt = [&](int i, int j, int k) -> bool {
         return (i >= ext[0] && i <= ext[1] &&
@@ -862,6 +883,8 @@ void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
     origIm->GetIncrements(incXO, incYO, incZO);
 
     for (int k = k0; k <= k1; ++k)
+    {
+        addprogresstomax(1, 75);
         for (int j = j0; j <= j1; ++j)
             for (int i = i0; i <= i1; ++i)
             {
@@ -889,6 +912,9 @@ void ToolsRemoveConnected::applyVoxelRecover(const int seed[3])
 
                 *pCur = ov;
             }
+    }
+
+    progress(90);
 }
 
 // Восстанавливает не более maxExtraVoxels вокселей вокруг оболочки shell.
@@ -1198,7 +1224,7 @@ static void FilterShellWithGrowableNeighbor(
 
 
 void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& mark,
-    const int seedIn[3])
+    const int seedIn[3], int steps)
 {
     if (!m_vol.u8().valid || !m_vol.raw()) return;
 
@@ -1215,22 +1241,42 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
     volNew.copy(m_vol.raw());
 
     std::vector<size_t> shell;
-    CollectShellVoxels(volNew, shell);
-
-    std::vector<uint8_t> isShell(total, 0);
-    for (size_t w : shell)
-        if (w < total)
-            isShell[w] = 1;
-
-    for (size_t n = 0; n < total; ++n)
-        if (isShell[n])
-            volNew.at(n) = 0u;
-
-
+    int oldSeed[3] = { seedIn[0], seedIn[1], seedIn[2] };
     int newSeed[3] = { seedIn[0], seedIn[1], seedIn[2] };
-    if (!findNearestNonEmptyConnectedVoxel(volNew.raw(), seedIn, newSeed))
-        return;
 
+    if (steps == 1)
+    {
+        progress(25);
+        status(tr("Collect shell"));
+    }
+
+    for (int i = 0; i < steps; i++)
+    {
+        CollectShellVoxels(volNew, shell);
+
+        std::vector<uint8_t> isShell(total, 0);
+        for (size_t w : shell)
+            if (w < total)
+                isShell[w] = 1;
+
+        for (size_t n = 0; n < total; ++n)
+            if (isShell[n])
+                volNew.at(n) = 0u;
+
+        if (!findNearestNonEmptyConnectedVoxel(volNew.raw(), oldSeed, newSeed))
+            return;
+
+        oldSeed[0] = newSeed[0];
+        oldSeed[1] = newSeed[1];
+        oldSeed[2] = newSeed[2];
+    }
+
+    if (steps == 1)
+    {
+        progress(50);
+        status(tr("Fill voxels"));
+    }
+    
     std::vector<uint8_t> newmark;
     const int cnt = floodFill6(volNew, newSeed, newmark);
     if (cnt <= 0)
@@ -1240,10 +1286,13 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
         if (!newmark[n])
             volNew.at(n) = 0u;
 
+    if (steps == 1)
+    {
+        progress(75);
+        status(tr("Recovery peel"));
+    }
 
-
-
-    RecoveryPeel(volNew, m_vol, 1);
+    RecoveryPeel(volNew, m_vol, steps);
 
     m_vol = volNew;
 }
@@ -1259,16 +1308,28 @@ void ToolsRemoveConnected::SmartDeleting(const int seedIn[3])
     Volume volNew;
     volNew.copy(m_vol.raw());
 
+    progress(80);
+    status(tr("Clearing volume"));
+
     const double ClearPersent = 0.20;
     double DistMm = ClearingVolume(volNew, seedIn, ClearPersent);
 
     size_t numofnonzerovox = CountNonZero(volNew);
 
+    progress(80);
+    status(tr("Collect shell voxels"));
+
     std::vector<size_t> shell;
     CollectShellVoxels(volNew, shell);
 
+    progress(90);
+    status(tr("Filter shell with growable neighbor"));
+
     FilterShellWithGrowableNeighbor(volNew, m_vol, shell);
     
+    progress(95);
+    status(tr("Recover from shell limited"));
+
     const size_t maxExtra = numofnonzerovox * ( 0.5 - ClearPersent);
     RecoverFromShellLimited(volNew, m_vol, shell, maxExtra);
     m_vol = volNew;
@@ -2223,6 +2284,9 @@ void ToolsRemoveConnected::MinusVoxels()
         if (!m_bin.at(n))
             volNew.at(n) = 0;
 
+    progress(75);
+    status(tr("Minus voxels"));
+
     ErodeBy6Neighbors(volNew);
 
     m_vol = volNew;
@@ -2235,18 +2299,27 @@ void ToolsRemoveConnected::PlusVoxels()
 
     const size_t total = m_vol.u8().size();
 
+    progress(25);
+    status(tr("Nearest neighbor search"));
+
     // расширяем МАСКУ строго единицами
     if (!AddBy6Neighbors(m_bin, 1u))
         return;
 
+    progress(50);
+    status(tr("Find avarege visible value"));
+
     const uint8_t fillVal = GetAverageVisibleValue();
+
+    progress(75);
+    status(tr("Plus voxels"));
 
     for (size_t n = 0; n < total; ++n)
         if (m_bin.at(n) && !m_vol.at(n))
             m_vol.at(n) = fillVal;
 }
 
-void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fillVal)
+void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift)
 {
     const auto& S = vol.u8();
     if (!S.valid || !vol.raw())
@@ -2277,12 +2350,15 @@ void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fill
     if (firstObjI < 0 || firstObjI >= ext[1])
         return;
 
+    progress(50);
+    status(tr("Fill face"));
+
     // 2. Заполняем весь найденный X-слой значением fillVal
     for (int k = ext[4]; k <= ext[5]; ++k)
         for (int j = ext[2]; j <= ext[3]; ++j)
         {
             const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
-            vol.at(idxFill) = fillVal;
+            vol.at(idxFill) = AverageVisibleValue;
         }
 
     // 3. Проверка: есть ли "опора" по X внутрь (в сторону больших i)
@@ -2324,6 +2400,9 @@ void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fill
                 break;
         }
 
+    progress(90);
+    status(tr("Copy bounds"));
+
     // 5. Копируем основание на слой "внутрь" (по X вправо)
     const int iInside = firstObjI + 1;
     if (iInside <= ext[1])
@@ -2338,7 +2417,7 @@ void ToolsRemoveConnected::AddBaseLeftX(Volume& vol, uint8_t shift, uint8_t fill
             }
 }
 
-void ToolsRemoveConnected::AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fillVal)
+void ToolsRemoveConnected::AddBaseRightX(Volume& vol, uint8_t shift)
 {
     const auto& S = vol.u8();
     if (!S.valid || !vol.raw())
@@ -2369,12 +2448,15 @@ void ToolsRemoveConnected::AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fil
     if (firstObjI < 0 || firstObjI <= ext[0])
         return;
 
+    progress(50);
+    status(tr("Fill face"));
+
     // 2. Заполняем весь найденный X-слой значением fillVal
     for (int k = ext[4]; k <= ext[5]; ++k)
         for (int j = ext[2]; j <= ext[3]; ++j)
         {
             const size_t idxFill = linearIdx(firstObjI, j, k, ext, nx, ny);
-            vol.at(idxFill) = fillVal;
+            vol.at(idxFill) = AverageVisibleValue;
         }
 
     // 3. Проверка: есть ли "опора" по X внутрь (в сторону меньших i)
@@ -2415,6 +2497,9 @@ void ToolsRemoveConnected::AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fil
                 break;
         }
 
+    progress(90);
+    status(tr("Copy bounds"));
+
     // 5. Копируем основание на слой "внутрь" (по X влево)
     const int iInside = firstObjI - 1;
     if (iInside >= ext[0])
@@ -2429,7 +2514,7 @@ void ToolsRemoveConnected::AddBaseRightX(Volume& vol, uint8_t shift, uint8_t fil
             }
 }
 
-void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillVal)
+void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift)
 {
     const auto& S = vol.u8();
     if (!S.valid || !vol.raw())
@@ -2466,12 +2551,15 @@ void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillV
     if (firstObjK < 0 || firstObjK <= ext[4])
         return;
 
+    progress(50);
+    status(tr("Fill face"));
+
     // 2. Заполняем весь найденный слой значением fillVal
     for (int j = ext[2]; j <= ext[3]; ++j)
         for (int i = ext[0]; i <= ext[1]; ++i)
         {
             const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
-            vol.at(idxFill) = fillVal;
+            vol.at(idxFill) = AverageVisibleValue;
         }
 
     // Вспомогательная функция: есть ли "опора" под точкой (i, j)
@@ -2513,6 +2601,9 @@ void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillV
                 break;
         }
 
+    progress(90);
+    status(tr("Copy bounds"));
+
     // 4. Копируем основание на слой ниже (если он существует)
     const int kBelow = firstObjK + 1;
     if (kBelow <= ext[5])
@@ -2527,7 +2618,7 @@ void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift, uint8_t fillV
             }
 }
 
-void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fillVal)
+void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift)
 {
     const auto& S = vol.u8();
     if (!S.valid || !vol.raw())
@@ -2564,12 +2655,15 @@ void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fi
     if (firstObjK < 0 || firstObjK <= ext[4])
         return;
     
+    progress(50);
+    status(tr("Fill face"));
+
     // 2. Заполняем весь найденный слой значением fillVal
     for (int j = ext[2]; j <= ext[3]; ++j)
         for (int i = ext[0]; i <= ext[1]; ++i)
         {
             const size_t idxFill = linearIdx(i, j, firstObjK, ext, nx, ny);
-            vol.at(idxFill) = fillVal;
+            vol.at(idxFill) = AverageVisibleValue;
         }
     
     // Вспомогательная функция: есть ли "опора" под точкой (i, j)
@@ -2611,6 +2705,9 @@ void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fi
                 break;
         }
     
+    progress(90);
+    status(tr("Copy bounds"));
+
     // 4. Копируем основание на слой ниже (если он существует)
     const int kBelow = firstObjK - 1;
     if (kBelow >= ext[4])
@@ -2625,7 +2722,7 @@ void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift, uint8_t fi
             }
 }
 
-void ToolsRemoveConnected::AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fillVal)
+void ToolsRemoveConnected::AddBaseFrontY(Volume& vol, uint8_t shift)
 {
     const auto& S = vol.u8();
     if (!S.valid || !vol.raw())
@@ -2655,12 +2752,15 @@ void ToolsRemoveConnected::AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fil
     if (firstObjJ < 0 || firstObjJ >= ext[3])
         return;
 
+    progress(50);
+    status(tr("Fill face"));
+
     // 2. Заполняем найденный Y-слой
     for (int k = ext[4]; k <= ext[5]; ++k)
         for (int i = ext[0]; i <= ext[1]; ++i)
         {
             const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
-            vol.at(idxFill) = fillVal;
+            vol.at(idxFill) = AverageVisibleValue;
         }
 
     // 3. Опора внутрь по Y (к большим j)
@@ -2701,6 +2801,9 @@ void ToolsRemoveConnected::AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fil
                 break;
         }
 
+    progress(90);
+    status(tr("Copy bounds"));
+
     // 5. Копируем основание внутрь (к большим j)
     const int jInside = firstObjJ + 1;
     if (jInside <= ext[3])
@@ -2715,7 +2818,7 @@ void ToolsRemoveConnected::AddBaseFrontY(Volume& vol, uint8_t shift, uint8_t fil
             }
 }
 
-void ToolsRemoveConnected::AddBaseBackY(Volume& vol, uint8_t shift, uint8_t fillVal)
+void ToolsRemoveConnected::AddBaseBackY(Volume& vol, uint8_t shift)
 {
     const auto& S = vol.u8();
     if (!S.valid || !vol.raw())
@@ -2745,12 +2848,15 @@ void ToolsRemoveConnected::AddBaseBackY(Volume& vol, uint8_t shift, uint8_t fill
     if (firstObjJ < 0 || firstObjJ <= ext[2])
         return;
 
+    progress(50);
+    status(tr("Fill face"));
+
     // 2. Заполняем найденный Y-слой
     for (int k = ext[4]; k <= ext[5]; ++k)
         for (int i = ext[0]; i <= ext[1]; ++i)
         {
             const size_t idxFill = linearIdx(i, firstObjJ, k, ext, nx, ny);
-            vol.at(idxFill) = fillVal;
+            vol.at(idxFill) = AverageVisibleValue;
         }
 
     // 3. Опора внутрь по Y (к меньшим j)
@@ -2791,6 +2897,9 @@ void ToolsRemoveConnected::AddBaseBackY(Volume& vol, uint8_t shift, uint8_t fill
                 break;
         }
 
+    progress(90);
+    status(tr("Copy bounds"));
+
     // 5. Копируем основание внутрь (к меньшим j)
     const int jInside = firstObjJ - 1;
     if (jInside >= ext[2])
@@ -2811,6 +2920,9 @@ void ToolsRemoveConnected::AddBaseToBounds(const std::vector<uint8_t>& mark, con
 
     const size_t total = m_vol.u8().size();
     if (mark.size() < total) return; // подстраховка
+
+    progress(10);
+    status(tr("Prepare volume"));
 
     for (size_t n = 0; n < total; ++n)
     {
@@ -2847,12 +2959,15 @@ void ToolsRemoveConnected::AddBaseToBounds(const std::vector<uint8_t>& mark, con
 
     int dist[6] = { dXMin, dXMax, dYMin, dYMax, dZMin, dZMax };
 
+    progress(30);
+    status(tr("Find nearest face"));
+
     int nearestFace = 0;
     for (int idx = 1; idx < 6; ++idx)
         if (dist[idx] < dist[nearestFace])
             nearestFace = idx;
 
-    const uint8_t fillVal = GetAverageVisibleValue();
+
     constexpr int baseMargin = 3;   // тот самый N
 
     switch (nearestFace)
@@ -2861,37 +2976,37 @@ void ToolsRemoveConnected::AddBaseToBounds(const std::vector<uint8_t>& mark, con
         for (int k = 0; k < nz; ++k)
             for (int j = 0; j < ny; ++j)
                 volNew.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;      // X = 0
-        AddBaseLeftX(volNew, baseMargin, fillVal);
+        AddBaseLeftX(volNew, baseMargin);
         break;
     case 1:
         for (int k = 0; k < nz; ++k)
             for (int j = 0; j < ny; ++j)
                 volNew.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
-        AddBaseRightX(volNew, baseMargin, fillVal);
+        AddBaseRightX(volNew, baseMargin);
         break;
     case 2:
         for (int k = 0; k < nz; ++k)
             for (int i = 0; i < nx; ++i)
                 volNew.at(size_t(k) * slice + i) = 0u;
-        AddBaseFrontY(volNew, baseMargin, fillVal);
+        AddBaseFrontY(volNew, baseMargin);
         break;
     case 3:
         for (int k = 0; k < nz; ++k)
             for (int i = 0; i < nx; ++i)
                 volNew.at(size_t(k) * slice + size_t(ny - 1) * nx + i) = 0u;
-        AddBaseBackY(volNew, baseMargin, fillVal);
+        AddBaseBackY(volNew, baseMargin);
         break;
     case 4:
         for (int j = 0; j < ny; ++j)
             for (int i = 0; i < nx; ++i)
                 volNew.at(size_t(j) * nx + i) = 0u;  // Z = 0
-        AddBaseBottomZ(volNew, baseMargin, fillVal);
+        AddBaseBottomZ(volNew, baseMargin);
         break;
     case 5:
         for (int j = 0; j < ny; ++j)
             for (int i = 0; i < nx; ++i)
                 volNew.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u; // Z = nz-1
-        AddBaseTopZ(volNew, baseMargin, fillVal);
+        AddBaseTopZ(volNew, baseMargin);
         break;
     }
 
@@ -2908,6 +3023,9 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
     const size_t total = m_vol.u8().size();
     if (mark.size() < total)
         return; // подстраховка
+
+    progress(25);
+    status(tr("Keep selected region"));
 
     // 1) применяем маску: оставляем только выбранную компоненту
     for (size_t n = 0; n < total; ++n)
@@ -2937,7 +3055,6 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
     }
 
     const size_t totalLocal = static_cast<size_t>(nx) * ny * nz;
-    const uint8_t fillVal = GetAverageVisibleValue();
 
     // ===============================
     // 2) Шаг 1: заполняем ТОЛЬКО внутренние полости
@@ -2963,6 +3080,10 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
             outside[idx] = 1;
             q.push(idx);
         };
+
+    
+    progress(50);
+    status(tr("Fill internal cavities"));
 
     // старт по нулям на внешней границе
     for (int k = ext[4]; k <= ext[5]; ++k)
@@ -3019,16 +3140,20 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
         }
     }
 
+
     // заливаем внутренние полости (нули, не помеченные как outside)
     for (size_t idx = 0; idx < totalLocal; ++idx)
     {
         if (volNew.at(idx) == 0u && !outside[idx])
-            volNew.at(idx) = fillVal;
+            volNew.at(idx) = AverageVisibleValue;
     }
 
     // ===============================
     // 3) Шаг 2: зашпаклевать мелкие порезы на поверхности
     // ===============================
+
+    progress(75);
+    status(tr("Fill holes"));
 
     // делаем копию, чтобы не портить соседний подсчёт
     std::vector<uint8_t> dataCopy(totalLocal);
@@ -3073,7 +3198,7 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
                 if (nzNeigh >= minNeighborsToFill)
                 {
                     // этот ноль лежит в "щербинке" между вокселями объекта → заполняем
-                    volNew.at(idx) = fillVal;
+                    volNew.at(idx) = AverageVisibleValue;
                 }
             }
         }
@@ -3083,30 +3208,30 @@ void ToolsRemoveConnected::FillEmptyRegions(const std::vector<uint8_t>& mark, co
 }
 
 
-int ToolsRemoveConnected::FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& mark)
+void ToolsRemoveConnected::FindSurf(Volume& volNew, std::vector<uint8_t>& mark)
 {
     if (!volNew.u8().valid || !volNew.raw())
-        return -1;
+        return;
 
     const size_t total = volNew.u8().size();
     if (mark.size() < total)
-        return -1; // подстраховка
+        return; // подстраховка
 
     const auto& S = volNew.u8();
     if (!S.valid || !S.p0)
-        return -1;
+        return;
 
     const int* ext = S.ext; // [xmin,xmax, ymin,ymax, zmin,zmax]
     const int nx = S.nx;
     const int ny = S.ny;
     const int nz = S.nz;
     if (nx <= 0 || ny <= 0 || nz <= 0)
-        return -1;
-
-    const size_t totalLocal = static_cast<size_t>(nx) * ny * nz;
-    const uint8_t fillVal = GetAverageVisibleValue();
+        return;
 
     const size_t slice = size_t(nx) * ny;
+
+    progress(35);
+    status(tr("Clearing bounds"));
 
     for (int j = 0; j < ny; ++j)
         for (int i = 0; i < nx; ++i)
@@ -3129,143 +3254,6 @@ int ToolsRemoveConnected::FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& 
             volNew.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;      // X = nx-1
         }
 
-    // ===============================
-    // 2) Шаг 1: заполняем ТОЛЬКО внутренние полости
-    // ===============================
-
-    std::vector<uint8_t> outside(totalLocal, 0);
-    std::queue<size_t> q;
-
-    auto markOutside = [&](int i, int j, int k)
-        {
-            if (i < ext[0] || i > ext[1] ||
-                j < ext[2] || j > ext[3] ||
-                k < ext[4] || k > ext[5])
-                return;
-
-            const size_t idx = linearIdx(i, j, k, ext, nx, ny);
-            if (outside[idx])
-                return;
-
-            if (volNew.at(idx) != 0u)
-                return; // объект
-
-            outside[idx] = 1;
-            q.push(idx);
-        };
-
-    // старт по нулям на внешней границе
-    for (int k = ext[4]; k <= ext[5]; ++k)
-    {
-        for (int j = ext[2]; j <= ext[3]; ++j)
-        {
-            for (int i = ext[0]; i <= ext[1]; ++i)
-            {
-                const bool onBoundary =
-                    (i == ext[0] || i == ext[1] ||
-                        j == ext[2] || j == ext[3] ||
-                        k == ext[4] || k == ext[5]);
-                if (!onBoundary)
-                    continue;
-
-                markOutside(i, j, k);
-            }
-        }
-    }
-
-    static const int N6[6][3] = {
-        {+1, 0, 0}, {-1, 0, 0},
-        {0, +1, 0}, {0, -1, 0},
-        {0, 0, +1}, {0, 0, -1}
-    };
-
-    while (!q.empty())
-    {
-        const size_t w = q.front();
-        q.pop();
-
-        int i, j, k;
-        ijkFromLinear(w, ext, nx, ny, i, j, k);
-
-        for (const auto& d : N6)
-        {
-            const int ni = i + d[0];
-            const int nj = j + d[1];
-            const int nk = k + d[2];
-
-            if (ni < ext[0] || ni > ext[1] ||
-                nj < ext[2] || nj > ext[3] ||
-                nk < ext[4] || nk > ext[5])
-                continue;
-
-            const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
-            if (outside[nIdx])
-                continue;
-            if (volNew.at(nIdx) != 0u)
-                continue;
-
-            outside[nIdx] = 1;
-            q.push(nIdx);
-        }
-    }
-
-    // заливаем внутренние полости (нули, не помеченные как outside)
-    for (size_t idx = 0; idx < totalLocal; ++idx)
-        if (volNew.at(idx) == 0u && !outside[idx])
-            volNew.at(idx) = fillVal;
-
-    // ===============================
-    // 3) Шаг 2: зашпаклевать мелкие порезы на поверхности
-    // ===============================
-
-    // делаем копию, чтобы не портить соседний подсчёт
-    std::vector<uint8_t> dataCopy(totalLocal);
-    for (size_t idx = 0; idx < totalLocal; ++idx)
-        dataCopy[idx] = volNew.at(idx);
-
-    auto countNonZeroNeighbors = [&](int i, int j, int k) -> int
-        {
-            int cnt = 0;
-            for (const auto& d : N6)
-            {
-                const int ni = i + d[0];
-                const int nj = j + d[1];
-                const int nk = k + d[2];
-
-                if (ni < ext[0] || ni > ext[1] ||
-                    nj < ext[2] || nj > ext[3] ||
-                    nk < ext[4] || nk > ext[5])
-                    continue;
-
-                const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
-                if (dataCopy[nIdx] != 0u)
-                    ++cnt;
-            }
-            return cnt;
-        };
-
-    // порог "соседей-объектов", при котором считаем нулевой воксель мелким разрезом
-    const int minNeighborsToFill = 4; // 4–5 из 6 обычно хорошо сглаживает, не раздувая сильно
-
-    for (int k = ext[4]; k <= ext[5]; ++k)
-    {
-        for (int j = ext[2]; j <= ext[3]; ++j)
-        {
-            for (int i = ext[0]; i <= ext[1]; ++i)
-            {
-                const size_t idx = linearIdx(i, j, k, ext, nx, ny);
-                if (dataCopy[idx] != 0u)
-                    continue; // это уже объект
-
-                const int nzNeigh = countNonZeroNeighbors(i, j, k);
-                if (nzNeigh >= minNeighborsToFill)
-                {
-                    // этот ноль лежит в "щербинке" между вокселями объекта → заполняем
-                    volNew.at(idx) = fillVal;
-                }
-            }
-        }
-    }
 
     for (size_t idx = 0; idx < total; idx++)
     {
@@ -3288,8 +3276,6 @@ int ToolsRemoveConnected::FillAndFindSurf(Volume& volNew, std::vector<uint8_t>& 
             volNew.at(n5) == 0u)
             mark[idx] = 1;
     }
-
-    return fillVal;
 }
 
 int ToolsRemoveConnected::floodFill6MultiSeed(const Volume& bin,
@@ -3351,10 +3337,47 @@ int ToolsRemoveConnected::floodFill6MultiSeed(const Volume& bin,
     return visited;
 }
 
-void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
+struct Off3 { int dx, dy, dz; };
+
+static std::vector<Off3> buildSphereOffsets(int R, bool shellOnly)
+{
+    std::vector<Off3> off;
+    if (R <= 0) return off;
+
+    const int R2 = R * R;
+    const int Rin = std::max(0, R - 1);
+    const int Rin2 = Rin * Rin;
+
+    // грубая оценка, чтобы меньше аллокаций
+    off.reserve(static_cast<size_t>(4.0 / 3.0 * 3.14159 * R2 * R) + 16);
+
+    for (int dz = -R; dz <= R; ++dz)
+        for (int dy = -R; dy <= R; ++dy)
+            for (int dx = -R; dx <= R; ++dx)
+            {
+                if (dx == 0 && dy == 0 && dz == 0) continue;
+
+                const int d2 = dx * dx + dy * dy + dz * dz;
+                if (d2 > R2) continue;
+                if (shellOnly && d2 <= Rin2) continue; // только оболочка
+
+                off.push_back({ dx, dy, dz });
+            }
+
+    // ближние сначала (часто чуть лучше и быстрее, меньше "длинных" сегментов)
+    std::sort(off.begin(), off.end(), [](const Off3& a, const Off3& b) {
+        const int da = a.dx * a.dx + a.dy * a.dy + a.dz * a.dz;
+        const int db = b.dx * b.dx + b.dy * b.dy + b.dz * b.dz;
+        return da < db;
+        });
+
+    return off;
+}
+
+void ToolsRemoveConnected::ConnectSurfaceToVolume(
+    Volume& volNew,
     const std::vector<uint8_t>& mark,
-    int shift,
-    uint8_t fillVal)
+    int shift)
 {
     if (!volNew.u8().valid || !volNew.raw())
         return;
@@ -3370,14 +3393,17 @@ void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
     if (nx <= 0 || ny <= 0 || nz <= 0)
         return;
 
-    const size_t totalLocal = static_cast<size_t>(nx) * ny * nz;
+    const size_t totalLocal = static_cast<size_t>(nx) * static_cast<size_t>(ny) * static_cast<size_t>(nz);
     if (mark.size() < totalLocal)
         return;
 
-    const int shiftClamped = std::max(1, shift);
-    const int shift2 = shiftClamped * shiftClamped;
+    const int R = std::max(1, shift);
 
-    // заливка отрезка между (i0,j0,k0) и (i1,j1,k1)
+    // 1) Предвычисляем оффсеты сферы.
+    // shellOnly=true будет ближе к твоей идее "строго граница".
+    const auto offsets = buildSphereOffsets(R, /*shellOnly=*/true);
+
+    // 2) Локальный fillSegment как у тебя (оставляю твою логику)
     auto fillSegment = [&](int i0, int j0, int k0,
         int i1, int j1, int k1)
         {
@@ -3387,7 +3413,7 @@ void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
 
             int steps = std::max({ std::abs(dx), std::abs(dy), std::abs(dz) });
             if (steps <= 1)
-                return; // нет промежуточных вокселей
+                return;
 
             const double incx = static_cast<double>(dx) / steps;
             const double incy = static_cast<double>(dy) / steps;
@@ -3399,13 +3425,11 @@ void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
 
             for (int s = 1; s < steps; ++s)
             {
-                x += incx;
-                y += incy;
-                z += incz;
+                x += incx; y += incy; z += incz;
 
-                int ci = static_cast<int>(std::round(x));
-                int cj = static_cast<int>(std::round(y));
-                int ck = static_cast<int>(std::round(z));
+                const int ci = static_cast<int>(std::round(x));
+                const int cj = static_cast<int>(std::round(y));
+                const int ck = static_cast<int>(std::round(z));
 
                 if (ci < ext[0] || ci > ext[1] ||
                     cj < ext[2] || cj > ext[3] ||
@@ -3414,66 +3438,77 @@ void ToolsRemoveConnected::ConnectSurfaceToVolume(Volume& volNew,
 
                 const size_t cIdx = linearIdx(ci, cj, ck, ext, nx, ny);
                 if (volNew.at(cIdx) == 0u)
-                    volNew.at(cIdx) = fillVal;
+                    volNew.at(cIdx) = AverageVisibleValue;
             }
         };
 
+    // 3) volNewPeel: оставляем только поверхность (как у тебя)
     Volume volNewPeel;
     volNewPeel.copy(volNew.raw());
-
     for (size_t n = 0; n < totalLocal; ++n)
         if (!mark[n])
             volNewPeel.at(n) = 0u;
 
+    // 4) Собираем список surface-индексов (ускоряет: не гоняем весь объем вхолостую)
+    std::vector<size_t> surfaceIdx;
+    surfaceIdx.reserve(totalLocal / 64);
+
     for (size_t idx = 0; idx < totalLocal; ++idx)
     {
-        if (!mark[idx])
-            continue;               // не поверхность
+        if (!mark[idx]) continue;           // должен быть surface
+        if (volNew.at(idx) == 0u) continue; // и не ноль (центр живой)
+        surfaceIdx.push_back(idx);
+    }
 
-        if (volNew.at(idx) == 0u)
-            continue;               // центральный должен быть не ноль
+    status(tr("Connecting surface to volume"));
+
+    // 5) Основной проход: центр + оффсеты
+    for (size_t idx : surfaceIdx)
+    {
+        if (currentprogress <= 90)
+            addprogress(1);
 
         int i, j, k;
         ijkFromLinear(idx, ext, nx, ny, i, j, k);
 
-        // обходим окрестность радиуса shift
-        for (int dz = -shiftClamped; dz <= shiftClamped; ++dz)
+        for (const auto& o : offsets)
         {
-            const int nk = k + dz;
-            if (nk < ext[4] || nk > ext[5])
+            const int ni = i + o.dx;
+            const int nj = j + o.dy;
+            const int nk = k + o.dz;
+
+            if (ni < ext[0] || ni > ext[1] ||
+                nj < ext[2] || nj > ext[3] ||
+                nk < ext[4] || nk > ext[5])
                 continue;
 
-            for (int dy = -shiftClamped; dy <= shiftClamped; ++dy)
-            {
-                const int nj = j + dy;
-                if (nj < ext[2] || nj > ext[3])
-                    continue;
+            const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
 
-                for (int dx = -shiftClamped; dx <= shiftClamped; ++dx)
-                {
-                    const int ni = i + dx;
-                    if (ni < ext[0] || ni > ext[1])
-                        continue;
+            // сосед тоже обязан быть surface
+            if (!mark[nIdx])
+                continue;
 
-                    const int dist2 = dx * dx + dy * dy + dz * dz;
-                    if (dist2 == 0 || dist2 > shift2)
-                        continue;   // вне сферы радиуса shift или центр
+            // и "живой" на поверхности
+            if (volNewPeel.at(nIdx) == 0u)
+                continue;
 
-                    const size_t nIdx = linearIdx(ni, nj, nk, ext, nx, ny);
-                    if (volNewPeel.at(nIdx) == 0u)
-                        continue;   // на сфере должен быть не ноль
+            // чтобы не соединять пары дважды (A->B и B->A)
+            if (nIdx <= idx)
+                continue;
 
-                    // оба конца не нули → заполняем всё между ними
-                    fillSegment(i, j, k, ni, nj, nk);
-                }
-            }
+            fillSegment(i, j, k, ni, nj, nk);
         }
     }
 
+    progress(99);
+
+    // 6) финальный шаг как у тебя
     for (size_t n = 0; n < totalLocal; ++n)
         if (!volNew.at(n) && (volNewPeel.at(n)))
-            volNew.at(n) = fillVal;
+            volNew.at(n) = AverageVisibleValue;
 }
+
+
 
 void ToolsRemoveConnected::PeelRecoveryVolume()
 {
@@ -3488,7 +3523,13 @@ void ToolsRemoveConnected::PeelRecoveryVolume()
         if (!m_bin.at(n))
             volNew.at(n) = 0;
 
+    progress(25);
+    status(tr("Find avarege visible value"));
+
     const uint8_t fillVal = GetAverageVisibleValue();
+
+    progress(50);
+    status(tr("Find Neighbors"));
 
     if (!AddBy6Neighbors(volNew, fillVal))
         return;
@@ -3509,6 +3550,63 @@ void ToolsRemoveConnected::PeelRecoveryVolume()
 
 }
 
+// помечаем все нули, связанные с (0,0,0), как "наружные"
+static void MarkConnectedZerosFromCorner6(const Volume& v, std::vector<uint8_t>& outMark)
+{
+    const auto& S = v.u8();
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t slice = size_t(nx) * size_t(ny);
+
+    outMark.assign(size_t(nx) * size_t(ny) * size_t(nz), 0);
+
+    auto inside = [&](int x, int y, int z) {
+        return (x >= 0 && x < nx && y >= 0 && y < ny && z >= 0 && z < nz);
+        };
+    auto idxOf = [&](int x, int y, int z) -> size_t {
+        return size_t(z) * slice + size_t(y) * size_t(nx) + size_t(x);
+        };
+
+    // стартуем строго с (0,0,0) как ты и хочешь
+    if (v.at(0) != 0)
+        return; // в углу не ноль -> "внешнего нуля" нет, выходим
+
+    std::queue<size_t> q;
+    outMark[0] = 1;
+    q.push(0);
+
+    while (!q.empty())
+    {
+        const size_t i = q.front();
+        q.pop();
+
+        const int x = int(i % size_t(nx));
+        const int y = int((i / size_t(nx)) % size_t(ny));
+        const int z = int(i / slice);
+
+        const int nb[6][3] = {
+            {x - 1,y,z},{x + 1,y,z},
+            {x,y - 1,z},{x,y + 1,z},
+            {x,y,z - 1},{x,y,z + 1}
+        };
+
+        for (int k = 0; k < 6; ++k)
+        {
+            const int xn = nb[k][0], yn = nb[k][1], zn = nb[k][2];
+            if (!inside(xn, yn, zn)) continue;
+
+            const size_t j = idxOf(xn, yn, zn);
+            if (outMark[j]) continue;
+            if (v.at(j) != 0) continue; // идем только по нулям
+
+            outMark[j] = 1;
+            q.push(j);
+        }
+    }
+}
+
+
 void ToolsRemoveConnected::TotalSmoothingVolume()
 {
     if (!m_vol.u8().valid || !m_vol.raw()) return;
@@ -3518,19 +3616,36 @@ void ToolsRemoveConnected::TotalSmoothingVolume()
     Volume volNew;
     volNew.copy(m_vol.raw());
 
-    int Shift = m_hoverRadiusVoxels;
-
     for (size_t n = 0; n < total; ++n)
         if (!m_bin.at(n))
             volNew.at(n) = 0;
 
+    std::vector<uint8_t> outsideZero(total, 0);
+    MarkConnectedZerosFromCorner6(volNew, outsideZero);
+
+    AverageVisibleValue = GetAverageVisibleValue();
+
+    for (size_t n = 0; n < total; ++n)
+        if (!outsideZero[n] && !volNew.at(n))
+            volNew.at(n) = AverageVisibleValue;
+
+
+   int Shift = m_hoverRadiusVoxels;
+
+    progress(25);
+    status(tr("Total smoothing volume"));
+
     std::vector<uint8_t> mark(total, 0);
-    int fillVal = FillAndFindSurf(volNew, mark);
+    FindSurf(volNew, mark);
 
-    if (fillVal < 0)
-        return;
+    ConnectSurfaceToVolume(volNew, mark, Shift);
 
-    ConnectSurfaceToVolume(volNew, mark, Shift, static_cast<uint8_t>(fillVal));
+    std::vector<uint8_t> newoutsideZero(total, 0);
+    MarkConnectedZerosFromCorner6(volNew, newoutsideZero);
+
+    for (size_t n = 0; n < total; ++n)
+        if (!newoutsideZero[n] && !volNew.at(n))
+            volNew.at(n) = AverageVisibleValue;
 
     m_vol = volNew;
 }
@@ -3541,6 +3656,9 @@ void ToolsRemoveConnected::applyKeepOnlySelected(const std::vector<uint8_t>& mar
 
     const size_t total = m_vol.u8().size();
     if (mark.size() < total) return; // подстраховка
+
+    progress(75);
+    status(tr("Keep selected region"));
 
     for (size_t n = 0; n < total; ++n)
     {
@@ -3556,9 +3674,135 @@ void ToolsRemoveConnected::applyRemoveSelected(const std::vector<uint8_t>& selMa
     const size_t total = m_vol.u8().size();
     if (selMask.size() < total) return;
 
+    progress(75);
+    status(tr("Remove selected region"));
+
     for (size_t n = 0; n < total; ++n)
     {
         if (selMask[n])
             m_vol.at(n) = 0u;
     }
+}
+
+bool ToolsRemoveConnected::pickSeedNearScreenPoint(const QPoint& p0, int outSeed[3]) const
+{
+    if (!m_vtk || !m_bin.u8().valid) return false;
+
+    const int w = m_vtk->width();
+    const int h = m_vtk->height();
+    if (w <= 0 || h <= 0) return false;
+
+    const auto& S = m_bin.u8();
+
+    auto insideScreen = [&](int x, int y) -> bool {
+        return (x >= 0 && x < w && y >= 0 && y < h);
+        };
+
+    auto isNonZeroAtSeed = [&](const int seed[3]) -> bool {
+        const int i = seed[0] - S.ext[0];
+        const int j = seed[1] - S.ext[2];
+        const int k = seed[2] - S.ext[4];
+
+        if (i < 0 || i >= S.nx || j < 0 || j >= S.ny || k < 0 || k >= S.nz)
+            return false;
+
+        const size_t idx = size_t(k) * size_t(S.nx) * size_t(S.ny)
+            + size_t(j) * size_t(S.nx)
+            + size_t(i);
+
+        return (idx < S.size() && m_bin.at(idx) != 0u);
+        };
+
+    auto tryScreenPixel = [&](int x, int y) -> bool {
+        if (!insideScreen(x, y)) return false;
+
+        const QPoint p(x, y);
+        int seed[3]{ 0,0,0 };
+
+        if (!screenToSeedIJK(p, seed))
+            return false;
+
+        if (!isNonZeroAtSeed(seed))
+            return false;
+
+        outSeed[0] = seed[0];
+        outSeed[1] = seed[1];
+        outSeed[2] = seed[2];
+        return true;
+        };
+
+    // 0) сначала пробуем исходную точку
+    if (tryScreenPixel(p0.x(), p0.y()))
+        return true;
+
+    // 1) спираль/кольца вокруг точки: radius = 1..R
+    // R можно подобрать: 40-80 обычно хватает, но сделаем от размера окна
+    const int maxR = std::min({ 96, w / 2, h / 2 });
+
+    for (int r = 1; r <= maxR; ++r)
+    {
+        const int cx = p0.x();
+        const int cy = p0.y();
+
+        // верхняя и нижняя сторона квадрата
+        for (int dx = -r; dx <= r; ++dx)
+        {
+            if (tryScreenPixel(cx + dx, cy - r)) return true;
+            if (tryScreenPixel(cx + dx, cy + r)) return true;
+        }
+
+        // левая и правая сторона (без углов, чтобы не дублировать)
+        for (int dy = -r + 1; dy <= r - 1; ++dy)
+        {
+            if (tryScreenPixel(cx - r, cy + dy)) return true;
+            if (tryScreenPixel(cx + r, cy + dy)) return true;
+        }
+    }
+
+    return false;
+}
+
+
+void ToolsRemoveConnected::SurfaceMappingVolume()
+{
+    if (!m_vtk) return;
+
+    if (!m_vol.u8().valid || !m_vol.raw()) return;
+    if (!m_bin.u8().valid) return;
+    if (CountNonZero(m_bin) == 0) return;
+
+    progress(10);
+    status(tr("Finding the starting point"));
+
+    const QPoint center(m_vtk->width() / 2, m_vtk->height() / 2);
+
+    int seed[3]{ 0,0,0 };
+    if (!pickSeedNearScreenPoint(center, seed))
+    {
+        status(tr("No starting point"));
+        return;
+    }
+
+    progress(25);
+    status(tr("Finding connected regions"));
+
+    std::vector<uint8_t> mark;
+    const int cnt = floodFill6(m_bin, seed, mark);
+    if (cnt <= 0)
+    {
+        return;
+    }
+
+    progress(50);
+    RemoveConnectedRegions(mark, seed, 2);
+    
+    progress(75);
+    status(tr("Linked area deletion completed"));
+
+    m_vol.raw()->Modified();
+    if (m_onImageReplaced)
+        m_onImageReplaced(m_vol.raw());
+
+    if (m_vtk->renderWindow())
+        m_vtk->renderWindow()->Render();
 }

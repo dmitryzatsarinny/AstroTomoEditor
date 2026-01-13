@@ -36,6 +36,8 @@
 #include <QTimer>
 #include <QLineEdit>
 #include <vtkFlyingEdges3D.h>
+#include "..\..\Services\LanguageManager.h"
+#include <QSettings>
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
 VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
@@ -157,6 +159,8 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
     connect(mBtnSTL, &QToolButton::clicked, this, &RenderView::onBuildStl);
     connect(mBtnSTLSimplify, &QToolButton::clicked, this, &RenderView::onStlSimplify);
     connect(mBtnSTLSave, &QToolButton::clicked, this, &RenderView::onSaveBuiltStl);
+
+    loadRenderSettings();
 }
 
 RenderView::~RenderView() {
@@ -200,7 +204,7 @@ void RenderView::buildOverlay()
         b->setText(text);
         b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
-        b->setFixedSize(44, 26);
+        b->setFixedSize(40, 26);
         b->setStyleSheet(
             "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
             " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
@@ -216,7 +220,7 @@ void RenderView::buildOverlay()
         b->setText(text);
         b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
-        b->setFixedSize(62, 26);
+        b->setFixedSize(86, 26);
         b->setStyleSheet(
             "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
             " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
@@ -232,7 +236,7 @@ void RenderView::buildOverlay()
         b->setText(text);
         b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
-        b->setFixedSize(126, 26);
+        b->setFixedSize(130, 26);
         b->setStyleSheet(
             "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
             " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
@@ -248,7 +252,7 @@ void RenderView::buildOverlay()
         b->setText(text);
         b->setCursor(Qt::PointingHandCursor);
         b->setFocusPolicy(Qt::NoFocus);
-        b->setFixedSize(146, 26);
+        b->setFixedSize(200, 26);
         b->setStyleSheet(
             "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
             " border:1px solid rgba(255,255,255,30); border-radius:6px; padding:0 8px; }"
@@ -284,7 +288,7 @@ void RenderView::buildOverlay()
     mBtnSTL->setCheckable(true);
     rv->addWidget(mBtnSTL);
 
-    mBtnSTLSimplify = makeBtn(rightPanel, "Simple");
+    mBtnSTLSimplify = makeBtn(rightPanel, tr("Simplify"));
     mBtnSTLSimplify->setEnabled(false);
     mBtnSTLSimplify->setVisible(false);
     auto pol = mBtnSTLSimplify->sizePolicy();
@@ -292,7 +296,7 @@ void RenderView::buildOverlay()
     mBtnSTLSimplify->setSizePolicy(pol);
     rv->addWidget(mBtnSTLSimplify);
 
-    mBtnSTLSave = makeBtn(rightPanel, "Save");
+    mBtnSTLSave = makeBtn(rightPanel, tr("Save"));
     mBtnSTLSave->setEnabled(false);
     mBtnSTLSave->setVisible(false);
     pol = mBtnSTLSave->sizePolicy();
@@ -315,15 +319,11 @@ void RenderView::buildOverlay()
     th->setContentsMargins(12, 8, 0, 0);
     th->setSpacing(6);
 
-    mBtnTF = makeBigBtn(topPanel, "Transfer function");
-    mTfMenu = TF::CreateMenu(mTopOverlay, [this](TFPreset p) { applyPreset(p); });
-    applyMenuStyle(mTfMenu, mBtnTF->width());
-    QAction* actCustom = mTfMenu->addAction(tr("Custom…"));
-    connect(actCustom, &QAction::triggered, this, &RenderView::openTfEditor);
-    mBtnTF->setMenu(mTfMenu);
+    
+    mBtnTF = makeBigBtn(topPanel, tr("Transfer function"));
+    reloadTfMenu();
     mBtnTF->setPopupMode(QToolButton::InstantPopup);
     th->addWidget(mBtnTF);
-
 
     mBtnTools = makeBigBtn(topPanel, tr("Edit"));
     mBtnTools->setCheckable(true);
@@ -344,7 +344,7 @@ void RenderView::buildOverlay()
     );
 
 
-    mToolsMenu = Tools::CreateMenu(mTopOverlay, [this](Action a) { ToolModeChanged(a); });
+    reloadToolsMenu();
     applyMenuStyle(mToolsMenu, mBtnTools->width());
 
     connect(mToolsMenu, &QMenu::aboutToShow, this, [this] {
@@ -390,14 +390,15 @@ void RenderView::buildOverlay()
         "}"
     );
 
-
-    mAppsMenu = Tools::CreateAppMenu(mTopOverlay, [this](App a) { AppModeChanged(a); });
+    reloadAppsMenu();
     applyMenuStyle(mAppsMenu, mBtnApps->width());
 
     connect(mAppsMenu, &QMenu::aboutToShow, this, [this] {
         if (!mAppActive) return;
         if (mHistDlg)
             mHistDlg->close();
+        if (mTemplateDlg)
+            mTemplateDlg->close();
         setAppUiActive(false, mCurrentApp);
         });
 
@@ -421,7 +422,6 @@ void RenderView::buildOverlay()
         mBtnRedo->setToolTip(tr("Redo (Ctrl+Y)"));
         mBtnRedo->setEnabled(false);
         th->addWidget(mBtnRedo);
-
 
         connect(mBtnUndo, &QToolButton::clicked, this, &RenderView::onUndo);
         connect(mBtnRedo, &QToolButton::clicked, this, &RenderView::onRedo);
@@ -455,13 +455,9 @@ void RenderView::buildOverlay()
 
     auto* scGradOpacity = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_T), this);
     connect(scGradOpacity, &QShortcut::activated, this, [this] {
-        if (!mVolume)
-            return;
-
-        mGradientOpacityOn = !mGradientOpacityOn;
-        updateGradientOpacity();
+        if (!mVolume) return;
+        setGradientOpacityEnabled(!mGradientOpacityOn);
         });
-
 
     topPanel->adjustSize();
     mTopOverlay->resize(topPanel->sizeHint());
@@ -547,6 +543,151 @@ void RenderView::openHistogram()
     mHistDlg->refreshFromImage(mImage);
 }
 
+void RenderView::ensureTemplateDialog()
+{
+    if (mTemplateDlg) return;
+
+    mTemplateDlg = new TemplateDialog(this, mImage, &DI);
+
+    connect(mTemplateDlg, &TemplateDialog::requestCapture,
+        this, &RenderView::onTemplateCapture);
+
+    connect(mTemplateDlg, &TemplateDialog::requestSetVisible,
+        this, &RenderView::onTemplateSetVisible);
+
+    connect(mTemplateDlg, &TemplateDialog::requestClear,
+        this, &RenderView::onTemplateClear);
+
+    connect(mTemplateDlg, &TemplateDialog::requestClearAll,
+        this, &RenderView::onTemplateClearAll);
+
+    connect(mTemplateDlg, &QObject::destroyed, this, [this] {
+        mTemplateDlg = nullptr;
+        });
+
+    connect(mTemplateDlg, &TemplateDialog::requestClearScene,
+        this, &RenderView::onTemplateClearScene);
+
+    mTemplateDlg->setOnFinished([this] {
+        setAppUiActive(false, mCurrentApp);
+        });
+}
+
+void RenderView::openTemplate()
+{
+    if (!mImage || !mVolume) return;
+
+    ensureTemplateDialog();
+
+    mTemplateDlg->show();
+    mTemplateDlg->raise();
+    mTemplateDlg->activateWindow();
+}
+
+void RenderView::onTemplateCapture(TemplateId id)
+{
+    if (!mTemplateDlg) return;
+
+    Volume m_vol;
+    m_vol.clear();
+    m_vol.copy(mImage);
+    if (!m_vol.raw()) return;
+
+    mTemplateDlg->setCaptured(id, m_vol);
+}
+
+void RenderView::onTemplateSetVisible(TemplateId id, bool on)
+{
+    if (!mTemplateDlg) return;
+
+    const auto* s = mTemplateDlg->slot(id);
+    if (!s || !s->hasData()) return;
+
+    applyTemplateLayer(id, on);
+}
+
+
+void RenderView::applyTemplateLayer(TemplateId id, bool visible)
+{
+    Volume m_vol;
+    m_vol.clear();
+    m_vol.copy(mImage);
+    if (!m_vol.raw()) return;
+
+    const auto* s = mTemplateDlg->slot(id);
+    Volume m_Template;
+    m_Template.clear();
+    m_Template = s->data;
+    if (!m_Template.raw()) return;
+
+    const auto& S = m_vol.u8();
+    const int* ext = S.ext;
+    const int nx = S.nx;
+    const int ny = S.ny;
+    const int nz = S.nz;
+    const size_t total = static_cast<size_t>(nx) * ny * nz;
+
+    for (size_t i = 0; i < total; i++)
+    {
+       if (visible)
+        {
+            if (m_Template.at(i))
+                m_vol.at(i) = m_Template.at(i);
+        }
+        else
+        {
+            if (m_Template.at(i))
+                m_vol.at(i) = 0u;
+        }
+    }
+
+    if (m_vol.raw())
+        m_vol.raw()->Modified();
+
+
+    if (mVtk && mVtk->renderWindow()) 
+        mVtk->renderWindow()->Render();
+
+    commitNewImage(m_vol.raw());
+}
+
+void RenderView::onTemplateClear(TemplateId id)
+{
+    removeTemplateLayer(id);
+}
+
+void RenderView::onTemplateClearAll()
+{
+    removeAllTemplateLayers();
+}
+
+void RenderView::removeTemplateLayer(TemplateId id)
+{
+    auto it = mTemplateVolumes.find(id);
+    if (it == mTemplateVolumes.end()) return;
+
+    mTemplateVolumes.erase(it);
+    if (mWindow) mWindow->Render();
+}
+
+void RenderView::removeAllTemplateLayers()
+{
+    mTemplateVolumes.clear();
+    if (mWindow) mWindow->Render();
+}
+
+void RenderView::reloadTemplate()
+{
+    if (!mImage || !mVolume) return;
+
+    if (mTemplateDlg) {
+        mTemplateDlg->close();
+        mTemplateDlg = nullptr;
+    }
+
+    ensureTemplateDialog();
+}
+
 void RenderView::reloadHistogram()
 {
     if (!mImage || !mVolume) return;
@@ -628,10 +769,13 @@ vtkSmartPointer<vtkImageData> RenderView::cloneImage(vtkImageData* src)
 void RenderView::setMapperInput(vtkImageData* im)
 {
     if (!mVolume || !mVolume->GetMapper()) return;
+
     if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mVolume->GetMapper()))
         gm->SetInputData(im);
     else
         mVolume->GetMapper()->SetInputDataObject(im);
+
+    mVolume->GetMapper()->Modified();
     mVolume->Modified();
 }
 
@@ -695,8 +839,13 @@ static vtkSmartPointer<vtkActor> MakeSurfaceActor(vtkPolyData* pd)
 
 void RenderView::updateAfterImageChange(bool reattachTools)
 {
-    if(mVolume)
-        mVolume->GetProperty()->SetInterpolationTypeToNearest();
+    if (mVolume && mVolume->GetProperty())
+    {
+        if (mInterpolation == VolumeInterpolation::Linear)
+            mVolume->GetProperty()->SetInterpolationTypeToLinear();
+        else
+            mVolume->GetProperty()->SetInterpolationTypeToNearest();
+    }
 
     setMapperInput(mImage);
 
@@ -764,7 +913,7 @@ void RenderView::setToolUiActive(bool on, Action a)
     if (on) 
     {
         mCurrentTool = a;
-        mBtnTools->setText(tr("%1").arg(Tools::ToDisplayName(a)));
+        mBtnTools->setText(Tools::ToDisplayName(a));
         mBtnTools->setChecked(true);
     }
     else 
@@ -781,7 +930,7 @@ void RenderView::setAppUiActive(bool on, App a)
     if (on)
     {
         mCurrentApp = a;
-        mBtnApps->setText(tr("App: %1").arg(Tools::ToDisplayAppName(a)));
+        mBtnApps->setText(Tools::ToDisplayAppName(a));
         mBtnApps->setChecked(true);
     }
     else
@@ -821,9 +970,24 @@ bool RenderView::ToolModeChanged(Action a)
         a == Action::AddBase ||
         a == Action::FillEmpty ||
         a == Action::TotalSmoothing ||
-        a == Action::PeelRecovery ||
-        a == Action::SurfaceMapping))
+        a == Action::PeelRecovery))
     {
+        setToolUiActive(true, a);
+        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+        mRemoveConn->handle(a);
+        return true;
+    }
+    else if (mRemoveConn && a == Action::SurfaceMapping)
+    {
+        if (!mImage)
+            return false;
+
+        if (!mHistDlg)
+            return false;
+
+        mHistDlg->HideRangeIfCT(mImage, 64, 255);
+        setViewPreset(ViewPreset::AP);
+        centerOnVolume();
         setToolUiActive(true, a);
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
         mRemoveConn->handle(a);
@@ -853,10 +1017,41 @@ bool RenderView::AppModeChanged(App a)
         return true;
     }
 
+    if (a == App::Templates)
+    {
+        setAppUiActive(true, a);
+        openTemplate();
+        return true;
+    }
+
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
     return false;
 }
 
+void RenderView::rebuildVisibleMaskFromImage(vtkImageData* src)
+{
+    if (!src) {
+        mVisibleMask = nullptr;
+        return;
+    }
+
+    // Создаём маску, если нет или геометрия изменилась
+    if (!mVisibleMask)
+        mVisibleMask = vtkSmartPointer<vtkImageData>::New();
+
+    mVisibleMask->DeepCopy(src);
+    mVisibleMask->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
+
+    const vtkIdType n = src->GetNumberOfPoints();
+    auto* in = src->GetPointData()->GetScalars();
+    auto* out = mVisibleMask->GetPointData()->GetScalars();
+
+    for (vtkIdType i = 0; i < n; ++i)
+    {
+        const double v = in->GetTuple1(i);
+        out->SetTuple1(i, v != 0.0 ? 255.0 : 0.0);
+    }
+}
 
 void RenderView::clearStlPreview()
 {
@@ -924,7 +1119,7 @@ void RenderView::onStlSimplify()
     QApplication::setOverrideCursor(Qt::WaitCursor);
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.60, /*smoothIter=*/30, /*passBand=*/0.10);
+    mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.40, /*smoothIter=*/10, /*passBand=*/0.2);
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
     {
@@ -933,7 +1128,10 @@ void RenderView::onStlSimplify()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
-        emit showWarning(tr("Ready volume"));
+        emit showInfo(tr("Ready surface"));
+        QTimer::singleShot(800, this, [this] {
+            emit showInfo(tr("Ready"));
+            });
         QApplication::restoreOverrideCursor();
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         return;
@@ -945,7 +1143,10 @@ void RenderView::onStlSimplify()
     mBtnSTLSave->setEnabled(true);
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
-    emit showWarning(tr("Ready surface"));
+    emit showInfo(tr("Ready surface"));
+    QTimer::singleShot(800, this, [this] {
+        emit showInfo(tr("Ready"));
+        });
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -981,7 +1182,10 @@ void RenderView::onBuildStl()
         if (mVtk && mVtk->renderWindow())
             mVtk->renderWindow()->Render();
 
-        emit showWarning(tr("Ready volume"));
+        emit showInfo(tr("Ready volume"));
+        QTimer::singleShot(800, this, [this] {
+            emit showInfo(tr("Ready"));
+            });
         return;
     }
 
@@ -989,27 +1193,25 @@ void RenderView::onBuildStl()
     QApplication::setOverrideCursor(Qt::WaitCursor);
 
     VisibleExportOptions opt;
-    opt.alphaThreshold = 0.15;
-    opt.smoothIterations = 2;
-    opt.smoothPassBand = 0.20;
-    opt.decimate = 0.0;
-
     // Прогресс в статус-бар + «прокачка» событий
-    opt.progress = [this](int p, const char* msg) {
-        emit showInfo(QString("%1 (%2%)")
-            .arg(QString::fromUtf8(msg ? msg : "Working"))
-            .arg(p));
+    opt.progress = [this](int p, const QString& msg) {
+        emit showInfo(tr("%1 (%2%)").arg(msg.isEmpty() ? tr("Working…") : msg).arg(p));
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         };
 
-
-    
-    mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxels(mImage, opt);
+    rebuildVisibleMaskFromImage(mImage);
+    mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxels(mVisibleMask, opt);
     if (isCtrlDown())
     {
         emit showInfo(tr("Simplify surface"));
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.70, /*smoothIter=*/20, /*passBand=*/0.1);
+        mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.7, /*smoothIter=*/30, /*passBand=*/0.3);
+    }
+    else
+    {
+        emit showInfo(tr("Simplify surface"));
+        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+        mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.6, /*smoothIter=*/15, /*passBand=*/0.2);
     }
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) 
@@ -1032,6 +1234,9 @@ void RenderView::onBuildStl()
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
     emit showInfo(tr("Ready surface"));
+    QTimer::singleShot(800, this, [this] {
+        emit showInfo(tr("Ready"));
+        });
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -1040,16 +1245,29 @@ void RenderView::onSaveBuiltStl()
 {
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) {
         emit showWarning(tr("Nothing to save - build STL first"));
+        QTimer::singleShot(800, this, [this] {
+            emit showInfo(tr("Ready"));
+            });
         return;
     }
     const QString filePath = QFileDialog::getSaveFileName(
         this, tr("Save STL"), QString(), tr("STL binary (*.stl)")
     );
-    if (filePath.isEmpty()) return;
+    if (filePath.isEmpty())
+    {
+        QTimer::singleShot(800, this, [this] {
+            emit showInfo(tr("Ready"));
+            });
+        return;
+    }
 
     const bool ok = VolumeStlExporter::SaveStl(mIsoMesh, filePath, true);
     if (ok) emit showInfo(tr("Saved STL: %1").arg(filePath));
     else    emit showWarning(tr("Save failed"));
+
+    QTimer::singleShot(800, this, [this] {
+        emit showInfo(tr("Ready"));
+        });
 }
 
 void RenderView::setImage(vtkSmartPointer<vtkImageData> img)
@@ -1084,6 +1302,8 @@ void RenderView::openTfEditor()
     // 2) Создаём TF-editor один раз
     if (!mTfEditor) {
         mTfEditor = new TransferFunctionEditor(this, mImage);
+        mTfEditor->setModal(false);
+        mTfEditor->setWindowModality(Qt::NonModal);
 
         // Предпросмотр: всегда пропускаем OTF через Hist-фильтр
         connect(mTfEditor, &TransferFunctionEditor::preview, this,
@@ -1166,6 +1386,7 @@ void RenderView::openTfEditor()
     mTfEditor->raise();
     mTfEditor->activateWindow();
 
+
     QTimer::singleShot(0, this, [this] { reloadTfMenu(); });
 }
 
@@ -1227,10 +1448,9 @@ void RenderView::hideOverlays()
     }
 
     if (mHistDlg)    mHistDlg->close();
-
-
+    if (mTemplateDlg)    mTemplateDlg->close();
+    if (mTfEditor)    mTfEditor->close();
     
-
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
     mOverlaysShown = false;
@@ -1266,6 +1486,17 @@ void RenderView::showEvent(QShowEvent* e)
         repositionOverlay();
         if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
         });
+}
+
+
+void RenderView::changeEvent(QEvent* e)
+{
+    QWidget::changeEvent(e);
+
+    if (e && e->type() == QEvent::LanguageChange)
+    {
+        retranslateUi();
+    }
 }
 
 void RenderView::repositionOverlay()
@@ -1336,14 +1567,16 @@ void RenderView::updateGradientOpacity()
     if (!prop)
         return;
 
-    if (mGradientOpacityOn) {
+    if (mGradientOpacityOn) 
+    {
         auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
         gtf->AddPoint(0, 0.00);
         gtf->AddPoint(15, 0.25);
         gtf->AddPoint(60, 0.80);
         prop->SetGradientOpacity(gtf);
     }
-    else {
+    else 
+    {
         auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
         gtf->AddPoint(0, 1.0);
         gtf->AddPoint(255, 1.0);
@@ -1417,7 +1650,7 @@ void RenderView::setViewPreset(ViewPreset v)
     mVtk->renderWindow()->Render();
 }
 
-void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
+void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom, PatientInfo info)
 {
     auto pump = [&](int p) {
         emit renderProgress(std::clamp(p, 0, 100));
@@ -1490,10 +1723,16 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     prop->SetAmbient(0.05);
     prop->SetDiffuse(0.9);
     prop->SetSpecular(0.1);
-    prop->SetInterpolationType(VTK_NEAREST_INTERPOLATION);
+    if (mInterpolation == VolumeInterpolation::Linear)
+        prop->SetInterpolationTypeToLinear();
+    else
+        prop->SetInterpolationTypeToNearest();
     
     double sp[3]{ 1,1,1 };
     image->GetSpacing(sp);
+    DI.mSpX = sp[0];
+    DI.mSpY = sp[1];
+    DI.mSpZ = sp[2];
     const double smin = std::min({ sp[0],sp[1],sp[2] });
     prop->SetScalarOpacityUnitDistance(std::max(0.3 * smin, 1e-3));
     pump(40);
@@ -1514,6 +1753,9 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     // 4) сохранить ссылки, преднастройки вида/клипбокса
     mImage = image;
     mVolume = vol;
+
+    updateGradientOpacity();
+
     setViewPreset(ViewPreset::AP);
 
     if (mClip) 
@@ -1556,14 +1798,39 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
         mRemoveConn->setAllowNavigation(true);
         mRemoveConn->setOnImageReplaced([this](vtkImageData* im) 
             {
+                QTimer::singleShot(800, this, [this] {
+                    emit showInfo(tr("Ready"));
+                    });
+                emit Progress(100);
                 commitNewImage(im);
+                mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+            });
+        mRemoveConn->Unsuccessful([this](vtkImageData* im)
+            {
+                QTimer::singleShot(800, this, [this] {
+                    emit showInfo(tr("Ready"));
+                    });
+                emit Progress(100);
                 mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
             });
         mRemoveConn->setOnFinished([this]() 
             {
-            setToolUiActive(false, mCurrentTool);
+                setToolUiActive(false, mCurrentTool);
             });
         mRemoveConn->EnsureOriginalSnapshot(mImage);
+
+        mRemoveConn->setStatusCallback(
+            [this](const QString& s)
+            {
+                emit showInfo(s);
+            }
+        );
+        mRemoveConn->setProgressCallback(
+            [this](const int p)
+            {
+                emit Progress(std::clamp(p, 0, 100));;
+            }
+        );
     }
     mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
 
@@ -1573,6 +1840,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
 
     // 5) применяем разумный пресет TF по диапазону данных
     reloadHistogram();
+    reloadTemplate();
     reloadTfMenu();
     pump(78);
 
@@ -1590,7 +1858,39 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom)
     if (rw) rw->Render();
     pump(96);
 
+    removeAllTemplateLayers();
+
+    DI.patientName = info.patientName;
+    DI.patientId = info.patientId;
+    DI.Description = info.Description;
+    DI.Sequence = info.Sequence;
+    DI.SeriesNumber = info.SeriesNumber;
+    DI.DicomPath = info.DicomPath;
+
+    auto sexStr = info.sex.trimmed().toLower();
+
+    if (sexStr == "m" || sexStr == "male")
+        DI.Sex = 1;
+    else if (sexStr == "f" || sexStr == "female")
+        DI.Sex = 2;
+    else
+        DI.Sex = 0;
+
+    if (mTemplateDlg) {
+        const QString tplFolder = mTemplateDlg->templatesFolderPath();
+        if (!tplFolder.isEmpty() && QDir(tplFolder).exists())
+            mTemplateDlg->loadAllTemplatesFromDisk(mImage);
+    }
+
     updateAfterImageChange(false);
+}
+
+void RenderView::saveTemplates(QString filename)
+{
+    QFileInfo fi(filename);
+    QString savedir = fi.absolutePath();
+    if (mTemplateDlg)
+        mTemplateDlg->onSaveAllTemplates(true, true, savedir);
 }
 
 void RenderView::applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop,
@@ -1681,4 +1981,175 @@ void RenderView::reloadTfMenu()
         }
     }
     mBtnTF->setMenu(mTfMenu);
+}
+
+void RenderView::retranslateUi()
+{
+    mBtnSTLSimplify->setText(tr("Simplify"));
+    mBtnSTLSave->setText(tr("Save"));
+
+    mBtnTF->setText(tr("Transfer function"));
+
+    mBtnUndo->setToolTip(tr("Undo (Ctrl+Z)"));
+    mBtnRedo->setToolTip(tr("Redo (Ctrl+Y)"));
+
+    reloadTfMenu();
+    reloadToolsMenu();
+    reloadAppsMenu();
+    updateToolCaptionFromState();
+    updateAppCaptionFromState();
+}
+
+void RenderView::reloadToolsMenu()
+{
+    if (!mTopOverlay || !mBtnTools) return;
+
+    if (mToolsMenu) { delete mToolsMenu; mToolsMenu = nullptr; }
+
+    mToolsMenu = Tools::CreateMenu(mTopOverlay, [this](Action a) { ToolModeChanged(a); });
+    applyMenuStyle(mToolsMenu, mBtnTools->width());
+
+    connect(mToolsMenu, &QMenu::aboutToShow, this, [this] {
+        if (!mToolActive) return;
+        if (mScissors)   mScissors->cancel();
+        if (mRemoveConn) mRemoveConn->cancel();
+        setToolUiActive(false, mCurrentTool);
+        });
+
+    mBtnTools->setMenu(mToolsMenu);
+}
+
+void RenderView::reloadAppsMenu()
+{
+    if (!mTopOverlay || !mBtnApps) return;
+
+    if (mAppsMenu) { delete mAppsMenu; mAppsMenu = nullptr; }
+
+    mAppsMenu = Tools::CreateAppMenu(mTopOverlay, [this](App a) { AppModeChanged(a); });
+    applyMenuStyle(mAppsMenu, mBtnApps->width());
+
+    connect(mAppsMenu, &QMenu::aboutToShow, this, [this] {
+        if (!mAppActive) return;
+        if (mHistDlg) mHistDlg->close();
+        if (mTemplateDlg) mTemplateDlg->close();
+        setAppUiActive(false, mCurrentApp);
+        });
+
+    mBtnApps->setMenu(mAppsMenu);
+}
+
+void RenderView::updateToolCaptionFromState()
+{
+    if (!mBtnTools) return;
+
+    if (mToolActive)
+    {
+        // если Tools::ToDisplayName умеет возвращать локализованную строку - отлично
+        mBtnTools->setText(Tools::ToDisplayName(mCurrentTool));
+        mBtnTools->setChecked(true);
+    }
+    else
+    {
+        mBtnTools->setText(tr("Edit"));
+        mBtnTools->setChecked(false);
+    }
+}
+
+
+void RenderView::updateAppCaptionFromState()
+{
+    if (!mBtnApps) return;
+
+    if (mAppActive)
+    {
+        mBtnApps->setText(tr("App: %1").arg(Tools::ToDisplayAppName(mCurrentApp)));
+        mBtnApps->setChecked(true);
+    }
+    else
+    {
+        mBtnApps->setText(tr("Applications"));
+        mBtnApps->setChecked(false);
+    }
+}
+
+void RenderView::setGradientOpacityEnabled(bool on)
+{
+    if (mGradientOpacityOn == on) return;   // важно, чтобы не спамить сигналами
+
+    mGradientOpacityOn = on;
+    saveRenderSettings();
+    updateGradientOpacity();
+
+    emit gradientOpacityChanged(mGradientOpacityOn);
+}
+
+void RenderView::loadRenderSettings()
+{
+    QSettings s;
+    mGradientOpacityOn = s.value(kGradOpacityKey, false).toBool();
+    const int im = s.value(kInterpKey, 0).toInt();
+    mInterpolation = (im == 1) ? VolumeInterpolation::Linear : VolumeInterpolation::Nearest;
+}
+
+void RenderView::saveRenderSettings()
+{
+    QSettings s;
+    s.setValue(kGradOpacityKey, mGradientOpacityOn);
+    s.setValue(kInterpKey, (mInterpolation == VolumeInterpolation::Linear) ? 1 : 0);
+}
+
+void RenderView::setVolumeInterpolation(VolumeInterpolation m)
+{
+    mInterpolation = m;
+    saveRenderSettings();
+
+    if (mVolume && mVolume->GetProperty())
+    {
+        if (mInterpolation == VolumeInterpolation::Linear)
+            mVolume->GetProperty()->SetInterpolationTypeToLinear();
+        else
+            mVolume->GetProperty()->SetInterpolationTypeToNearest();
+
+        mVolume->GetProperty()->Modified();
+    }
+
+    if (mVtk && mVtk->renderWindow())
+        mVtk->renderWindow()->Render();
+}
+
+void RenderView::onTemplateClearScene()
+{
+    if (!mImage || !mVolume)
+        return;
+
+    // 1) undo/redo как в commitNewImage, но без смены указателя mImage
+    mUndoStack.push_back(cloneImage(mImage));
+    while (mUndoStack.size() > mHistoryLimit)
+        mUndoStack.pop_front();
+    mRedoStack.clear();
+
+    // 2) зануляем все скаляры
+    auto* scalars = mImage->GetPointData() ? mImage->GetPointData()->GetScalars() : nullptr;
+    if (!scalars)
+    {
+        // на всякий: если скаляров нет, создадим стандартные под текущее изображение
+        // (если у тебя всегда есть scalars, этот блок почти никогда не нужен)
+        mImage->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
+        scalars = mImage->GetPointData()->GetScalars();
+        if (!scalars)
+            return;
+    }
+
+    const vtkIdType tuples = scalars->GetNumberOfTuples();
+    const int comps = scalars->GetNumberOfComponents();
+    const size_t bytes = size_t(tuples) * size_t(comps) * size_t(scalars->GetDataTypeSize());
+
+    if (bytes > 0)
+        std::memset(scalars->GetVoidPointer(0), 0, bytes);
+
+    scalars->Modified();
+    mImage->Modified();
+
+    // 3) обновляем маппер/рендер, инструменты можно не переаттачивать
+    updateAfterImageChange(false);
 }

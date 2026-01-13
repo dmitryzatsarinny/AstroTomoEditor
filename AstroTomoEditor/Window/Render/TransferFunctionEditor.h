@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QPointer> 
 #include "../../Services/DicomRange.h"
+#include <QDialogButtonBox> 
 
 class QWidget;
 class QSlider;
@@ -52,7 +53,21 @@ private:
     vtkColorTransferFunction* makeCTF(const QVector<TfPoint>& pts);
     vtkPiecewiseFunction* makeOTF(const QVector<TfPoint>& pts);
 
+protected:
+    void changeEvent(QEvent* e) override;
+
 private:
+    void retranslateUi();
+
+    QLabel* mLblR = nullptr;
+    QLabel* mLblG = nullptr;
+    QLabel* mLblB = nullptr;
+
+    QPushButton* mBtnAuto = nullptr;
+    QPushButton* mBtnSave = nullptr;
+
+    QDialogButtonBox* mBB = nullptr;
+
     TfCanvas* mCanvas{ nullptr };
     QSlider* mR{ nullptr };
     QSlider* mG{ nullptr };

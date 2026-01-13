@@ -31,6 +31,41 @@ struct SeriesItem {
     QImage  thumb;
 };
 
+enum Roles { RoleSeriesKey = Qt::UserRole, RoleNumImages, RoleDescription };
+
+struct SeriesScanResult
+{
+    struct QuickDicomFile
+    {
+        QString path;
+        QString fileName;
+        bool    hasZ = false;
+        double  z = std::numeric_limits<double>::quiet_NaN();
+        bool    hasInstance = false;
+        int     instance = 0;
+        QString modality;
+        QString seriesDescription;
+        QString studyUID;
+        QString seriesNumber;
+
+        bool hasPixelKey = false;
+        int rows = 0;
+        int cols = 0;
+        int bitsAllocated = 0;
+        int samplesPerPixel = 0;
+        int pixelRepresentation = 0;
+        QString photometric;
+    };
+
+    QHash<QString, QVector<QuickDicomFile>> entriesBySeries;
+    QHash<QString, QVector<QString>> filesBySeries;
+    QVector<SeriesItem> items;
+    PatientInfo patientInfo;
+    bool patientInfoValid = false;
+    int totalFiles = 0;
+    bool canceled = false;
+};
+
 class SeriesListPanel : public QWidget
 {
     Q_OBJECT
@@ -39,6 +74,10 @@ public:
     ~SeriesListPanel() override;
 
     static QImage makeThumbImageFromDicom(const QString& file);
+    void retranslateUi();
+
+protected:
+    void changeEvent(QEvent* e) override;
 
 public slots:
     void scanSingleFile(const QString& filePath);

@@ -5,6 +5,7 @@
 #include <Services/DicomRange.h>
 #include "U8Span.h"
 #include "..\MainWindow\DialogShell.h"
+#include "..\MainWindow\TitleBar.h"
 
 class QWidget;
 class QPushButton;
@@ -36,6 +37,7 @@ public:
     double axisMax() const { return mAxisMax; }
 
     void HideAutoRange(vtkImageData* image);
+    void HideRangeIfCT(vtkImageData* image, int HLeft, int HRight);
 
 signals:
     // ВАЖНО: отдаем ГРАНИЦЫ В ДАННЫХ HistMin..HistMax
@@ -44,6 +46,7 @@ signals:
 protected:
     bool eventFilter(QObject* o, QEvent* e) override;
     void done(int r) override;
+    void changeEvent(QEvent* e) override;
 
 private:
     enum class Drag { None, Left, Right, Pan };
@@ -54,6 +57,7 @@ private:
     void paintCanvas();
     void autoRange(bool refresh);
     void setRange(int loBin, int hiBin, bool emitSig);
+
     void setRangeAxis(double loAxis, double hiAxis, bool emitSig = true);
     GaussianPeak FindSecondPeak(const QVector<double>& s);
 
@@ -108,6 +112,7 @@ private:
         return nf * p;
     }
 
+    void retranslateUi();
 private:
     // данные
     vtkImageData* mImage{ nullptr };

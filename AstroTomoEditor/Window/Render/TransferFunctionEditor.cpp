@@ -19,6 +19,7 @@
 #include <vtkPiecewiseFunction.h>
 
 #include "../../Services/DicomRange.h"
+#include "../MainWindow/TitleBar.h"
 // ===== холст: гистограмма + кривая с точками ===============================
 
 static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
@@ -363,26 +364,30 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
     v->addWidget(mCanvas, 1);
 
     // RGB-слайдеры
-    auto makeSlider = [&](const char* name)->QSlider* {
+   // RGB sliders
+    auto makeSlider = [&](const QString& name, QLabel*& outLbl)->QSlider* {
         auto* row = new QWidget(content);
         auto* h = new QHBoxLayout(row);
         h->setContentsMargins(0, 0, 0, 0);
 
-        auto* lbl = new QLabel(name, row);
+        outLbl = new QLabel(name, row);
         auto* s = new QSlider(Qt::Horizontal, row);
         s->setRange(HistMin, HistMax);
         s->setSingleStep(1);
         s->setPageStep(8);
 
-        h->addWidget(lbl);
+        h->addWidget(outLbl);
         h->addWidget(s, 1);
         v->addWidget(row);
         return s;
         };
 
-    mR = makeSlider("R");
-    mG = makeSlider("G");
-    mB = makeSlider("B");
+    mR = makeSlider(tr("R"), mLblR);
+    mG = makeSlider(tr("G"), mLblG);
+    mB = makeSlider(tr("B"), mLblB);
+
+
+
 
     mR->setStyleSheet(sliderCss(QColor(255, 0, 0)));
     mG->setStyleSheet(sliderCss(QColor(0, 255, 0)));
@@ -395,10 +400,10 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
     v->addWidget(mSwatch);
 
     // кнопки
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok, content);
-    auto* btnAuto = bb->addButton("Auto", QDialogButtonBox::ActionRole);
-    auto* btnSave = bb->addButton("Save preset…", QDialogButtonBox::ActionRole);
-    v->addWidget(bb);
+    mBB = new QDialogButtonBox(QDialogButtonBox::Ok, content);
+    mBtnAuto = mBB->addButton(tr("Auto"), QDialogButtonBox::ActionRole);
+    mBtnSave = mBB->addButton(tr("Save preset"), QDialogButtonBox::ActionRole);
+    v->addWidget(mBB);
 
     // сигналы/слоты — всё как у тебя было
     connect(mCanvas, &TfCanvas::changed,
@@ -425,7 +430,7 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
     connect(mG, &QSlider::valueChanged, this, &TransferFunctionEditor::onRgbChanged);
     connect(mB, &QSlider::valueChanged, this, &TransferFunctionEditor::onRgbChanged);
 
-    connect(bb, &QDialogButtonBox::accepted, this, [this] {
+    connect(mBB, &QDialogButtonBox::accepted, this, [this] {
         rebuildPreview(false);
         auto* c = makeCTF(mPts);
         auto* o = makeOTF(mPts);
@@ -434,17 +439,22 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
         o->Delete();
         accept();
         });
-    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(mBB, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
-    connect(btnAuto, &QPushButton::clicked,
+    connect(mBtnAuto, &QPushButton::clicked,
         this, &TransferFunctionEditor::onAutoColors);
 
-    connect(btnSave, &QPushButton::clicked,
+    connect(mBtnSave, &QPushButton::clicked,
         this, [this] {
             bool ok = true;
-            QString name = QInputDialog::getText(this, tr("Save TF preset"),
-                tr("Name:"), QLineEdit::Normal,
-                "My Preset", &ok);
+            QString name = QInputDialog::getText(
+                this,
+                tr("Save TF preset"),
+                tr("Name:"),
+                QLineEdit::Normal,
+                tr("My preset"),
+                &ok
+            );
             if (!ok || name.isEmpty()) return;
 
             TF::CustomPreset P;
@@ -499,6 +509,33 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
     );
 }
 
+void TransferFunctionEditor::changeEvent(QEvent* e)
+{
+    DialogShell::changeEvent(e);
+    if (e->type() == QEvent::LanguageChange)
+        retranslateUi();
+}
+
+void TransferFunctionEditor::retranslateUi()
+{
+    const QString title = tr("Transfer function");
+    setWindowTitle(title);
+    if (titleBar())
+        titleBar()->setTitle(title);
+
+    if (mLblR) mLblR->setText(tr("R"));
+    if (mLblG) mLblG->setText(tr("G"));
+    if (mLblB) mLblB->setText(tr("B"));
+
+    if (mBtnAuto) mBtnAuto->setText(tr("Auto"));
+    if (mBtnSave) mBtnSave->setText(tr("Save preset"));
+
+    // стандартные кнопки у bb
+    if (mBB) {
+        if (auto* ok = mBB->button(QDialogButtonBox::Ok)) ok->setText(tr("OK"));
+        if (auto* cn = mBB->button(QDialogButtonBox::Cancel)) cn->setText(tr("Cancel"));
+    }
+}
 
 void TransferFunctionEditor::onCanvasChanged()
 {

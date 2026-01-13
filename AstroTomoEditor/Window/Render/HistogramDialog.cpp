@@ -190,6 +190,12 @@ void HistogramDialog::HideAutoRange(vtkImageData* image)
     autoRange(false);
 }
 
+void HistogramDialog::HideRangeIfCT(vtkImageData* image, int HLeft, int HRight)
+{
+    if (Dicom.TypeOfRecord == CT || Dicom.TypeOfRecord == CT3DR) 
+        setRange(HLeft, HRight, true);
+}
+
 void HistogramDialog::refreshFromImage(vtkImageData* image)
 {
     mImage = image;
@@ -353,6 +359,51 @@ void HistogramDialog::done(int r)
     QDialog::done(r);
 }
 
+void HistogramDialog::changeEvent(QEvent* e)
+{
+    DialogShell::changeEvent(e);
+
+    if (e->type() == QEvent::LanguageChange)
+    {
+        retranslateUi();
+        mCache = QImage();          // сбросить кэш, иначе останется старый текст
+        if (mCanvas) mCanvas->update();
+        update();
+    }
+}
+
+static QString trPV(const char* s)
+{
+    return QCoreApplication::translate("PlanarView", s);
+}
+
+void HistogramDialog::retranslateUi()
+{
+    const QString title = tr("Histogram");
+    setWindowTitle(title);
+    if (titleBar())
+        titleBar()->setTitle(title);
+
+    if (mBtnAuto)
+        mBtnAuto->setText(tr("Auto range"));
+
+    // подписи осей зависят от типа исследования
+    if (Dicom.TypeOfRecord == CT || Dicom.TypeOfRecord == CT3DR)
+    {
+        Dicom.XTitle = trPV("Hounsfield Units");
+        Dicom.YTitle = trPV("Voxel count");
+        Dicom.XLable = trPV("HU");
+        Dicom.YLable = trPV("N");
+    }
+    else if (Dicom.TypeOfRecord == MRI || Dicom.TypeOfRecord == MRI3DR)
+    {
+        Dicom.XTitle = trPV("MRI intensity");
+        Dicom.YTitle = trPV("Voxel count");
+        Dicom.XLable = trPV("AU");
+        Dicom.YLable = trPV("N");
+    }
+}
+
 void HistogramDialog::setRangeAxis(double loAxis, double hiAxis, bool emitSig)
 {
     if (loAxis > hiAxis) std::swap(loAxis, hiAxis);
@@ -372,6 +423,7 @@ void HistogramDialog::setRange(int loBin, int hiBin, bool emitSig)
     if (mCanvas)
         mCanvas->update();
 }
+
 
 // самая глубокая "впадина" в диапазоне [L..R] как просто минимум s[i]
 static int deepestValleyInRange(const QVector<double>& s, int L, int R)
@@ -671,9 +723,9 @@ void HistogramDialog::autoRange(bool refresh)
         return;
     }
 
-    for (int i = binA - 1; i < binB + 1; ++i) {
-        qDebug() << " i " << i << " axis " << axisFromData(i) << " s " << s[i];
-    }
+    //for (int i = binA - 1; i < binB + 1; ++i) {
+    //    qDebug() << " i " << i << " axis " << axisFromData(i) << " s " << s[i];
+    //}
 
     // === 2. Левая граница: как раньше (впадина или перегиб) ===
     PeakInfo P = analyzePeak(s, gp.peakBin);
