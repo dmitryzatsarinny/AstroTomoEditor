@@ -910,47 +910,6 @@ void ElectrodePanel::toggleCut(ElectrodeId id)
 
 }
 
-static bool computeNormalFromScalars(vtkImageData* img, vtkDataArray* arr,
-    const std::array<int, 3>& ijk,
-    double outN[3])
-{
-    if (!img || !arr) return false;
-
-    int dims[3]; img->GetDimensions(dims);
-
-    auto inside = [&](int x, int y, int z) {
-        return x >= 0 && y >= 0 && z >= 0 && x < dims[0] && y < dims[1] && z < dims[2];
-        };
-
-    const int x = ijk[0], y = ijk[1], z = ijk[2];
-    if (!inside(x, y, z)) return false;
-
-    auto sample = [&](int xi, int yi, int zi)->double {
-        int p[3]{ xi,yi,zi };
-        const vtkIdType pid = img->ComputePointId(p);
-        return arr->GetComponent(pid, 0);
-        };
-
-    // центральные разности, с подстраховкой на границах
-    const int xm = inside(x - 1, y, z) ? x - 1 : x;
-    const int xp = inside(x + 1, y, z) ? x + 1 : x;
-    const int ym = inside(x, y - 1, z) ? y - 1 : y;
-    const int yp = inside(x, y + 1, z) ? y + 1 : y;
-    const int zm = inside(x, y, z - 1) ? z - 1 : z;
-    const int zp = inside(x, y, z + 1) ? z + 1 : z;
-
-    const double gx = sample(xp, y, z) - sample(xm, y, z);
-    const double gy = sample(x, yp, z) - sample(x, ym, z);
-    const double gz = sample(x, y, zp) - sample(x, y, zm);
-
-    double n[3]{ gx, gy, gz };
-    const double L = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-    if (L < 1e-9) return false;
-
-    outN[0] = n[0] / L; outN[1] = n[1] / L; outN[2] = n[2] / L;
-    return true;
-}
-
 static QString electrodeLabel(ElectrodePanel::ElectrodeId id)
 {
     // Подстрой под твой enum! Я предполагаю что V1..V30 идут подряд.
@@ -1115,50 +1074,60 @@ void ElectrodePanel::updateMarker(ElectrodeId id,
     it->sphere->Modified();
 
     // -----------------------------
-    // 2) НОРМАЛЬ (для подписи)
+    // 2) НОРМАЛЬ НАРУЖУ (для подписи)
     // -----------------------------
-    double n[3]{ 0,0,1 };
-    bool hasN = false;
+    double nOut[3]{ 0,0,1 };
+    bool hasOutwardN = false;
+    int ijkRaw[3]{ ijk[0], ijk[1], ijk[2] };
 
     if (mPick.image)
     {
-        if (auto* arr = mPick.image->GetPointData()->GetScalars())
-            hasN = computeNormalFromScalars(mPick.image, arr, ijk, n);
+        hasOutwardN = worldNormalFromIJK(mPick.image, ijkRaw, nOut);
+
+        if (hasOutwardN)
+        {
+            double center[3]{ 0,0,0 };
+            mPick.image->GetCenter(center);
+
+            // Нормаль разворачиваем так, чтобы она указывала наружу тела,
+            // а не зависела от позиции камеры.
+            double toOutside[3]{ w[0] - center[0], w[1] - center[1], w[2] - center[2] };
+            const double dot = nOut[0] * toOutside[0] + nOut[1] * toOutside[1] + nOut[2] * toOutside[2];
+            if (dot < 0.0)
+            {
+                nOut[0] = -nOut[0];
+                nOut[1] = -nOut[1];
+                nOut[2] = -nOut[2];
+            }
+        }
     }
 
-    if (!hasN)
+    if (!hasOutwardN)
     {
-        // fallback: к камере
-        auto* cam = (mPick.renderer ? mPick.renderer->GetActiveCamera() : nullptr);
-        double pos[3]{};
-        if (cam) cam->GetPosition(pos);
+        double center[3]{ 0,0,0 };
+        if (mPick.image) mPick.image->GetCenter(center);
 
-        double v[3]{ pos[0] - w[0], pos[1] - w[1], pos[2] - w[2] };
+        double v[3]{ w[0] - center[0], w[1] - center[1], w[2] - center[2] };
         const double L = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-        if (L > 1e-9) { n[0] = v[0] / L; n[1] = v[1] / L; n[2] = v[2] / L; }
+
+        if (L > 1e-9)
+        {
+            nOut[0] = v[0] / L;
+            nOut[1] = v[1] / L;
+            nOut[2] = v[2] / L;
+        }
     }
 
     // -----------------------------
-    // 3) ТЕКСТ: на поверхности сферы со стороны камеры
+    // 3) ТЕКСТ: снаружи относительно поверхности
     // -----------------------------
 
-    if (auto* cam = (mPick.renderer ? mPick.renderer->GetActiveCamera() : nullptr))
-    {
-        double cpos[3]{};
-        cam->GetPosition(cpos);
-
-        double v[3]{ cpos[0] - w[0], cpos[1] - w[1], cpos[2] - w[2] };
-        const double L = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-        if (L > 1e-9) { nCam[0] = v[0] / L; nCam[1] = v[1] / L; nCam[2] = v[2] / L; }
-    }
-
-    // чуть наружу от поверхности, чтобы не было z-fighting со сферой
-    const double textOff = r * 0.5;
+    const double textOff = r * 0.7;
 
     const double tp[3]{
-        w[0] + nCam[0] * textOff,
-        w[1] + nCam[1] * textOff,
-        w[2] + nCam[2] * textOff
+        w[0] + nOut[0] * textOff,
+        w[1] + nOut[1] * textOff,
+        w[2] + nOut[2] * textOff
     };
 
     const QByteArray lbl = electrodeLabel(id).toUtf8();

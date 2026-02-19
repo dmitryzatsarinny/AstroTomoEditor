@@ -1003,12 +1003,12 @@ void RenderView::removeAllTemplateLayers()
 
 void RenderView::reloadElectrodes()
 {
-    if (!mImage || !mVolume) return;
-
     if (mAppActive && mCurrentApp == App::Electrodes) 
     {
         setElectrodesUiActive(false);
         endElectrodesPreview();
+        mLblStlSize->setVisible(false);
+        mLblStlSize->setText("");
         setAppUiActive(false, mCurrentApp);
     }
 }
@@ -2306,6 +2306,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
 
     mShiftValue = 3;
 
+    reloadElectrodes();
+
     // 3) собираем volume и сцену
     auto vol = vtkSmartPointer<vtkVolume>::New();
     vol->SetMapper(mapper);
@@ -2408,7 +2410,6 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     // 5) применяем разумный пресет TF по диапазону данных
     reloadHistogram();
     reloadTemplate();
-    reloadElectrodes();
     reloadTfMenu();
     pump(78);
 
