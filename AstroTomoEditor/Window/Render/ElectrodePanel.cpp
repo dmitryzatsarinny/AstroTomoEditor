@@ -561,6 +561,12 @@ QVector<ElectrodePanel::ElectrodeIJKCoord> ElectrodePanel::coordsIJK() const
 
 void ElectrodePanel::setPickContext(const PickContext& ctx)
 {
+    if (mPick.vtkWidget)
+        mPick.vtkWidget->removeEventFilter(this);
+
+    if (mHoverActor && mPick.renderer)
+        mPick.renderer->RemoveActor(mHoverActor);
+
     mPick = ctx;
 
     // панель должна ловить мышь поверх vtk
@@ -580,7 +586,15 @@ void ElectrodePanel::setPickContext(const PickContext& ctx)
     }
     mMarkers.clear();
 
-    ensureHoverActor();
+    if (mHoverActor && mPick.renderer)
+    {
+        mHoverActor->SetVisibility(0);
+        mPick.renderer->AddActor(mHoverActor);
+    }
+    else
+    {
+        ensureHoverActor();
+    }
 }
 
 void ElectrodePanel::beginPick(ElectrodeId id)
@@ -1077,35 +1091,11 @@ void ElectrodePanel::updateMarker(ElectrodeId id,
     // 2) НОРМАЛЬ НАРУЖУ (для подписи)
     // -----------------------------
     double nOut[3]{ 0,0,1 };
-    bool hasOutwardN = false;
-    int ijkRaw[3]{ ijk[0], ijk[1], ijk[2] };
 
     if (mPick.image)
     {
-        hasOutwardN = worldNormalFromIJK(mPick.image, ijkRaw, nOut);
-
-        if (hasOutwardN)
-        {
-            double center[3]{ 0,0,0 };
-            mPick.image->GetCenter(center);
-
-            // Нормаль разворачиваем так, чтобы она указывала наружу тела,
-            // а не зависела от позиции камеры.
-            double toOutside[3]{ w[0] - center[0], w[1] - center[1], w[2] - center[2] };
-            const double dot = nOut[0] * toOutside[0] + nOut[1] * toOutside[1] + nOut[2] * toOutside[2];
-            if (dot < 0.0)
-            {
-                nOut[0] = -nOut[0];
-                nOut[1] = -nOut[1];
-                nOut[2] = -nOut[2];
-            }
-        }
-    }
-
-    if (!hasOutwardN)
-    {
         double center[3]{ 0,0,0 };
-        if (mPick.image) mPick.image->GetCenter(center);
+        mPick.image->GetCenter(center);
 
         double v[3]{ w[0] - center[0], w[1] - center[1], w[2] - center[2] };
         const double L = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
@@ -1116,13 +1106,18 @@ void ElectrodePanel::updateMarker(ElectrodeId id,
             nOut[1] = v[1] / L;
             nOut[2] = v[2] / L;
         }
+        else
+        {
+            int ijkRaw[3]{ ijk[0], ijk[1], ijk[2] };
+            worldNormalFromIJK(mPick.image, ijkRaw, nOut);
+        }
     }
 
     // -----------------------------
     // 3) ТЕКСТ: снаружи относительно поверхности
     // -----------------------------
 
-    const double textOff = r * 0.7;
+    const double textOff = r * 1.2;
 
     const double tp[3]{
         w[0] + nOut[0] * textOff,

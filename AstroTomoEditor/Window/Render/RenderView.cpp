@@ -720,10 +720,29 @@ void RenderView::beginElectrodesPreview()
 
     if (mVolume && mVolume->GetProperty())
     {
+        auto* prop = mVolume->GetProperty();
+
+        // Сохраняем текущую TF, чтобы вернуть её при выходе из режима электродов.
+        mElectrodesPreviewSavedCTF = vtkSmartPointer<vtkColorTransferFunction>::New();
+        mElectrodesPreviewSavedOTF = vtkSmartPointer<vtkPiecewiseFunction>::New();
+        if (auto* c = prop->GetRGBTransferFunction(0))
+            mElectrodesPreviewSavedCTF->DeepCopy(c);
+        if (auto* o = prop->GetScalarOpacity(0))
+            mElectrodesPreviewSavedOTF->DeepCopy(o);
+
+        // В режиме электродов: весь объём серый, электроды (250..255) — красные.
+        auto previewCTF = vtkSmartPointer<vtkColorTransferFunction>::New();
+        previewCTF->SetColorSpaceToLab();
+        previewCTF->AddRGBPoint(DataMin, 0.0, 0.0, 0.0);
+        previewCTF->AddRGBPoint(249.0, 1.0, 1.0, 1.0);
+        previewCTF->AddRGBPoint(250.0, 1.0, 0.0, 0.0);
+        previewCTF->AddRGBPoint(DataMax, 1.0, 0.0, 0.0);
+        prop->SetColor(0, previewCTF);
+
         if (mInterpolation == VolumeInterpolation::Linear)
-            mVolume->GetProperty()->SetInterpolationTypeToLinear();
+            prop->SetInterpolationTypeToLinear();
         else
-            mVolume->GetProperty()->SetInterpolationTypeToNearest();
+            prop->SetInterpolationTypeToNearest();
     }
 
 
@@ -747,10 +766,16 @@ void RenderView::endElectrodesPreview()
 
         if (mVolume && mVolume->GetProperty())
         {
+            auto* prop = mVolume->GetProperty();
+            if (mElectrodesPreviewSavedCTF)
+                prop->SetColor(0, mElectrodesPreviewSavedCTF);
+            if (mElectrodesPreviewSavedOTF)
+                prop->SetScalarOpacity(0, mElectrodesPreviewSavedOTF);
+
             if (mInterpolation == VolumeInterpolation::Linear)
-                mVolume->GetProperty()->SetInterpolationTypeToLinear();
+                prop->SetInterpolationTypeToLinear();
             else
-                mVolume->GetProperty()->SetInterpolationTypeToNearest();
+                prop->SetInterpolationTypeToNearest();
         }
 
         setMapperInput(mImage);
@@ -760,6 +785,8 @@ void RenderView::endElectrodesPreview()
     mElectrodesPreviewImage = nullptr;
     mImageBeforeElectrodes = nullptr;
     mElectrodesPreviewActive = false;
+    mElectrodesPreviewSavedCTF = nullptr;
+    mElectrodesPreviewSavedOTF = nullptr;
 
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible())

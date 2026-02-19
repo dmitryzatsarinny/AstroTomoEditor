@@ -223,6 +223,8 @@ private:
     void endElectrodesPreview();
     vtkSmartPointer<vtkImageData> mImageBeforeElectrodes;
     vtkSmartPointer<vtkImageData> mElectrodesPreviewImage;
+    vtkSmartPointer<vtkColorTransferFunction> mElectrodesPreviewSavedCTF;
+    vtkSmartPointer<vtkPiecewiseFunction> mElectrodesPreviewSavedOTF;
     bool mElectrodesPreviewActive{ false };
 
     bool   mHistMaskActive{ false };
