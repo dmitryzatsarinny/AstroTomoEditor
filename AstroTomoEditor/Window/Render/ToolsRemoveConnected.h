@@ -82,6 +82,11 @@ public:
     using ProgressFn = std::function<void(const int)>;
     void setStatusCallback(StatusFn fn) { mStatus = std::move(fn); }
     void setProgressCallback(ProgressFn fn) { mProgress = std::move(fn); }
+    bool AddBy6Neighbors(Volume& volume, uint8_t fillVal);
+   /* vtkImageData* ClearImage(QVTKOpenGLNativeWidget* vtk,
+        vtkRenderer* renderer,
+        vtkImageData* image,
+        vtkVolume* volume);*/
 
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
@@ -107,7 +112,7 @@ private:
     void PlusVoxels();
     void AddBaseToBounds(const std::vector<uint8_t>& mark, const int seedIn[3]);
     void ErodeBy6Neighbors(Volume& volume);
-    bool AddBy6Neighbors(Volume& volume, uint8_t fillVal);
+   
     void FillEmptyRegions(const std::vector<uint8_t>& mark, const int seedIn[3]);
     void TotalSmoothingVolume();
     void PeelRecoveryVolume();

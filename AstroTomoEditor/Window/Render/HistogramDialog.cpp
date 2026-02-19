@@ -261,6 +261,9 @@ void HistogramDialog::buildHistogram()
         }
     }
 
+    //for (int i = 0; i <= 255; i++)
+    //    qDebug() << i << "  " << mH[i];
+
     if (!mH.isEmpty())
         mH[(int)HistMin] = 0;   // глушим "0", если нужно
 
@@ -716,7 +719,7 @@ void HistogramDialog::autoRange(bool refresh)
     }
 
     GaussianPeak gp = findMostGaussianPeakBins(s, binA, binB);
-    qDebug() << "peakBin" << gp.peakBin << "muBin" << gp.muBin << "sigmaBin" << gp.sigmaBin << "error" << gp.error;
+    //qDebug() << "peakBin" << gp.peakBin << "muBin" << gp.muBin << "sigmaBin" << gp.sigmaBin << "error" << gp.error;
     if (gp.peakBin < 0 || gp.sigmaBin <= 0.0)
     {
         setRange(binA, binB, true);
@@ -768,13 +771,13 @@ void HistogramDialog::autoRange(bool refresh)
         }
     }
 
-    qDebug() << " Left i " << loBin << " axis " << axisFromData(loBin) << " s " << s[loBin];
+    //qDebug() << " Left i " << loBin << " axis " << axisFromData(loBin) << " s " << s[loBin];
 
     // === 3. Правая граница: центр + 2.8 σ (в биннах) ===
     int RightBySigma = int(std::round(gp.peakBin + 2.8 * gp.sigmaBin));
     RightBySigma = std::clamp(RightBySigma, binB, (int)HistMax);
 
-    qDebug() << " Right i " << RightBySigma << " axis " << axisFromData(RightBySigma) << " s " << s[RightBySigma];
+    //qDebug() << " Right i " << RightBySigma << " axis " << axisFromData(RightBySigma) << " s " << s[RightBySigma];
 
     autoleft = loBin;
     autoright = RightBySigma;

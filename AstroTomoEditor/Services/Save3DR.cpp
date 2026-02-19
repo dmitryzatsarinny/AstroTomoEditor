@@ -3,7 +3,6 @@
 #include <QFileDialog>
 #include <QSaveFile>
 #include <QStandardPaths>
-#include <QMessageBox>
 
 #include <vtkImageData.h>
 #include <vtkSmartPointer.h>
@@ -13,32 +12,63 @@
 
 #include <Services/VolumeFix3DR.h> // для _3Dinfo
 #include <Services/DicomRange.h>   // для DicomInfo/Mode (CT/MRI)
+#include <Window/ServiceWindow/CustomMessageBox.h>
+#include <QSettings>
+#include <QApplication>
+#include <Window/ServiceWindow/ShellFileDialog.h>
 
 bool Save3DR::saveWithDialog(QWidget* parent, vtkImageData* img, const DicomInfo* dicom, QString& savepath)
 {
-    if (!img) 
+    if (!img)
     {
-        QMessageBox::warning(parent, QObject::tr("Save 3DR"),
-            QObject::tr("No loaded volume"));
+        CustomMessageBox::warning(parent, QObject::tr("Save 3DR"),
+            QObject::tr("No loaded volume"), ServiceWindow);
         return false;
     }
 
-    const QString defDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    const QString path = QFileDialog::getSaveFileName(
-        parent,
-        QObject::tr("Save as 3DR"),
-        defDir + "/volume.3dr",
+    QSettings s;
+    const QString defDir = s.value(
+        "Paths/Last3drDir",
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+    ).toString();
+
+    ShellFileDialog shell(parent,
+        QObject::tr("Save 3DR"),
+        ServiceWindow,
+        QDir(defDir).filePath("volume.3dr"),
         QObject::tr("Astro 3DR (*.3dr)")
     );
-    if (path.isEmpty()) 
+
+    auto* dlg = shell.fileDialog();
+    dlg->setAcceptMode(QFileDialog::AcceptSave);
+    dlg->setFileMode(QFileDialog::AnyFile);
+    dlg->setOption(QFileDialog::ShowDirsOnly, true);
+    dlg->setFilter(QDir::AllDirs | QDir::Drives | QDir::NoDotAndDotDot);
+    dlg->setDefaultSuffix("3dr");
+    dlg->setOption(QFileDialog::DontConfirmOverwrite, true);
+
+    if (shell.exec() != QDialog::Accepted)
         return false;
 
+    QString path = dlg->selectedFiles().isEmpty() ? QString() : dlg->selectedFiles().first();
+    if (path.isEmpty())
+        return false;
+
+    while (path.endsWith('.')) path.chop(1);
+    if (!path.endsWith(".3dr", Qt::CaseInsensitive))
+        path += ".3dr";
+
+    s.setValue("Paths/Last3drDir", QFileInfo(path).absolutePath());
+
+
     QString err;
-    if (!Save3DR::write(path, img, dicom, &err)) {
-        QMessageBox::critical(parent, QObject::tr("Save 3DR"),
-            QObject::tr("Failed to save file:\n%1").arg(err));
+    if (!Save3DR::write(path, img, dicom, &err))
+    {
+        CustomMessageBox::critical(parent, QObject::tr("Save 3DR"),
+            QObject::tr("Failed to save file:\n%1").arg(err), ServiceWindow);
         return false;
     }
+
     savepath = path;
     return true;
 }

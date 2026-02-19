@@ -54,6 +54,12 @@
     <Filter Include="Source Files\Window\Render">
       <UniqueIdentifier>{07afd8b9-08d0-4f05-be40-5dc4d2f4ab0f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\Window\ServiceWindow">
+      <UniqueIdentifier>{52fd087a-2594-46c3-b885-4efdb188d323}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Window\ServiceWindow">
+      <UniqueIdentifier>{cd020452-426b-4c19-8294-321fffbb59ba}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Loader\main.cpp">
@@ -149,6 +155,18 @@
     <ClCompile Include="Window\Render\TemplateDialog.cpp">
       <Filter>Source Files\Window\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Window\Render\ElectrodePanel.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\ServiceWindow\PresetNameDialog.cpp">
+      <Filter>Source Files\Window\ServiceWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\ServiceWindow\CustomMessageBox.cpp">
+      <Filter>Source Files\Window\ServiceWindow</Filter>
+    </ClCompile>
+    <ClCompile Include="Window\ServiceWindow\ShellFileDialog.cpp">
+      <Filter>Source Files\Window\ServiceWindow</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -206,9 +224,6 @@
       <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
     <ClInclude Include="Services\AppConfig.h">
-      <Filter>Header Files\Services</Filter>
-    </ClInclude>
-    <ClInclude Include="Services\PerfScan.h">
       <Filter>Header Files\Services</Filter>
     </ClInclude>
     <ClInclude Include="Services\FastDicomHeaderReader.h">
@@ -281,6 +296,18 @@
     </QtMoc>
     <QtMoc Include="Window\Render\TemplateDialog.h">
       <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\Render\ElectrodePanel.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\ServiceWindow\PresetNameDialog.h">
+      <Filter>Header Files\Window\ServiceWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\ServiceWindow\CustomMessageBox.h">
+      <Filter>Header Files\Window\ServiceWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\ServiceWindow\ShellFileDialog.h">
+      <Filter>Header Files\Window\ServiceWindow</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>

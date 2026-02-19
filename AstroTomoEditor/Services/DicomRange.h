@@ -19,6 +19,7 @@ struct DicomInfo
     double slope, intercept;
     bool rawActualFromTags;
     double mSpX{ 1.0 }, mSpY{ 1.0 }, mSpZ{ 1.0 };
+    double OriginSpZ{ 1.0 };
     bool SpCreated{ false };
     QString XTitle = "Hounsfield Units";
     QString YTitle = "Voxel count";
@@ -32,6 +33,17 @@ struct DicomInfo
     QString Sequence = "Null";
     QString SeriesNumber = "0";
     QString DicomPath = "C:\\";
+
+    double VolumeOriginX{ 0.0 };
+    double VolumeOriginY{ 0.0 };
+    double VolumeOriginZ{ 0.0 };
+
+    double VolumeFirstZ{ 0.0 };
+    double VolumeLastZ{ 0.0 };
+
+    double VolumeCenterX{ 0.0 };
+    double VolumeCenterY{ 0.0 };
+    double VolumeCenterZ{ 0.0 };
 };
 
 

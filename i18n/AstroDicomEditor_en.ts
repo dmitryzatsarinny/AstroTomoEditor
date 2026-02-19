@@ -28,6 +28,14 @@
     </message>
 </context>
 <context>
+    <name>ElectrodePanel</name>
+    <message>
+        <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="311"/>
+        <source>Save electrodes coords</source>
+        <translation type="unfinished"></translation>
+    </message>
+</context>
+<context>
     <name>ExplorerDialog</name>
     <message>
         <location filename="../AstroTomoEditor/Window/Explorer/ExplorerDialog.cpp" line="16"/>
@@ -766,150 +774,150 @@
 <context>
     <name>RenderView</name>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1928"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2308"/>
         <source>Custom…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="328"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="921"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2053"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="385"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1232"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2444"/>
         <source>Edit</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="375"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="938"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2070"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="435"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1249"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2461"/>
         <source>Applications</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="414"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1993"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="481"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2373"/>
         <source>Undo (Ctrl+Z)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="422"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1994"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="490"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2374"/>
         <source>Redo (Ctrl+Y)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2065"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2456"/>
         <source>App: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1113"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1158"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1440"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1485"/>
         <source>No volume to build STL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1118"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1192"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1445"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1519"/>
         <source>Building surface…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1185"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1224"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1512"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1551"/>
         <source>Ready volume</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1131"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1146"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1236"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1458"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1473"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1563"/>
         <source>Ready surface</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1133"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1148"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1187"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1238"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1249"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1259"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1269"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1802"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1811"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1460"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1475"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1514"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1565"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1576"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1586"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1596"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2181"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2190"/>
         <source>Ready</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1198"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1525"/>
         <source>%1 (%2%)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1198"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1525"/>
         <source>Working…</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1206"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1212"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1533"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1539"/>
         <source>Simplify surface</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1247"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1574"/>
         <source>Nothing to save - build STL first</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1254"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1581"/>
         <source>Save STL</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1254"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1581"/>
         <source>STL binary (*.stl)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1265"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1592"/>
         <source>Saved STL: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1266"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1593"/>
         <source>Save failed</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1676"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2052"/>
         <source>Invalid image: empty extent or no scalars</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="291"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1988"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="302"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2368"/>
         <source>Simplify</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="299"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1989"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="308"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2369"/>
         <source>Save</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="323"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1991"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="379"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2371"/>
         <source>Transfer function</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1668"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2044"/>
         <source>No image</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1683"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2059"/>
         <source>No render window</source>
         <translation type="unfinished"></translation>
     </message>

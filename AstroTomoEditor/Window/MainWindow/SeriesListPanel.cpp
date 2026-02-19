@@ -43,7 +43,6 @@
 #include <QtConcurrent/QtConcurrentFilter> 
 #include <QtConcurrent/QtConcurrentMap> 
 #include "PlanarView.h"
-#include <Services/PerfScan.h>
 
 // --- Быстрая проверка: Part-10 преамбула ---
 static inline bool hasDicmPreamble(const uchar* p, qsizetype n) {
@@ -64,6 +63,26 @@ static inline bool isVR2(char a, char b) {
     default: return false;
     }
 }
+
+static bool tryGetPatientPosition(vtkDICOMMetaData* md, double& x, double& y, double& z)
+{
+    if (!md) return false;
+
+    // (0020,0032) ImagePositionPatient: 3 числа
+    if (!md->Has(DC::ImagePositionPatient))
+        return false;
+
+    const vtkDICOMValue& v = md->Get(DC::ImagePositionPatient);
+    if (v.GetNumberOfValues() < 3)
+        return false;
+
+    x = v.GetDouble(0);
+    y = v.GetDouble(1);
+    z = v.GetDouble(2);
+
+    return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
+}
+
 
 // Маленький парсер первых тегов: поддержка Explicit/Implicit VR (LE)
 // Этого хватает, чтобы со 100% вероятностью отличить DICOM от мусора
@@ -377,7 +396,6 @@ void SeriesListPanel::scanSingleFile(const QString& filePath)
     }
 
     // Patient info
-    // Patient info
     PatientInfo pinfo;
     pinfo.patientName = DicomParcer::normalizePN(qstr(md->Get(DC::PatientName)));
     {
@@ -411,6 +429,21 @@ void SeriesListPanel::scanSingleFile(const QString& filePath)
 
     pinfo.Sequence = seqName.trimmed();
 
+    {
+        double x, y, z;
+        if (tryGetPatientPosition(md, x, y, z)) 
+        {
+            pinfo.patientPosX = x;
+            pinfo.patientPosY = y;
+            pinfo.patientPosZ = z;
+        }
+        else
+        {
+            pinfo.patientPosX = 0;
+            pinfo.patientPosY = 0;
+            pinfo.patientPosZ = 0;
+        }
+    }
 
     // Series item
     QString seriesUID = qstr(md->Get(DC::SeriesInstanceUID));
@@ -814,14 +847,6 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
 {
     SeriesScanResult result;
 
-#ifdef QT_DEBUG
-    for (auto& s : PerfScan::g) {
-        s.nsTotal.store(0, std::memory_order_relaxed);
-        s.nsMax.store(0, std::memory_order_relaxed);
-        s.calls.store(0, std::memory_order_relaxed);
-    }
-#endif
-
     if (rootPaths.isEmpty()) {
         result.totalFiles = 0;
         return result;
@@ -832,8 +857,6 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
     candidates.reserve(1 << 15);
 
     {
-        PERF_SCOPE(PerfScan::Id::Pass1_Total);
-
         QElapsedTimer tick;
         tick.start();
 
@@ -854,25 +877,21 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
 
             while (it.hasNext())
             {
-                PERF_SCOPE(PerfScan::Id::Pass1_IterateFiles);
 
                 if (shouldCancel()) { result.canceled = true; return result; }
 
                 it.next();
                 const QFileInfo fi = it.fileInfo();
 
-                {
-                    PERF_SCOPE(PerfScan::Id::Pass1_ExtSizeChecks);
 
-                    const QString ext = fi.suffix().toLower();
-                    if (ext == "3dr" && !mInclude3dr)
-                        continue;
+                const QString ext = fi.suffix().toLower();
+                if (ext == "3dr" && !mInclude3dr)
+                    continue;
 
-                    qint64 sz = fi.size();
-                    if (sz < 1024 || sz >(1ll << 33))
-                        continue;
+                qint64 sz = fi.size();
+                if (sz < 1024 || sz >(1ll << 33))
+                    continue;
 
-                }
 
                 ++seen;
                 if (tick.hasExpired(120)) {
@@ -929,93 +948,85 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
 
         parser->SetBufferSize(256 * 1024);
 
-        {
-            PERF_SCOPE(PerfScan::Id::Map_ParseMeta_Update);
-            parser->Update();
-        }
 
-        {
-            PERF_SCOPE(PerfScan::Id::Map_HasGeometryPixelChecks);
-            const bool hasGeometry =
-                meta->Has(DC::Rows) || meta->Has(DC::Columns);
-            const bool hasPixel =
-                meta->Has(DC::PixelData) ||
-                meta->Has(DC::FloatPixelData) ||
-                meta->Has(DC::DoubleFloatPixelData);
+       parser->Update();
 
-            if (!(hasGeometry || hasPixel))
-                return out;
-        }
+       const bool hasGeometry =
+           meta->Has(DC::Rows) || meta->Has(DC::Columns);
+       const bool hasPixel =
+           meta->Has(DC::PixelData) ||
+           meta->Has(DC::FloatPixelData) ||
+           meta->Has(DC::DoubleFloatPixelData);
 
-        {
-            PERF_SCOPE(PerfScan::Id::Map_MakeSeriesKey);
-            out.seriesKey = makeSeriesKey(meta);
-            out.ok = !out.seriesKey.isEmpty();
-        }
+       if (!(hasGeometry || hasPixel))
+           return out;
 
-        if (out.ok)
-        {
-            PERF_SCOPE(PerfScan::Id::Map_ExtractFields);
-            out.meta.fileName = QFileInfo(p).fileName();
 
-            if (meta->Has(DC::Rows))    out.meta.rows = meta->Get(DC::Rows).AsInt();
-            if (meta->Has(DC::Columns)) out.meta.cols = meta->Get(DC::Columns).AsInt();
-            if (meta->Has(DC::BitsAllocated)) {
-                out.meta.bitsAllocated = meta->Get(DC::BitsAllocated).AsInt();
-            }
-            if (meta->Has(DC::SamplesPerPixel)) {
-                out.meta.samplesPerPixel = meta->Get(DC::SamplesPerPixel).AsInt();
-            }
-            if (meta->Has(DC::PixelRepresentation)) {
-                out.meta.pixelRepresentation = meta->Get(DC::PixelRepresentation).AsInt();
-            }
-            if (meta->Has(DC::PhotometricInterpretation)) {
-                out.meta.photometric = QString::fromUtf8(meta->Get(DC::PhotometricInterpretation).AsString());
-            }
-            out.meta.hasPixelKey = (out.meta.rows > 0 && out.meta.cols > 0);
+       out.seriesKey = makeSeriesKey(meta);
+       out.ok = !out.seriesKey.isEmpty();
 
-            if (meta->Has(DC::ImagePositionPatient)) {
-                const vtkDICOMValue& v = meta->Get(DC::ImagePositionPatient);
-                if (v.GetNumberOfValues() >= 3) {
-                    out.meta.z = v.GetDouble(2);
-                    out.meta.hasZ = true;
-                }
-            }
+     if (out.ok)
+     {
+         out.meta.fileName = QFileInfo(p).fileName();
 
-            if (meta->Has(DC::InstanceNumber)) {
-                out.meta.instance = meta->Get(DC::InstanceNumber).AsInt();
-                out.meta.hasInstance = true;
-            }
+         if (meta->Has(DC::Rows))    out.meta.rows = meta->Get(DC::Rows).AsInt();
+         if (meta->Has(DC::Columns)) out.meta.cols = meta->Get(DC::Columns).AsInt();
+         if (meta->Has(DC::BitsAllocated)) {
+             out.meta.bitsAllocated = meta->Get(DC::BitsAllocated).AsInt();
+         }
+         if (meta->Has(DC::SamplesPerPixel)) {
+             out.meta.samplesPerPixel = meta->Get(DC::SamplesPerPixel).AsInt();
+         }
+         if (meta->Has(DC::PixelRepresentation)) {
+             out.meta.pixelRepresentation = meta->Get(DC::PixelRepresentation).AsInt();
+         }
+         if (meta->Has(DC::PhotometricInterpretation)) {
+             out.meta.photometric = QString::fromUtf8(meta->Get(DC::PhotometricInterpretation).AsString());
+         }
+         out.meta.hasPixelKey = (out.meta.rows > 0 && out.meta.cols > 0);
 
-            out.meta.modality =
-                QString::fromUtf8(meta->Get(DC::Modality).AsString());
-            out.meta.seriesDescription =
-                QString::fromUtf8(meta->Get(DC::SeriesDescription).AsString());
-            out.meta.studyUID =
-                QString::fromUtf8(meta->Get(DC::StudyInstanceUID).AsString());
-            out.meta.seriesNumber =
-                QString::fromUtf8(meta->Get(DC::SeriesNumber).AsString());
-        }
+         if (meta->Has(DC::ImagePositionPatient)) {
+             const vtkDICOMValue& v = meta->Get(DC::ImagePositionPatient);
+             if (v.GetNumberOfValues() >= 3) {
+                 out.meta.z = v.GetDouble(2);
+                 out.meta.hasZ = true;
+             }
+         }
 
-        if (out.ok && !gotPatient.test_and_set(std::memory_order_acq_rel))
-        {
-            PatientInfo pi;
-            if (tryFillPatientInfoFromMeta(meta, pi)) {
-                out.pinfo = std::move(pi);
-                out.pinfoValid = true;
-            }
-            else {
-                // если не получилось, разрешаем другим попытаться
-                gotPatient.clear(std::memory_order_release);
-            }
-        }
+         if (meta->Has(DC::InstanceNumber)) {
+             out.meta.instance = meta->Get(DC::InstanceNumber).AsInt();
+             out.meta.hasInstance = true;
+         }
 
-        int k = ++progressed;
-        if ((k & 0x0F) == 0)
-            emit scanProgress(k, candidates.size(), p);
+         out.meta.modality =
+             QString::fromUtf8(meta->Get(DC::Modality).AsString());
+         out.meta.seriesDescription =
+             QString::fromUtf8(meta->Get(DC::SeriesDescription).AsString());
+         out.meta.studyUID =
+             QString::fromUtf8(meta->Get(DC::StudyInstanceUID).AsString());
+         out.meta.seriesNumber =
+             QString::fromUtf8(meta->Get(DC::SeriesNumber).AsString());
+     }
 
-        return out;
-        };
+     if (out.ok && !gotPatient.test_and_set(std::memory_order_acq_rel))
+     {
+         PatientInfo pi;
+         if (tryFillPatientInfoFromMeta(meta, pi)) {
+             out.pinfo = std::move(pi);
+             out.pinfoValid = true;
+         }
+         else {
+             // если не получилось, разрешаем другим попытаться
+             gotPatient.clear(std::memory_order_release);
+         }
+     }
+
+     int k = ++progressed;
+     if ((k & 0x0F) == 0)
+         emit scanProgress(k, candidates.size(), p);
+
+     return out;
+     };
 
     SeriesScanResult acc;
 
@@ -1031,12 +1042,8 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
     QThreadPool pool;
     pool.setMaxThreadCount(2);
 
-    {
-        PERF_SCOPE(PerfScan::Id::Pass2_Total);
-
-        acc = QtConcurrent::blockingMappedReduced<SeriesScanResult>(
-            &pool, candidates, mapFn, reduceFn, QtConcurrent::SequentialReduce);
-    }
+    acc = QtConcurrent::blockingMappedReduced<SeriesScanResult>(
+         &pool, candidates, mapFn, reduceFn, QtConcurrent::SequentialReduce);
 
     if (shouldCancel()) {
         result.canceled = true;
@@ -1060,8 +1067,6 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
     items.reserve(keys.size());
 
     {
-        PERF_SCOPE(PerfScan::Id::Pass3_Total);
-
         for (const QString& seriesKey : keys)
         {
             if (shouldCancel()) { result.canceled = true; break; }
@@ -1069,14 +1074,10 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
             QVector<SeriesScanResult::QuickDicomFile> entries =
                 acc.entriesBySeries.value(seriesKey);
 
-            {
-
-                PERF_SCOPE(PerfScan::Id::Pass3_SortEntries);
-                std::sort(entries.begin(), entries.end(),
-                    [&](const auto& a, const auto& b) {
-                        return coll.compare(a.fileName, b.fileName) < 0;
-                    });
-            }
+            std::sort(entries.begin(), entries.end(),
+                [&](const auto& a, const auto& b) {
+                    return coll.compare(a.fileName, b.fileName) < 0;
+                });
 
             QVector<QString> sortedPaths;
             sortedPaths.reserve(entries.size());
@@ -1090,12 +1091,8 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
 
             PlanarView::ValidationReport rep;
             QVector<QString> valid = sortedPaths;
-            {
-                PERF_SCOPE(PerfScan::Id::Pass3_FilterConsistency);
-                rep = PlanarView::filterSeriesByConsistency(entries);
-            }
+            rep = PlanarView::filterSeriesByConsistency(entries);
             if (rep.good.isEmpty()) {
-                PERF_SCOPE(PerfScan::Id::Pass3_PickMiddle);
                 QString mid = pickMiddleSliceFile(entries);
                 valid = mid.isEmpty() ? QVector<QString>{} : QVector<QString>{ mid };
             }
@@ -1127,7 +1124,6 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
             SeriesItem s;
             s.seriesKey = seriesKey;
             {
-                PERF_SCOPE(PerfScan::Id::Pass3_PickMiddle);
                 s.firstFile =
                     pickMiddleSliceFile(validEntries.isEmpty() ? entries : validEntries);
                 s.numImages = valid.size();
@@ -1149,23 +1145,15 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
             }
             s.description = desc;
 
-            {
+            s.thumb = SeriesListPanel::makeThumbImageFromDicom(s.firstFile);
+            items.push_back(std::move(s));
 
-                PERF_SCOPE(PerfScan::Id::Pass3_MakeThumb);
-                s.thumb = SeriesListPanel::makeThumbImageFromDicom(s.firstFile);
-                items.push_back(std::move(s));
-            }
         }
 
     }
     if (result.canceled) return result;
+       sortSeriesByName(items);
 
-    {
-
-        PERF_SCOPE(PerfScan::Id::Final_SortSeriesByName);
-        sortSeriesByName(items);
-
-    }
     // переносим данные в результат
     result.filesBySeries = std::move(acc.filesBySeries);
     result.items = std::move(items);
@@ -1176,10 +1164,6 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
     for (const auto& v : result.filesBySeries)
         dicomCount += v.size();
     result.totalFiles = dicomCount;
-
-#ifdef QT_DEBUG
-    PerfScan::dumpTop(30);
-#endif
 
     return result;
 }
@@ -1322,6 +1306,8 @@ void SeriesListPanel::startNextThumb()
     mThumbWatcher.setFuture(future);
 }
 
+
+
 static QString getTagStr(vtkDICOMMetaData* d, const vtkDICOMTag& tag)
 {
     if (!d || !d->Has(tag)) return {};
@@ -1429,6 +1415,19 @@ void SeriesListPanel::updatePatientInfoForSeries(const QString& seriesKey,
 
         if (!mriParams.isEmpty())
             info.Sequence += " [" + mriParams.join(", ") + "]";
+    }
+
+    {
+        double x, y, z;
+        if (tryGetPatientPosition(md, x, y, z)) {
+            info.patientPosX = x;
+            info.patientPosY = y;
+            info.patientPosZ = z;
+        }
+        else 
+        {
+            info.patientPosX = info.patientPosY = info.patientPosZ = 0.0;
+        }
     }
 
     emit patientInfoChanged(info);

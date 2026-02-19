@@ -25,15 +25,12 @@ int main(int argc, char* argv[])
 
     QCoreApplication::setOrganizationName("Astrocard");
     QCoreApplication::setApplicationName("AstroDicomEditor");
-
     QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
     vtkOutputWindow::SetGlobalWarningDisplay(false);
-
     QSurfaceFormat::setDefaultFormat(QVTKOpenGLNativeWidget::defaultFormat());
     QApplication app(argc, argv);
 
     app.setStyle(QStyleFactory::create("Fusion"));
-
 
     // === загрузка XML-конфига ===
     const QString cfgPath =

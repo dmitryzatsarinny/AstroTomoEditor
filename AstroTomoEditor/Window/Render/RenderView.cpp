@@ -38,6 +38,8 @@
 #include <vtkFlyingEdges3D.h>
 #include "..\..\Services\LanguageManager.h"
 #include <QSettings>
+#include <QStandardPaths>
+#include <Window/ServiceWindow/ShellFileDialog.h>
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
 VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
@@ -125,6 +127,8 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
 
     // 2) создаём render window и привязываем к виджету
     mWindow = vtkSmartPointer<vtkGenericOpenGLRenderWindow>::New();
+    mWindow->SetAlphaBitPlanes(1);
+    mWindow->SetMultiSamples(0);
     mVtk->setRenderWindow(mWindow);
 
     // 3) создаём renderer и добавляем в окно
@@ -150,6 +154,8 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
 
     // создаём overlay после VTK
     buildOverlay();
+    showOverlays();
+    repositionOverlay();
 
     mClip = std::make_unique<ClipBoxController>(this);
     mClip->setRenderer(mRenderer);
@@ -263,6 +269,13 @@ void RenderView::buildOverlay()
         return b;
         };
 
+    auto retain = [](QWidget* w)
+        {
+            if (!w) return;
+            auto pol = w->sizePolicy();
+            pol.setRetainSizeWhenHidden(true);
+            w->setSizePolicy(pol);
+        };
 
     mBtnAP = makeBtn(rightPanel, "AP");
     mBtnPA = makeBtn(rightPanel, "PA");
@@ -291,18 +304,37 @@ void RenderView::buildOverlay()
     mBtnSTLSimplify = makeBtn(rightPanel, tr("Simplify"));
     mBtnSTLSimplify->setEnabled(false);
     mBtnSTLSimplify->setVisible(false);
-    auto pol = mBtnSTLSimplify->sizePolicy();
-    pol.setRetainSizeWhenHidden(true);
-    mBtnSTLSimplify->setSizePolicy(pol);
+    retain(mBtnSTLSimplify);
     rv->addWidget(mBtnSTLSimplify);
 
     mBtnSTLSave = makeBtn(rightPanel, tr("Save"));
     mBtnSTLSave->setEnabled(false);
     mBtnSTLSave->setVisible(false);
-    pol = mBtnSTLSave->sizePolicy();
-    pol.setRetainSizeWhenHidden(true);
-    mBtnSTLSave->setSizePolicy(pol);
+    retain(mBtnSTLSave);
     rv->addWidget(mBtnSTLSave);
+
+    mLblStlSize = new QLabel(rightPanel);
+    mLblStlSize->setVisible(false);
+    retain(mLblStlSize);
+
+    mLblStlSize->setText("");
+    mLblStlSize->setWordWrap(true);
+
+    // ширина = ширина кнопки Save (чтобы точно совпало)
+    const int w = mBtnSTLSave ? mBtnSTLSave->width() : 86;
+    mLblStlSize->setFixedWidth(w);
+
+    // центр текста внутри
+    mLblStlSize->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+
+    // стиль: меньше шрифт и почти без паддинга, чтобы не резало
+    mLblStlSize->setStyleSheet(
+        "QLabel{ color:rgba(255,255,255,190); background:transparent;"
+        "padding:0px; font-size:12px; }"
+    );
+
+    // ВАЖНО: добавить с выравниванием по центру (центрируется сам виджет в колонке)
+    rv->addWidget(mLblStlSize, 0, Qt::AlignHCenter);
 
 
     rightPanel->adjustSize();
@@ -312,20 +344,71 @@ void RenderView::buildOverlay()
     mTopOverlay = makeNativeOverlay(this);
     mTopOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 
+    mElectrodeOverlay = makeNativeOverlay(this);
+    mElectrodeOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+
     auto* topPanel = new QWidget(mTopOverlay);
+    topPanel->setObjectName("TopPanel");
     topPanel->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+
+    auto* topElectrodPanel = new QWidget(mElectrodeOverlay);
+    topElectrodPanel->setObjectName("TopElectrodPanel");
+    topElectrodPanel->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 
     auto* th = new QHBoxLayout(topPanel);
     th->setContentsMargins(12, 8, 0, 0);
     th->setSpacing(6);
 
+    auto* the = new QHBoxLayout(topElectrodPanel);
+    the->setContentsMargins(0, 0, 0, 0);
+    the->setSpacing(6);
     
+    mElectrodePanel = new ElectrodePanel(topElectrodPanel);
+    mElectrodePanel->setVisible(false);
+    mElectrodePanel->setAttribute(Qt::WA_TransparentForMouseEvents, false);
+    mElectrodePanel->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+    connect(mElectrodePanel, &ElectrodePanel::requestExit, this, [this] {
+        if (mAppActive && mCurrentApp == App::Electrodes) {
+            setElectrodesUiActive(false);
+            setAppUiActive(false, mCurrentApp);
+        }
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::electrodeChosen, this,
+        [this](ElectrodePanel::ElectrodeId id)
+        {
+            if (mElectrodePanel)
+                mElectrodePanel->beginPick(id);
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::pickCommitted, this,
+        [this](ElectrodePanel::ElectrodeId id, std::array<int, 3> ijk, std::array<double, 3> w)
+        {
+            mElectrodeIJK[id] = ijk;
+
+            if (mElectrodePanel)
+                mElectrodePanel->setHasCoord(id, true);
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::electrodeClearRequested, this,
+        [this](ElectrodePanel::ElectrodeId id)
+        {
+            mElectrodeIJK.remove(id);
+            if (mElectrodePanel)
+                mElectrodePanel->setHasCoord(id, false);
+        });
+
+    the->addWidget(mElectrodePanel);
+
     mBtnTF = makeBigBtn(topPanel, tr("Transfer function"));
     reloadTfMenu();
     mBtnTF->setPopupMode(QToolButton::InstantPopup);
+    retain(mBtnTF);
     th->addWidget(mBtnTF);
 
     mBtnTools = makeBigBtn(topPanel, tr("Edit"));
+    retain(mBtnTools);
     mBtnTools->setCheckable(true);
 
 
@@ -342,6 +425,7 @@ void RenderView::buildOverlay()
         "   outline: none;"
         "}"
     );
+
 
 
     reloadToolsMenu();
@@ -364,6 +448,7 @@ void RenderView::buildOverlay()
     mBtnShift->setRange(1, 99);
     mBtnShift->setValue(mShiftValue);
     mBtnShift->setWheelStep(1);        // обычный шаг
+    retain(mBtnShift);
     th->addWidget(mBtnShift);
 
     connect(mBtnShift, QOverload<int>::of(&QSpinBox::valueChanged),
@@ -399,12 +484,19 @@ void RenderView::buildOverlay()
             mHistDlg->close();
         if (mTemplateDlg)
             mTemplateDlg->close();
+        if (mElectrodePanel)
+            mElectrodePanel->setModeEnabled(false);
         setAppUiActive(false, mCurrentApp);
         });
 
+    connect(mElectrodePanel, &ElectrodePanel::saveRequested,
+        this, &RenderView::onSaveElectrodesCoords);
+
     mBtnApps->setMenu(mAppsMenu);
     mBtnApps->setPopupMode(QToolButton::InstantPopup);
+    retain(mBtnApps);
     th->addWidget(mBtnApps);
+    
 
     {
         mBtnUndo = makeSmallBtn(topPanel, "");
@@ -413,6 +505,7 @@ void RenderView::buildOverlay()
         mBtnUndo->setIconSize(QSize(20, 20));
         mBtnUndo->setToolTip(tr("Undo (Ctrl+Z)"));
         mBtnUndo->setEnabled(false);
+        retain(mBtnUndo);
         th->addWidget(mBtnUndo);
 
         mBtnRedo = makeSmallBtn(topPanel, "");
@@ -421,6 +514,7 @@ void RenderView::buildOverlay()
         mBtnRedo->setIconSize(QSize(20, 20));
         mBtnRedo->setToolTip(tr("Redo (Ctrl+Y)"));
         mBtnRedo->setEnabled(false);
+        retain(mBtnRedo);
         th->addWidget(mBtnRedo);
 
         connect(mBtnUndo, &QToolButton::clicked, this, &RenderView::onUndo);
@@ -461,8 +555,6 @@ void RenderView::buildOverlay()
 
     topPanel->adjustSize();
     mTopOverlay->resize(topPanel->sizeHint());
-    
-    th->addStretch();
 
     // ---------- Сигналы ----------
     connect(mBtnAP, &QToolButton::clicked, this, [this] { setViewPreset(ViewPreset::AP);  });
@@ -526,6 +618,209 @@ BuildMaskedOTF(vtkPiecewiseFunction* base, double lo, double hi)
     return out;
 }
 
+void RenderView::updateElectrodeOverlayMask()
+{
+    if (!mElectrodeOverlay || !mElectrodePanel) return;
+
+    // берём маску ElectrodePanel и переносим её в координаты overlay
+    QRegion reg = mElectrodePanel->mask();
+    if (reg.isEmpty())
+        reg = QRegion(mElectrodePanel->rect()); // на всякий
+
+    const QPoint off = mElectrodePanel->mapTo(mElectrodeOverlay, QPoint(0, 0));
+    reg.translate(off);
+
+    mElectrodeOverlay->setMask(reg);
+}
+
+void RenderView::captureElectrodesTemplateFromCurrentVolume()
+{
+    if (!mImage)
+        return;
+
+    // Нужен диалог шаблонов, потому что именно он хранит слоты.
+    ensureTemplateDialog();
+    if (!mTemplateDlg)
+        return;
+
+    if (!mTemplateDlg->isCaptured(TemplateId::Electrodes))
+    {
+
+        // Делаем КОПИЮ, чтобы не портить текущий volume/рендер.
+        Volume vol;
+        vol.clear();
+        vol.copy(mImage);
+        if (!vol.raw() || !vol.u8().valid)
+            return;
+
+        const size_t total = vol.u8().size();
+        for (size_t i = 0; i < total; ++i)
+        {
+            const uint8_t v = vol.at(i);
+            if (v < 245 || v > 256)
+                vol.at(i) = 0;
+        }
+        if (mRemoveConn)
+            mRemoveConn->AddBy6Neighbors(vol, 250);
+
+        // Сохраняем в слот Electrodes. Диалог сам обновит UI.
+        mTemplateDlg->setCaptured(TemplateId::Electrodes, vol);
+    }
+}
+
+void RenderView::beginElectrodesPreview()
+{
+    if (mElectrodesPreviewActive)
+        return;
+    if (!mImage || !mVolume)
+        return;
+
+    // Шаблон хранится в TemplateDialog слотах.
+    ensureTemplateDialog();
+    if (!mTemplateDlg)
+        return;
+
+    // Если ещё не захвачен, пусть создастся автоматически.
+    if (!mTemplateDlg->isCaptured(TemplateId::Electrodes))
+        captureElectrodesTemplateFromCurrentVolume();
+
+    const auto* s = mTemplateDlg->slot(TemplateId::Electrodes);
+    if (!s || !s->hasData())
+        return;
+
+    // Запоминаем текущий volume и делаем «картинку для просмотра».
+    mImageBeforeElectrodes = mImage;
+    mElectrodesPreviewImage = cloneImage(mImage);
+    if (!mElectrodesPreviewImage)
+        return;
+
+    Volume volPreview;
+    volPreview.clear();
+    volPreview.copy(mElectrodesPreviewImage);
+    if (!volPreview.raw() || !volPreview.u8().valid)
+        return;
+
+    const Volume& templ = s->data;
+    if (!templ.raw() || !templ.u8().valid)
+        return;
+
+    const size_t total = std::min(volPreview.u8().size(), templ.u8().size());
+    for (size_t i = 0; i < total; ++i)
+    {
+        const uint8_t tv = templ.at(i);
+        if (tv)
+            volPreview.at(i) = tv; // прямое наложение (250..255)
+    }
+
+    if (volPreview.raw())
+        volPreview.raw()->Modified();
+
+    mImage = volPreview.raw();
+    mElectrodesPreviewActive = true;
+
+    if (mVolume && mVolume->GetProperty())
+    {
+        if (mInterpolation == VolumeInterpolation::Linear)
+            mVolume->GetProperty()->SetInterpolationTypeToLinear();
+        else
+            mVolume->GetProperty()->SetInterpolationTypeToNearest();
+    }
+
+
+    setMapperInput(mImage);
+    updateElectrodePickContext();
+
+    if (mVtk && mVtk->renderWindow())
+        mVtk->renderWindow()->Render();
+}
+
+void RenderView::endElectrodesPreview()
+{
+    if (!mElectrodesPreviewActive)
+        return;
+
+    if (mImageBeforeElectrodes)
+    {
+        mImage = mImageBeforeElectrodes;
+
+        mImage->Modified();
+
+        if (mVolume && mVolume->GetProperty())
+        {
+            if (mInterpolation == VolumeInterpolation::Linear)
+                mVolume->GetProperty()->SetInterpolationTypeToLinear();
+            else
+                mVolume->GetProperty()->SetInterpolationTypeToNearest();
+        }
+
+        setMapperInput(mImage);
+        updateElectrodePickContext();
+    }
+
+    mElectrodesPreviewImage = nullptr;
+    mImageBeforeElectrodes = nullptr;
+    mElectrodesPreviewActive = false;
+
+    updateUndoRedoUi();
+    if (mHistDlg && mHistDlg->isVisible())
+        mHistDlg->refreshFromImage(mImage);
+    if (mVtk && mVtk->renderWindow())
+        mVtk->renderWindow()->Render();
+}
+
+
+void RenderView::setElectrodesUiActive(bool on)
+{
+
+    if (mBtnTF)    mBtnTF->setVisible(!on);
+    if (mBtnTools) mBtnTools->setVisible(!on);
+    if (mBtnUndo) mBtnUndo->setVisible(!on);
+    if (mBtnRedo) mBtnRedo->setVisible(!on);
+    if (mBtnShift) mBtnShift->setVisible(!on);
+
+    if (mBtnClip) mBtnClip->setChecked(false);
+
+    if (mBtnSTL) 
+    {
+        mBtnSTL->setChecked(false);
+        mBtnSTL->setVisible(!on);
+        if (mBtnSTLSimplify) mBtnSTLSimplify->setVisible(false);
+        if (mBtnSTLSave)     mBtnSTLSave->setVisible(false);
+    }
+
+    if (on) {
+        if (mToolActive) {
+            if (mScissors)   mScissors->cancel();
+            if (mRemoveConn) mRemoveConn->cancel();
+            setToolUiActive(false, mCurrentTool);
+        }
+        clearStlPreview();
+    }
+
+    if (mElectrodePanel)
+    {
+        mElectrodePanel->setModeEnabled(on);
+        mElectrodePanel->setVisible(on);
+        mElectrodePanel->SetDicomInfo(DI);
+
+        if (auto* panel = mElectrodeOverlay ? mElectrodeOverlay->findChild<QWidget*>("TopElectrodPanel") : nullptr) {
+            if (panel->layout()) panel->layout()->invalidate();
+            panel->adjustSize();
+        }
+
+        if (on)
+            QTimer::singleShot(0, this, [this] { updateElectrodeOverlayMask(); });
+        else if (mElectrodeOverlay)
+        {
+            mElectrodePanel->endPick();
+            mElectrodeOverlay->clearMask();
+        }
+    }
+
+    repositionOverlay();
+}
+
+
 void RenderView::onShiftChanged(int val)
 {
     mShiftValue = val;
@@ -541,6 +836,36 @@ void RenderView::openHistogram()
     mHistDlg->raise();
     mHistDlg->activateWindow();
     mHistDlg->refreshFromImage(mImage);
+}
+
+void RenderView::ensureElectrodPanel()
+{
+    if (mTemplateDlg) return;
+
+    mTemplateDlg = new TemplateDialog(this, mImage, &DI);
+
+    connect(mTemplateDlg, &TemplateDialog::requestCapture,
+        this, &RenderView::onTemplateCapture);
+
+    connect(mTemplateDlg, &TemplateDialog::requestSetVisible,
+        this, &RenderView::onTemplateSetVisible);
+
+    connect(mTemplateDlg, &TemplateDialog::requestClear,
+        this, &RenderView::onTemplateClear);
+
+    connect(mTemplateDlg, &TemplateDialog::requestClearAll,
+        this, &RenderView::onTemplateClearAll);
+
+    connect(mTemplateDlg, &QObject::destroyed, this, [this] {
+        mTemplateDlg = nullptr;
+        });
+
+    connect(mTemplateDlg, &TemplateDialog::requestClearScene,
+        this, &RenderView::onTemplateClearScene);
+
+    mTemplateDlg->setOnFinished([this] {
+        setAppUiActive(false, mCurrentApp);
+        });
 }
 
 void RenderView::ensureTemplateDialog()
@@ -674,6 +999,18 @@ void RenderView::removeAllTemplateLayers()
 {
     mTemplateVolumes.clear();
     if (mWindow) mWindow->Render();
+}
+
+void RenderView::reloadElectrodes()
+{
+    if (!mImage || !mVolume) return;
+
+    if (mAppActive && mCurrentApp == App::Electrodes) 
+    {
+        setElectrodesUiActive(false);
+        endElectrodesPreview();
+        setAppUiActive(false, mCurrentApp);
+    }
 }
 
 void RenderView::reloadTemplate()
@@ -991,6 +1328,7 @@ bool RenderView::ToolModeChanged(Action a)
         setToolUiActive(true, a);
         mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
         mRemoveConn->handle(a);
+        captureElectrodesTemplateFromCurrentVolume();
         return true;
     }
 
@@ -1002,10 +1340,17 @@ bool RenderView::AppModeChanged(App a)
 {
     if (!mVolume) return false;
 
-    if (mAppActive) 
+    if (mAppActive)
     {
-        if (mHistDlg)    mHistDlg->close();
-        
+        if (mCurrentApp == App::Electrodes)
+        {
+            endElectrodesPreview();
+            setElectrodesUiActive(false);
+        }
+
+        if (mHistDlg) mHistDlg->close();
+        if (mTemplateDlg) mTemplateDlg->close();
+
         setAppUiActive(false, mCurrentApp);
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     }
@@ -1024,9 +1369,21 @@ bool RenderView::AppModeChanged(App a)
         return true;
     }
 
+    if (a == App::Electrodes)
+    {
+        beginElectrodesPreview();
+        setAppUiActive(true, a);
+        setElectrodesUiActive(true);
+        
+        return true;
+    }
+
     if (mVtk && mVtk->renderWindow()) mVtk->renderWindow()->Render();
     return false;
 }
+
+#include <vtkUnsignedCharArray.h>
+#include <algorithm>
 
 void RenderView::rebuildVisibleMaskFromImage(vtkImageData* src)
 {
@@ -1035,23 +1392,108 @@ void RenderView::rebuildVisibleMaskFromImage(vtkImageData* src)
         return;
     }
 
-    // Создаём маску, если нет или геометрия изменилась
     if (!mVisibleMask)
         mVisibleMask = vtkSmartPointer<vtkImageData>::New();
 
+    // копируем геометрию + данные (неважно какой тип), потом выделим u8
     mVisibleMask->DeepCopy(src);
     mVisibleMask->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
 
-    const vtkIdType n = src->GetNumberOfPoints();
-    auto* in = src->GetPointData()->GetScalars();
-    auto* out = mVisibleMask->GetPointData()->GetScalars();
+    auto* inScAny = src->GetPointData() ? src->GetPointData()->GetScalars() : nullptr;
+    auto* outU8 = vtkUnsignedCharArray::SafeDownCast(
+        mVisibleMask->GetPointData() ? mVisibleMask->GetPointData()->GetScalars() : nullptr
+    );
 
-    for (vtkIdType i = 0; i < n; ++i)
-    {
-        const double v = in->GetTuple1(i);
-        out->SetTuple1(i, v != 0.0 ? 255.0 : 0.0);
+    if (!inScAny || !outU8) {
+        mVisibleMask = nullptr;
+        return;
     }
+
+    int ext[6];
+    src->GetExtent(ext);
+
+    const int nx = ext[1] - ext[0] + 1;
+    const int ny = ext[3] - ext[2] + 1;
+    const int nz = ext[5] - ext[4] + 1;
+
+    // если объём слишком тонкий — проще занулить всё
+    if (nx < 4 || ny < 4 || nz < 4) {
+        outU8->FillValue(0);
+        mVisibleMask->Modified();
+        return;
+    }
+
+    const vtkIdType nPts = src->GetNumberOfPoints();
+    auto* outPtr = outU8->WritePointer(0, nPts);
+
+    // 1) делаем бинарь 0/255
+    // (если src тоже u8, можно ускорить, но универсально оставим так)
+    for (vtkIdType id = 0; id < nPts; ++id) 
+    {
+        const double v = inScAny->GetTuple1(id);
+        outPtr[id] = (v != 0.0 && v >= mHistMaskLo && v <= mHistMaskHi) ? 255u : 0u;
+    }
+
+    // 2) стираем первые 2 слоя по всем граням: 0,1 и n-2,n-1
+    constexpr int L = 2; // сколько слоёв стираем
+
+    auto clampi = [](int v, int lo, int hi) { return std::max(lo, std::min(v, hi)); };
+
+    const int i0 = ext[0], i1 = ext[1];
+    const int j0 = ext[2], j1 = ext[3];
+    const int k0 = ext[4], k1 = ext[5];
+
+    const int iL0 = i0;
+    const int iL1 = i0 + (L - 1);
+    const int iR0 = i1 - (L - 1);
+    const int iR1 = i1;
+
+    const int jL0 = j0;
+    const int jL1 = j0 + (L - 1);
+    const int jR0 = j1 - (L - 1);
+    const int jR1 = j1;
+
+    const int kL0 = k0;
+    const int kL1 = k0 + (L - 1);
+    const int kR0 = k1 - (L - 1);
+    const int kR1 = k1;
+
+    // helper: set voxel (i,j,k) = 0
+    auto zeroAt = [&](int i, int j, int k)
+        {
+            int ijk[3] = { i, j, k };
+            const vtkIdType id = src->ComputePointId(ijk);
+            outPtr[id] = 0u;
+        };
+
+    // X-грани (левая и правая)
+    for (int k = k0; k <= k1; ++k)
+        for (int j = j0; j <= j1; ++j)
+        {
+            for (int i = iL0; i <= iL1; ++i) zeroAt(i, j, k);
+            for (int i = iR0; i <= iR1; ++i) zeroAt(i, j, k);
+        }
+
+    // Y-грани (перед/зад)
+    for (int k = k0; k <= k1; ++k)
+        for (int i = i0; i <= i1; ++i)
+        {
+            for (int j = jL0; j <= jL1; ++j) zeroAt(i, j, k);
+            for (int j = jR0; j <= jR1; ++j) zeroAt(i, j, k);
+        }
+
+    // Z-грани (низ/верх)
+    for (int j = j0; j <= j1; ++j)
+        for (int i = i0; i <= i1; ++i)
+        {
+            for (int k = kL0; k <= kL1; ++k) zeroAt(i, j, k);
+            for (int k = kR0; k <= kR1; ++k) zeroAt(i, j, k);
+        }
+
+    outU8->Modified();
+    mVisibleMask->Modified();
 }
+
 
 void RenderView::clearStlPreview()
 {
@@ -1060,6 +1502,11 @@ void RenderView::clearStlPreview()
     if (mIsoActor) {
         mRenderer->RemoveActor(mIsoActor);
         mIsoActor = nullptr;
+    }
+
+    if (mLblStlSize) {
+        mLblStlSize->setVisible(false);
+        mLblStlSize->setText("");
     }
 
     if (mVolume) mVolume->SetVisibility(mPrevVolumeVisible);
@@ -1109,44 +1556,45 @@ void RenderView::addStlPreview()
 
 void RenderView::onStlSimplify()
 {
-    if (!mImage || !mIsoMesh || !mVolume || !mRenderer) {
-        emit showWarning(tr("No volume to build STL"));
-        if (mBtnSTL) mBtnSTL->setChecked(false);
+    if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) {
+        emit showWarning(tr("No surface to simplify"));
         return;
     }
 
-    emit showInfo(tr("Building surface…"));
     QApplication::setOverrideCursor(Qt::WaitCursor);
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.40, /*smoothIter=*/10, /*passBand=*/0.2);
+    // если это первое нажатие после построения, целимся сразу в 2-4 MB (в 3 MB)
+    if (!mSimplifyStarted)
+    {
+        mIsoMesh = VolumeStlExporter::NormalizeSurface(mIsoMesh);
+        mSimplifyTargetMB = kFirstAimMB;
+        mSimplifyStarted = true;
+    }
+    else
+    {
+        // последующие нажатия: уменьшаем цель плавно
+        mSimplifyTargetMB = std::max(kMinMB, mSimplifyTargetMB * kStepFactor);
+    }
+
+    const std::int64_t targetBytes = static_cast<std::int64_t>(mSimplifyTargetMB * kMB);
+
+    const bool first = (mSimplifyTargetMB >= 2.5); // или по mSimplifyStarted==false
+    const int smoothIter = first ? 16 : 10;
+    const double passBand = first ? 0.12 : 0.16;;
+
+    mIsoMesh = VolumeStlExporter::SimplifyToTargetBytes(mIsoMesh, targetBytes, smoothIter, passBand);
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
     {
-        if (mBtnSTL) mBtnSTL->setChecked(false);
-        mBtnSTLSave->setVisible(false);
-        mBtnSTLSave->setEnabled(false);
-        mBtnSTLSimplify->setVisible(false);
-        mBtnSTLSimplify->setEnabled(false);
-        emit showInfo(tr("Ready surface"));
-        QTimer::singleShot(800, this, [this] {
-            emit showInfo(tr("Ready"));
-            });
         QApplication::restoreOverrideCursor();
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+        emit showWarning(tr("Simplify failed"));
         return;
     }
 
     addStlPreview();
+    updateStlSizeLabel();
 
-    mBtnSTLSave->setVisible(true);
-    mBtnSTLSave->setEnabled(true);
-    mBtnSTLSimplify->setVisible(true);
-    mBtnSTLSimplify->setEnabled(true);
-    emit showInfo(tr("Ready surface"));
-    QTimer::singleShot(800, this, [this] {
-        emit showInfo(tr("Ready"));
-        });
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -1157,6 +1605,7 @@ void RenderView::onBuildStl()
     if (!mImage || !mVolume || !mRenderer) {
         emit showWarning(tr("No volume to build STL"));
         if (mBtnSTL) mBtnSTL->setChecked(false);
+        if (mTopOverlay) { mTopOverlay->show(); }
         return;
     }
 
@@ -1170,6 +1619,9 @@ void RenderView::onBuildStl()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
+
+        if (mTopOverlay) { mTopOverlay->show(); }
+
         if (mClip)
         {
             const bool wasClipOn = (mBtnClip && mBtnClip->isChecked());
@@ -1181,6 +1633,11 @@ void RenderView::onBuildStl()
         }
         if (mVtk && mVtk->renderWindow())
             mVtk->renderWindow()->Render();
+
+        if (mLblStlSize) {
+            mLblStlSize->setVisible(false);
+            mLblStlSize->setText("");
+        }
 
         emit showInfo(tr("Ready volume"));
         QTimer::singleShot(800, this, [this] {
@@ -1200,19 +1657,13 @@ void RenderView::onBuildStl()
         };
 
     rebuildVisibleMaskFromImage(mImage);
-    mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxels(mVisibleMask, opt);
+    mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxelsNew(mVisibleMask, opt);
     if (isCtrlDown())
     {
-        emit showInfo(tr("Simplify surface"));
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.7, /*smoothIter=*/30, /*passBand=*/0.3);
+        onStlSimplify();
     }
-    else
-    {
-        emit showInfo(tr("Simplify surface"));
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        mIsoMesh = VolumeStlExporter::SimplifySurface(mIsoMesh, /*targetReduction=*/0.6, /*smoothIter=*/15, /*passBand=*/0.2);
-    }
+
+    qDebug() << "mIsoMeshNumber" << "  " << mIsoMesh->GetNumberOfCells();
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) 
     {
@@ -1221,6 +1672,7 @@ void RenderView::onBuildStl()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
+        if (mTopOverlay) { mTopOverlay->show(); }
         emit showInfo(tr("Ready volume"));
         QApplication::restoreOverrideCursor();
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -1228,11 +1680,13 @@ void RenderView::onBuildStl()
     }
 
     addStlPreview();
+    updateStlSizeLabel();
 
     mBtnSTLSave->setVisible(true);
     mBtnSTLSave->setEnabled(true);
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
+    if (mTopOverlay) { mTopOverlay->hide(); }
     emit showInfo(tr("Ready surface"));
     QTimer::singleShot(800, this, [this] {
         emit showInfo(tr("Ready"));
@@ -1240,6 +1694,26 @@ void RenderView::onBuildStl()
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
+
+void RenderView::updateStlSizeLabel()
+{
+    if (!mLblStlSize) return;
+
+    if (!mIsoMesh || mIsoMesh->GetNumberOfPolys() == 0)
+    {
+        mLblStlSize->setVisible(false);
+        mLblStlSize->setText("");
+        repositionOverlay();
+        return;
+    }
+
+    mLblStlSize->setText(VolumeStlExporter::makeStlSizeText(mIsoMesh));
+    mLblStlSize->setVisible(true);
+
+    mLblStlSize->adjustSize();
+    repositionOverlay();
+}
+
 
 void RenderView::onSaveBuiltStl()
 {
@@ -1250,20 +1724,61 @@ void RenderView::onSaveBuiltStl()
             });
         return;
     }
-    const QString filePath = QFileDialog::getSaveFileName(
-        this, tr("Save STL"), QString(), tr("STL binary (*.stl)")
+
+    QSettings s;
+    const QString defDir = s.value(
+        "Paths/LastStlDir",
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+    ).toString();
+
+    ShellFileDialog shell(this,
+        QObject::tr("Save STL"),
+        ServiceWindow,
+        QDir(defDir).filePath("mesh.stl"),
+        QObject::tr("STL binary (*.stl)")
     );
-    if (filePath.isEmpty())
-    {
+
+    auto* dlg = shell.fileDialog();
+    dlg->setAcceptMode(QFileDialog::AcceptSave);
+    dlg->setFileMode(QFileDialog::AnyFile);
+    dlg->setOption(QFileDialog::ShowDirsOnly, true);
+    dlg->setFilter(QDir::AllDirs | QDir::Drives | QDir::NoDotAndDotDot);
+    dlg->setDefaultSuffix("stl");
+    dlg->setOption(QFileDialog::DontConfirmOverwrite, true);
+
+    if (shell.exec() != QDialog::Accepted) {
         QTimer::singleShot(800, this, [this] {
             emit showInfo(tr("Ready"));
             });
         return;
     }
 
-    const bool ok = VolumeStlExporter::SaveStl(mIsoMesh, filePath, true);
-    if (ok) emit showInfo(tr("Saved STL: %1").arg(filePath));
-    else    emit showWarning(tr("Save failed"));
+    QString path = dlg->selectedFiles().isEmpty() ? QString() : dlg->selectedFiles().first();
+    if (path.isEmpty())
+        return;
+
+    while (path.endsWith('.')) path.chop(1);
+    if (!path.endsWith(".stl", Qt::CaseInsensitive))
+        path += ".stl";
+
+    s.setValue("Paths/LastStlDir", QFileInfo(path).absolutePath());
+
+    const bool ok = VolumeStlExporter::SaveStlMyBinary_NoCenter(
+        mIsoMesh,
+        path,
+        DI.VolumeOriginX,
+        DI.VolumeOriginY,
+        DI.VolumeOriginZ,
+        DI.VolumeCenterX,
+        DI.VolumeCenterY,
+        DI.VolumeCenterZ,
+        true
+    );
+
+    if (ok)
+        emit showInfo(tr("Saved STL: %1").arg(path));
+    else
+        emit showWarning(tr("Save failed"));
 
     QTimer::singleShot(800, this, [this] {
         emit showInfo(tr("Ready"));
@@ -1503,28 +2018,77 @@ void RenderView::repositionOverlay()
 {
     if (!mVtk) return;
 
-    const QRect r = mVtk->geometry();     // локальная геометрия внутри RenderView
+    const QRect r = mVtk->geometry();
     const int pad = 8;
 
-    if (mScissors) 
-        mScissors->onViewResized();
-    if (mRemoveConn)
-        mRemoveConn->onViewResized();
+    if (mScissors) mScissors->onViewResized();
+    if (mRemoveConn) mRemoveConn->onViewResized();
+
     if (mRightOverlay) {
+        // важно: пересчитать размер по фактическому содержимому
+        if (auto* panel = mRightOverlay->findChild<QWidget*>()) {
+            panel->adjustSize();
+            mRightOverlay->resize(panel->sizeHint());
+        }
+        else {
+            mRightOverlay->adjustSize();
+        }
+
         const QSize sz = mRightOverlay->size();
-        const int x = r.right() - sz.width() - pad;  // прижать к правому краю mVtk
-        const int y = r.top() + pad;                 // немного отступить сверху
+        const int x = r.right() - sz.width() - pad;
+        const int y = r.top() + pad;
         mRightOverlay->move(x, y);
         mRightOverlay->raise();
     }
-    if (mTopOverlay) {
-        const QSize sz = mTopOverlay->size();
-        const int x = r.left() + pad;                // левый верх mVtk
-        const int y = r.top() + pad;
-        mTopOverlay->move(x, y);
+
+    if (mTopOverlay)
+    {
+        const int pad = 8;
+        const QRect r = mVtk->geometry();
+
+        QWidget* panel = mTopOverlay->findChild<QWidget*>("TopPanel");
+        if (panel)
+        {
+            panel->adjustSize();
+            const QSize sz = panel->sizeHint();
+
+            mTopOverlay->setGeometry(r.left() + pad, r.top() + pad, sz.width(), sz.height());
+        }
+        else
+        {
+            mTopOverlay->adjustSize();
+            const QSize sz = mTopOverlay->sizeHint();
+            mTopOverlay->setGeometry(r.left() + pad, r.top() + pad, sz.width(), sz.height());
+        }
+
         mTopOverlay->raise();
     }
+
+    if (mElectrodeOverlay && mElectrodeOverlay->isVisible())
+    {
+        const int pad = 8;
+        const QRect r = mVtk->geometry();
+
+        QWidget* panel = mElectrodeOverlay->findChild<QWidget*>("TopElectrodPanel");
+        if (panel)
+        {
+            panel->adjustSize();
+            const QSize sz = panel->sizeHint();
+
+            mElectrodeOverlay->setGeometry(r.left() + pad, r.top() + pad, sz.width(), sz.height());
+        }
+        else
+        {
+            mElectrodeOverlay->adjustSize();
+            const QSize sz = mElectrodeOverlay->sizeHint();
+            mElectrodeOverlay->setGeometry(r.left() + pad, r.top() + pad, sz.width(), sz.height());
+        }
+
+        mElectrodeOverlay->raise();
+        updateElectrodeOverlayMask();
+    }
 }
+
 
 void RenderView::centerOnVolume()
 {
@@ -1686,6 +2250,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     auto* rw = mVtk->renderWindow();
     if (!rw) {
         mWindow = vtkSmartPointer<vtkGenericOpenGLRenderWindow>::New();
+        mWindow->SetAlphaBitPlanes(1);
+        mWindow->SetMultiSamples(0);
         mVtk->setRenderWindow(mWindow);
         rw = mVtk->renderWindow();
     }
@@ -1753,6 +2319,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     // 4) сохранить ссылки, преднастройки вида/клипбокса
     mImage = image;
     mVolume = vol;
+    updateElectrodePickContext();
 
     updateGradientOpacity();
 
@@ -1841,6 +2408,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     // 5) применяем разумный пресет TF по диапазону данных
     reloadHistogram();
     reloadTemplate();
+    reloadElectrodes();
     reloadTfMenu();
     pump(78);
 
@@ -1867,6 +2435,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     DI.SeriesNumber = info.SeriesNumber;
     DI.DicomPath = info.DicomPath;
 
+
+
     auto sexStr = info.sex.trimmed().toLower();
 
     if (sexStr == "m" || sexStr == "male")
@@ -1881,6 +2451,33 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         if (!tplFolder.isEmpty() && QDir(tplFolder).exists())
             mTemplateDlg->loadAllTemplatesFromDisk(mImage);
     }
+
+    qDebug() << "///////////////////////////////";
+
+    double vb[6];
+    mImage->GetBounds(vb);
+    qDebug() << "VOLUME BOUNDS:"
+        << vb[0] << vb[1]
+        << vb[2] << vb[3]
+        << vb[4] << vb[5];
+
+    double origin[3];
+    mImage->GetOrigin(origin);
+    qDebug() << "VOLUME ORIGIN:"
+        << origin[0] << origin[1] << origin[2];
+
+    DI.VolumeOriginX = origin[0];
+    DI.VolumeOriginY = origin[1];
+    DI.VolumeOriginZ = origin[2];
+
+    DI.VolumeCenterX = (vb[1] - vb[0])/2;
+    DI.VolumeCenterY = (vb[3] - vb[2])/2;
+    DI.VolumeCenterZ = (vb[5] - vb[4])/2;
+
+    qDebug() << "VOLUME CENTER:"
+        << DI.VolumeCenterX << DI.VolumeCenterY << DI.VolumeCenterZ;
+    qDebug() << "VOLUME XYZ"
+        << ext[1] << ext[0] << ext[3] << ext[2] << ext[5] << ext[4];
 
     updateAfterImageChange(false);
 }
@@ -2029,9 +2626,20 @@ void RenderView::reloadAppsMenu()
     applyMenuStyle(mAppsMenu, mBtnApps->width());
 
     connect(mAppsMenu, &QMenu::aboutToShow, this, [this] {
+
+        // если активны электроды, корректно закрываем режим и возвращаем кнопки
+        if (mAppActive && mCurrentApp == App::Electrodes)
+        {
+            setElectrodesUiActive(false);
+            endElectrodesPreview();
+        }
+
+
         if (!mAppActive) return;
-        if (mHistDlg) mHistDlg->close();
+
+        if (mHistDlg)     mHistDlg->close();
         if (mTemplateDlg) mTemplateDlg->close();
+
         setAppUiActive(false, mCurrentApp);
         });
 
@@ -2152,4 +2760,134 @@ void RenderView::onTemplateClearScene()
 
     // 3) обновляем маппер/рендер, инструменты можно не переаттачивать
     updateAfterImageChange(false);
+}
+
+void RenderView::updateElectrodePickContext()
+{
+    if (!mElectrodePanel || !mVtk || !mRenderer || !mImage || !mVolume)
+        return;
+
+    ElectrodePanel::PickContext ctx;
+    ctx.vtkWidget = mVtk;
+    ctx.renderer = mRenderer;
+    ctx.image = mImage;
+    ctx.volume = mVolume;
+    ctx.volProp = mVolume->GetProperty();
+
+    mElectrodePanel->setPickContext(ctx);
+}
+
+static QString electrodeIdToString(ElectrodePanel::ElectrodeId id)
+{
+    if (id >= ElectrodePanel::ElectrodeId::V1 && id <= ElectrodePanel::ElectrodeId::V30)
+        return QString("V%1").arg(int(id) - int(ElectrodePanel::ElectrodeId::V1) + 1);
+
+    switch (id)
+    {
+    case ElectrodePanel::ElectrodeId::L: return "L";
+    case ElectrodePanel::ElectrodeId::R: return "R";
+    case ElectrodePanel::ElectrodeId::F: return "F";
+    case ElectrodePanel::ElectrodeId::N: return "N";
+    default: return "?";
+    }
+
+}
+
+static int electrodeIdToint(ElectrodePanel::ElectrodeId id)
+{
+    if (id >= ElectrodePanel::ElectrodeId::V1 && id <= ElectrodePanel::ElectrodeId::V30)
+        return (int)id - (int)ElectrodePanel::ElectrodeId::V1 + 1;
+        
+
+    switch (id)
+    {
+    case ElectrodePanel::ElectrodeId::L: return 31;
+    case ElectrodePanel::ElectrodeId::R: return 32;
+    case ElectrodePanel::ElectrodeId::F: return 33;
+    case ElectrodePanel::ElectrodeId::N: return 34;
+    default: return 0;
+    }
+}
+
+struct ElectrodeOut
+{
+    int    n;      // 1..34
+    double x, y, z;
+};
+
+void RenderView::onSaveElectrodesCoords()
+{
+    if (!mElectrodePanel)
+        return;
+
+    const QString dicomDir = DI.DicomPath.trimmed();
+    QString series = DI.SeriesNumber.trimmed();
+    if (dicomDir.isEmpty())
+        return;
+
+    QDir base(dicomDir);
+    if (!base.exists())
+        return;
+
+    series = QString("Templates-Series-%1").arg(series);
+
+    QString outDirPath = dicomDir;
+    if (!series.isEmpty())
+        outDirPath = base.filePath(series);
+
+    QDir outDir(outDirPath);
+    if (!outDir.exists())
+        outDir.mkpath(".");
+
+    const auto coords = mElectrodePanel->coordsIJK(); // как у тебя сейчас
+    const int count = coords.size();
+    if (count <= 0)
+        return;
+
+    QString fileName = "Electrod.txt";
+    if (count >= 30)
+        fileName = "ElectrodBodyMm.txt";
+    else if (count >= 4)
+        fileName = "ElectrodHeartMm.txt";
+
+    QVector<ElectrodeOut> out;
+    out.reserve(coords.size());
+
+    for (const auto& c : coords)
+    {
+        const int n = electrodeIdToint(c.id);
+        if (n <= 0 || n > 34)
+            continue;
+
+        out.push_back({
+            n,
+            c.vox[0] * DI.mSpX,
+            c.vox[1] * DI.mSpY,
+            c.vox[2] * DI.mSpZ
+            });
+    }
+
+    std::sort(out.begin(), out.end(),
+        [](const ElectrodeOut& a, const ElectrodeOut& b)
+        {
+            return a.n < b.n;
+        });
+
+    const QString filePath = outDir.filePath(fileName);
+
+    QFile f(filePath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
+        return;
+
+    QTextStream s(&f);
+    s.setRealNumberNotation(QTextStream::FixedNotation);
+    s.setRealNumberPrecision(6);
+
+    for (const auto& e : out)
+    {
+        s << e.n << "\t"
+            << e.x << "\t"
+            << e.z << "\t"
+            << e.y << "\n";
+    }
 }

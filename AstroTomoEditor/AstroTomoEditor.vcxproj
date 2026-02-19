@@ -40,10 +40,19 @@
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
     <ClCompile Include="Window\MainWindow\MainWindow.cpp" />
     <ClCompile Include="Window\MainWindow\PlanarView.cpp" />
+    <ClCompile Include="Window\Render\ElectrodePanel.cpp">
+      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
+      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Filename).moc</QtMocFileName>
+      <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|x64'">input</DynamicSource>
+      <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Filename).moc</QtMocFileName>
+    </ClCompile>
     <ClCompile Include="Window\Render\FaceOnlyBoxRepresentation.cpp" />
     <ClCompile Include="Window\Render\FaceOnlyBoxWidget.cpp" />
     <ClCompile Include="Window\Render\TemplateDialog.cpp" />
     <ClCompile Include="Window\Render\WheelSpinButton.cpp" />
+    <ClCompile Include="Window\ServiceWindow\CustomMessageBox.cpp" />
+    <ClCompile Include="Window\ServiceWindow\PresetNameDialog.cpp" />
+    <ClCompile Include="Window\ServiceWindow\ShellFileDialog.cpp" />
     <QtMoc Include="Window\MainWindow\SeriesListPanel.cpp">
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Filename).moc</QtMocFileName>
@@ -67,6 +76,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
+    <QtMoc Include="Window\ServiceWindow\ShellFileDialog.h" />
+    <QtMoc Include="Window\ServiceWindow\CustomMessageBox.h" />
+    <QtMoc Include="Window\ServiceWindow\PresetNameDialog.h" />
     <QtMoc Include="Window\Render\WheelSpinButton.h" />
     <QtMoc Include="Services\CornerGrip.h" />
     <ClInclude Include="Services\AppConfig.h" />
@@ -74,7 +86,6 @@
     <QtMoc Include="Services\LanguageManager.h" />
     <ClInclude Include="Services\FastDicomHeaderReader.h" />
     <ClInclude Include="Services\PatientInfo.h" />
-    <ClInclude Include="Services\PerfScan.h" />
     <ClInclude Include="Services\Save3DR.h" />
     <QtMoc Include="Services\TooltipsFilter.h" />
     <ClInclude Include="Services\VolumeFix3DR.h" />
@@ -83,6 +94,7 @@
     <ClInclude Include="Window\MainWindow\DialogShell.h" />
     <QtMoc Include="Window\MainWindow\PatientDialog.h" />
     <QtMoc Include="Window\MainWindow\SettingsDialog.h" />
+    <QtMoc Include="Window\Render\ElectrodePanel.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxRepresentation.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxWidget.h" />
     <ClInclude Include="Window\Render\HoverDelegate.h" />

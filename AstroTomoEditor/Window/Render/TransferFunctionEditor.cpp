@@ -10,7 +10,6 @@
 #include <algorithm>
 #include <QPainterPath>
 #include <QInputDialog>
-#include <QMessageBox>
 
 #include <vtkImageData.h>
 #include <vtkPointData.h>
@@ -270,6 +269,8 @@ private:
 
 #include "TransferFunctionEditor.moc"  // для TfCanvas signals/slots
 #include "TransferFunction.h"
+#include <Window/ServiceWindow/PresetNameDialog.h>
+#include <Window/ServiceWindow/CustomMessageBox.h>
 
 // ===== TransferFunctionEditor ===============================================
 
@@ -444,37 +445,43 @@ TransferFunctionEditor::TransferFunctionEditor(QWidget* parent, vtkImageData* im
     connect(mBtnAuto, &QPushButton::clicked,
         this, &TransferFunctionEditor::onAutoColors);
 
-    connect(mBtnSave, &QPushButton::clicked,
-        this, [this] {
-            bool ok = true;
-            QString name = QInputDialog::getText(
-                this,
-                tr("Save TF preset"),
-                tr("Name:"),
-                QLineEdit::Normal,
-                tr("My preset"),
-                &ok
-            );
-            if (!ok || name.isEmpty()) return;
+    connect(mBtnSave, &QPushButton::clicked, this, [this] {
 
-            TF::CustomPreset P;
-            P.name = name;
-            P.opacityK = 1.0;
-            P.colorSpace = "Lab";
-            P.points.reserve(mPts.size());
-            for (const auto& t : mPts) {
-                TF::TFPoint q;
-                q.x = t.x; q.a = t.a;
-                q.r = t.color.redF();
-                q.g = t.color.greenF();
-                q.b = t.color.blueF();
-                P.points.push_back(q);
-            }
-            if (!TF::SaveCustomPreset(P))
-                QMessageBox::warning(this, tr("Save preset"), tr("Failed to save preset file"));
-            else
-                emit presetSaved();
+        PresetNameDialog dlg(
+            this,
+            tr("Save TF preset"),
+            tr("Name:"),
+            tr("My preset"),
+            WindowType::ServiceWindow
+        );
+
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+
+        const QString name = dlg.textValue();
+        if (name.isEmpty())
+            return;
+
+        TF::CustomPreset P;
+        P.name = name;
+        P.opacityK = 1.0;
+        P.colorSpace = "Lab";
+        P.points.reserve(mPts.size());
+        for (const auto& t : mPts) {
+            TF::TFPoint q;
+            q.x = t.x; q.a = t.a;
+            q.r = t.color.redF();
+            q.g = t.color.greenF();
+            q.b = t.color.blueF();
+            P.points.push_back(q);
+        }
+
+        if (!TF::SaveCustomPreset(P))
+            CustomMessageBox::warning(this, tr("Save preset"), tr("Failed to save preset file"), ServiceWindow);
+        else
+            emit presetSaved();
         });
+
 
     // начальный выбор
     if (mCanvas->points().size() > 1)

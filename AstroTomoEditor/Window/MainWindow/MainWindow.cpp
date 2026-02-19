@@ -9,6 +9,7 @@
 #include <QEvent>
 #include <QElapsedTimer>
 #include <Services/LanguageManager.h>
+#include <Window/ServiceWindow/CustomMessageBox.h>
 
 namespace 
 {
@@ -166,6 +167,7 @@ void MainWindow::buildUi()
 
     mStatusText = new QLabel(tr("Ready"), centerWrap);
     mStatusText->setAlignment(Qt::AlignCenter);
+    mStatusText->setObjectName("StatusText");
     mStatusText->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     cLay->addWidget(mStatusText);
 
@@ -394,6 +396,8 @@ void MainWindow::buildStyles()
                     );
                 }
             )";
+
+    ss += "QLabel#StatusText { color: rgba(255,255,255,0.95); }\n";
 
     // Если окно развёрнуто — без радиусов
     ss += "#CentralCard[maxed=\"true\"] { border-radius:0; }"
@@ -657,7 +661,7 @@ void MainWindow::onSave3DR()
     auto vol = mRenderView->image();
     if (!vol) 
     {
-        QMessageBox::warning(this, tr("Save 3DR"), tr("No volume to save"));
+        CustomMessageBox::warning(this, tr("Save 3DR"), tr("No volume to save"), ServiceWindow);
         return;
     }
 

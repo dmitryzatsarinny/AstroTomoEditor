@@ -30,7 +30,6 @@
 #include <QDateTime>
 #include <QDirIterator>
 #include <QPointer>
-#include <QMessageBox>
 #include <QProgressBar>
 #include <QLabel>
 #include <QTimer>

@@ -15,7 +15,8 @@ enum WindowType
     Patient = 3,
     Histogram = 4,
     TranferFunction = 5,
-    Template = 6
+    Template = 6,
+    ServiceWindow = 7
 };
 
 class DialogShell : public QDialog

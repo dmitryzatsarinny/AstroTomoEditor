@@ -9,11 +9,11 @@
 #include <QEvent>
 #include <QFileDialog>
 #include <QDir>
-#include <QMessageBox>
 #include <QStandardPaths>
 #include <QSettings>
 
 #include "../../Services/Save3DR.h"
+#include <Window/ServiceWindow/CustomMessageBox.h>
 
 const TemplateDialog::ItemDesc TemplateDialog::kLeftItems[8] = {
     {TemplateId::LA,      QT_TR_NOOP("Left atrium")},
@@ -433,13 +433,13 @@ void TemplateDialog::onSaveAllTemplates(bool hide, bool saveto, const QString& s
     if (count == 0) 
     {
         if(!hide)
-            QMessageBox::information(this, tr("Templates"), tr("Nothing to save."));
+            CustomMessageBox::information(this, tr("Templates"), tr("Nothing to save."), ServiceWindow);
         return;
     }
 
     if (!mDinfo) {
         if (!hide)
-            QMessageBox::warning(this, tr("Templates"), tr("No DICOM info. Cannot determine output folder."));
+            CustomMessageBox::warning(this, tr("Templates"), tr("No DICOM info. Cannot determine output folder."), ServiceWindow);
         return;
     }
 
@@ -451,7 +451,7 @@ void TemplateDialog::onSaveAllTemplates(bool hide, bool saveto, const QString& s
     if (dicomDir.isEmpty()) 
     {
         if (!hide)
-            QMessageBox::warning(this, tr("Templates"), tr("DicomPath is empty."));
+            CustomMessageBox::warning(this, tr("Templates"), tr("DicomPath is empty."));
         return;
     }
 
@@ -459,7 +459,7 @@ void TemplateDialog::onSaveAllTemplates(bool hide, bool saveto, const QString& s
     if (!base.exists()) 
     {
         if (!hide)
-        QMessageBox::warning(this, tr("Templates"),
+            CustomMessageBox::warning(this, tr("Templates"),
             tr("DicomPath does not exist:\n%1").arg(dicomDir));
         return;
     }
@@ -471,14 +471,14 @@ void TemplateDialog::onSaveAllTemplates(bool hide, bool saveto, const QString& s
         if (!base.mkdir(tplFolderName)) 
         {
             if (!hide)
-                QMessageBox::warning(this, tr("Templates"), tr("Failed to create folder:\n%1").arg(base.filePath(tplFolderName)));
+                CustomMessageBox::warning(this, tr("Templates"), tr("Failed to create folder:\n%1").arg(base.filePath(tplFolderName)));
             return;
         }
 
     if (!base.cd(tplFolderName)) 
     {
         if (!hide)
-            QMessageBox::warning(this, tr("Templates"), tr("Failed to open folder:\n%1").arg(base.filePath(tplFolderName)));
+            CustomMessageBox::warning(this, tr("Templates"), tr("Failed to open folder:\n%1").arg(base.filePath(tplFolderName)));
         return;
     }
 
@@ -504,14 +504,14 @@ void TemplateDialog::onSaveAllTemplates(bool hide, bool saveto, const QString& s
     if (!failed.isEmpty()) 
     {
         if (!hide)
-        QMessageBox::warning(this, tr("Templates"),
+            CustomMessageBox::warning(this, tr("Templates"),
             tr("Saved to:\n%1\n\nSome templates were not saved:\n%2")
             .arg(outDir, failed.join("\n")));
     }
     else 
     {
         if (!hide)
-        QMessageBox::information(this, tr("Templates"),
+            CustomMessageBox::information(this, tr("Templates"),
             tr("Saved %1 templates to:\n%2").arg(count).arg(outDir));
     }
 }
@@ -547,6 +547,12 @@ void TemplateDialog::retranslateUi()
         titleBar()->setTitle(title);
 
     applyTexts();
+}
+
+bool TemplateDialog::isCaptured(TemplateId id)
+{
+    auto& s = mSlots[id];
+    return s.hasData();
 }
 
 void TemplateDialog::setCaptured(TemplateId id, Volume img)

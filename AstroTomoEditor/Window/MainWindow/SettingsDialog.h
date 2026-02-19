@@ -4,6 +4,7 @@
 #include <Services/Pool.h>
 #include <QEvent>
 #include "TitleBar.h"
+#include <qmessagebox.h>
 
 class QLabel;
 class QFormLayout;

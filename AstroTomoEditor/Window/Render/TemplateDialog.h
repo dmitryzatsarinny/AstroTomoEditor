@@ -62,7 +62,7 @@ public:
     Slot* slot(TemplateId id);
     void loadAllTemplatesFromDisk(vtkImageData* mImage);
     QString templatesFolderPath() const;
-
+    bool isCaptured(TemplateId id);
 signals:
     // ВАЖНО: отдаем ГРАНИЦЫ В ДАННЫХ HistMin..HistMax
     void requestCapture(TemplateId id);       // нажали Save
@@ -80,7 +80,7 @@ protected:
     bool eventFilter(QObject* o, QEvent* e) override;
     void done(int r) override;
     void changeEvent(QEvent* e) override;
-
+    
 private:
     std::function<void()> m_onFinished;
 

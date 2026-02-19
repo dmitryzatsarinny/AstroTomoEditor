@@ -551,6 +551,67 @@ void ToolsRemoveConnected::updateHover(const QPoint& pDevice)
     }
 }
 
+//vtkImageData* ToolsRemoveConnected::ClearImage(
+//    QVTKOpenGLNativeWidget* vtk,
+//    vtkRenderer* renderer,
+//    vtkImageData* image,
+//    vtkVolume* volume)
+//{
+//    m_vtk = vtk;
+//    m_renderer = renderer;
+//    m_image = image;
+//    m_volume = volume;
+//
+//    if (!m_vtk || !m_renderer || !m_volume || !m_image)
+//        return nullptr;
+//
+//    // актуальные границы гист окна (если у тебя они где-то выставляются извне - ок)
+//    mHistLo = HistMin;
+//    mHistHi = HistMax;
+//
+//    // 1) пересобираем LUT видимости под текущую opacity-функцию
+//    rebuildVisibilityLUT();
+//
+//    // 2) делаем копию тома в m_vol
+//    m_vol.clear();
+//    m_vol.copy(m_image);
+//
+//    if (!m_vol.u8().valid || !m_vol.raw())
+//        return nullptr;
+//
+//    // 3) строим бинарную маску "видимое"
+//    m_bin.clear();
+//    makeBinaryMask(m_vol.raw());
+//
+//    // если видимого вообще нет - просто обнулим всё (или вернём как есть - на твой вкус)
+//    if (CountNonZero(m_bin) == 0)
+//    {
+//        const size_t total = m_vol.u8().size();
+//        for (size_t n = 0; n < total; ++n)
+//            m_vol.at(n) = 0u;
+//
+//        m_vol.raw()->Modified();
+//        if (m_onImageReplaced) m_onImageReplaced(m_vol.raw());
+//        if (m_vtk && m_vtk->renderWindow()) m_vtk->renderWindow()->Render();
+//        return m_vol.raw();
+//    }
+//
+//    // 4) чистим: всё, что НЕ видно - в ноль
+//    const size_t total = m_vol.u8().size();
+//    for (size_t n = 0; n < total; ++n)
+//    {
+//        if (!m_bin.at(n))
+//            m_vol.at(n) = 0u;
+//    }
+//
+//    // 5) финализация
+//    m_vol.raw()->Modified();
+//    if (m_onImageReplaced) m_onImageReplaced(m_vol.raw());
+//    if (m_vtk && m_vtk->renderWindow()) m_vtk->renderWindow()->Render();
+//
+//    return m_vol.raw();
+//}
+
 
 void ToolsRemoveConnected::start(Action a, HoverMode hm)
 {
@@ -3798,11 +3859,4 @@ void ToolsRemoveConnected::SurfaceMappingVolume()
     
     progress(75);
     status(tr("Linked area deletion completed"));
-
-    m_vol.raw()->Modified();
-    if (m_onImageReplaced)
-        m_onImageReplaced(m_vol.raw());
-
-    if (m_vtk->renderWindow())
-        m_vtk->renderWindow()->Render();
 }

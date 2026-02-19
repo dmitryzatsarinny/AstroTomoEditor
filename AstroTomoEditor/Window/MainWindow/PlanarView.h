@@ -116,6 +116,7 @@ private:
     double          mWW{ 0.0 };
     bool            mAutoFit{ true };
     double          mSpX{ 1.0 }, mSpY{ 1.0 }, mSpZ{ 1.0 };
+    double          OriginSpZ{ 1.0 };
     int             X{ 1 }, Y{ 1 }, Z{ 1 };
     bool            flipX{ false };
     bool            flipY{ false };

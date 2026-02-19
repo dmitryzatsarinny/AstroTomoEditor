@@ -572,36 +572,35 @@ void ExplorerDialog::onPathEdited()
     navigateTo(m_pathCombo->currentText()); // Enter в поле пути -> перейти.
 }
 
-void ExplorerDialog::onDoubleClicked(const QModelIndex& vIdx) {
+void ExplorerDialog::onDoubleClicked(const QModelIndex& vIdx)
+{
     if (!vIdx.isValid()) return;
     hideBusy();
 
     const QString path = filePathFromViewIndex(vIdx);
     const QFileInfo fi(path);
 
-    if (fi.isDir())
-    {
+    if (fi.isDir()) {
         navigateTo(path);
         return;
     }
 
-    // файл — если валиден под режим, то OK
-    if (fi.isFile() && m_buttons->button(QDialogButtonBox::Ok)->isChecked()) {
+    // файл — если OK сейчас разрешён, закрываем диалог
+    auto* okBtn = m_buttons->button(QDialogButtonBox::Ok);
+    if (fi.isFile() && okBtn && okBtn->isEnabled()) {
         accept();
     }
 }
 
-void ExplorerDialog::onSelectionChanged(const QItemSelection& selected, const QItemSelection& deselected)
+
+void ExplorerDialog::onSelectionChanged(const QItemSelection&, const QItemSelection&)
 {
     auto sm = m_view->selectionModel();
-    if (!sm)
+    if (!sm || !sm->hasSelection()) {
         updateOkState(false);
-
-    // Если после изменения выделения НЕ осталось выделенных строк — выходим
-    if (!sm->hasSelection())
-        updateOkState(false);
-
-    updateOkState(true);                        // Любое изменение выбора -> пересчитать доступность Ok.
+        return;
+    }
+    updateOkState(true);
 }
 
 void ExplorerDialog::updateOkState(const bool state) 

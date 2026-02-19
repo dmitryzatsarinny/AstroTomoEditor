@@ -24,6 +24,8 @@
 #include "WheelSpinButton.h"
 #include "U8Span.h"
 #include "TemplateDialog.h"
+#include "ElectrodePanel.h"
+#include <algorithm>
 
 class QVTKOpenGLNativeWidget;
 class vtkRenderer;
@@ -115,6 +117,8 @@ private:
     vtkSmartPointer<vtkImageData> mVisibleMask;
 
     QWidget* mRightOverlay{ nullptr };
+    QWidget* mTopOverlay{ nullptr };
+    QWidget* mElectrodeOverlay{ nullptr };
 
     QToolButton* mBtnAP{ nullptr };
     QToolButton* mBtnPA{ nullptr };
@@ -129,9 +133,10 @@ private:
     QToolButton* mBtnSTL{ nullptr };
     QToolButton* mBtnSTLSimplify{ nullptr };
     QToolButton* mBtnSTLSave{ nullptr };
+    QLabel* mLblStlSize{ nullptr };
     bool mPrevVolumeVisible = true;
-
-    QWidget* mTopOverlay{ nullptr };
+    double mSimplifyTargetMB = 3.0;
+    bool   mSimplifyStarted = false;
 
     QMenu* mTfMenu{ nullptr };
     vtkSmartPointer<vtkVolumeProperty> mProp;
@@ -141,6 +146,7 @@ private:
     void reloadTfMenu();
     void reloadHistogram();
     void reloadTemplate();
+    void reloadElectrodes();
     void updateAfterImageChange(bool reattachTools);
 
     bool mOverlaysBuilt{ false };
@@ -166,6 +172,8 @@ private:
 
     void ensureTemplateDialog();
     void rebuildVisibleMaskFromImage(vtkImageData* src);
+
+    void ensureElectrodPanel();
 
     bool mToolActive{ false };
     Action mCurrentTool{};
@@ -203,8 +211,19 @@ private:
     WheelSpinButton* mBtnShift{ nullptr };
     int mShiftValue = 3;
 
-    QToolButton* mBtnTemplate{ nullptr };
-    QToolButton* mBtnElectrod{ nullptr };
+    ElectrodePanel* mElectrodePanel{ nullptr };
+    void setElectrodesUiActive(bool on);
+    void updateElectrodeOverlayMask();
+    void updateElectrodePickContext();
+    void onSaveElectrodesCoords();
+
+    QHash<ElectrodePanel::ElectrodeId, std::array<int, 3>> mElectrodeIJK;
+    void captureElectrodesTemplateFromCurrentVolume();
+    void beginElectrodesPreview();
+    void endElectrodesPreview();
+    vtkSmartPointer<vtkImageData> mImageBeforeElectrodes;
+    vtkSmartPointer<vtkImageData> mElectrodesPreviewImage;
+    bool mElectrodesPreviewActive{ false };
 
     bool   mHistMaskActive{ false };
     double mHistMaskLo{ static_cast<double>(HistMin) };
@@ -225,6 +244,7 @@ private:
 
     void addStlPreview();
     void clearStlPreview();
+    void updateStlSizeLabel();
 
     bool mGradientOpacityOn = false;
     void updateGradientOpacity();
@@ -239,3 +259,10 @@ private:
     void saveRenderSettings();
     VolumeInterpolation mInterpolation = VolumeInterpolation::Nearest;
 };
+
+static constexpr double kMB = 1024.0 * 1024.0;
+static constexpr double kFirstMinMB = 2.0;
+static constexpr double kFirstMaxMB = 4.0;
+static constexpr double kFirstAimMB = 3.0;
+static constexpr double kStepFactor = 0.85;
+static constexpr double kMinMB = 0.5;

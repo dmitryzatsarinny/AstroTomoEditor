@@ -34,16 +34,22 @@ class VolumeStlExporter
 {
 
 public:
-    static vtkSmartPointer<vtkPolyData> BuildFromVisible(
-        vtkImageData* image,
-        vtkVolume* volumeWithTF,
-        const VisibleExportOptions& opt = {});
-
-    static vtkSmartPointer<vtkPolyData> BuildFromBinaryVoxels(
+    static vtkSmartPointer<vtkPolyData> BuildFromBinaryVoxelsNew(
         vtkImageData* binImage, const VisibleExportOptions& opt);
 
     static vtkSmartPointer<vtkPolyData> SimplifySurface(
         vtkPolyData* in, double targetReduction = 0.25, int smoothIter = 10, double passBand = 0.15);
+    
+    static bool SaveStlMyBinary_NoCenter(vtkPolyData* pd, const QString& filePath, double VolumeOriginX, double VolumeOriginY, double VolumeOriginZ,
+        double VolumeCenterX, double VolumeCenterY, double VolumeCenterZ, bool recomputeNormals /*= true*/);
 
-    static bool SaveStl(vtkPolyData* pd, const QString& filePath, bool binary = true);
+    static vtkSmartPointer<vtkPolyData> SimplifyToTargetBytes(vtkPolyData* in, std::int64_t targetBytes, int smoothIter, double passBand);
+
+    static vtkSmartPointer<vtkPolyData> NormalizeSurface(vtkPolyData* in);
+
+    static QString prettyBytes(quint64 bytes);
+
+    static quint64 estimateBinaryStlBytesFast(vtkPolyData* pd);
+
+    static QString makeStlSizeText(vtkPolyData* pd);
 };

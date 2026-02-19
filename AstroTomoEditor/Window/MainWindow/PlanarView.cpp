@@ -235,7 +235,6 @@ void PlanarView::initUi()
 #include <vtkImageShrink3D.h>
 #include <cmath> 
 #include <algorithm> 
-#include <Services/PerfScan.h>
 
 vtkSmartPointer<vtkImageData> shrinkAlongAxis(vtkImageData* src, int axis, int factor)
 {
@@ -325,6 +324,7 @@ vtkSmartPointer<vtkImageData> PlanarView::makeVtkVolume() const
         }
     }
 
+    
     return vol;
 }
 
@@ -363,6 +363,12 @@ void PlanarView::pageSlice(int delta)
     int step = mScroll->pageStep();
     if (step < 1) step = 10; // дефолт, если не задан
     nudgeSlice((delta < 0 ? -step : +step));
+}
+
+static QString tagStr(vtkDICOMMetaData* md, const vtkDICOMTag& t)
+{
+    if (!md || !md->Has(t)) return "<absent>";
+    return QString::fromStdString(md->Get(t).AsString()).trimmed();
 }
 
 static inline void autoWindowFromPercentiles3D(
@@ -515,29 +521,19 @@ static bool canReconstructVolume(const QVector<QString>& files)
     return true;
 }
 
+
+
 void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 {
-
-#ifdef QT_DEBUG
-    PerfScan::reset();
-#endif
-    PERF_SCOPE(PerfScan::Id::PV_Total);
-
-    {
-        PERF_SCOPE(PerfScan::Id::PV_UiReset);
-        emit loadStarted(0);
-        emit showInfo(tr("Preparing…"));
-        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-    }
+    emit loadStarted(0);
+    emit showInfo(tr("Preparing…"));
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
     auto pump = [] {
         static QElapsedTimer t; if (!t.isValid()) t.start();
         if (t.elapsed() > 12) {
             QElapsedTimer tt; tt.start();
             qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-#ifdef QT_DEBUG
-            PerfScan::addNs(PerfScan::Id::PV_Pump_ProcessEvents, tt.nsecsElapsed());
-#endif
             t.restart();
         }
         };
@@ -617,8 +613,6 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         phaseStart(tr("Reading file list…"));
         auto names = vtkSmartPointer<vtkStringArray>::New();
         {
-            PERF_SCOPE(PerfScan::Id::PV_BuildNames);
-
             names->SetNumberOfValues(files.size());
             for (vtkIdType i = 0; i < static_cast<vtkIdType>(files.size()); ++i) {
                 names->SetValue(i, files[int(i)].toUtf8().constData());
@@ -634,10 +628,12 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         auto errObs1 = vtkSmartPointer<VtkErrorCatcher>::New();
         mdReader->AddObserver(vtkCommand::ErrorEvent, errObs1);
         mdReader->SetFileNames(names);
-        {
-            PERF_SCOPE(PerfScan::Id::PV_md_UpdateInformation);
-            mdReader->UpdateInformation();
-        }
+        mdReader->UpdateInformation();
+
+
+
+
+
         phaseStep(60, tr("Parsing metadata…"));
         pump();
 
@@ -655,10 +651,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             return ts.rfind("1.2.840.10008.1.2.4.", 0) == 0 || ts == "1.2.840.10008.1.2.5";
             };
         bool isCompressed = false;
-        {
-            PERF_SCOPE(PerfScan::Id::PV_CheckTransferSyntax);
-            isCompressed = isCompressedTS(md);   // БЕЗ bool
-        }
+        isCompressed = isCompressedTS(md);   // БЕЗ bool
         phaseDone();
 
         // 2a) Если НЕ сжато — обычный vtkDICOMReader
@@ -668,18 +661,10 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             auto errObs2 = vtkSmartPointer<VtkErrorCatcher>::New();
             pixReader->AddObserver(vtkCommand::ErrorEvent, errObs2);
             pixReader->SetFileNames(names);
-
-            {
-                PERF_SCOPE(PerfScan::Id::PV_Pix_UpdateInformation);
-                pixReader->UpdateInformation();
-            }
+            pixReader->UpdateInformation();
             phaseStep(40, tr("Allocating image…"));
             pump();
-
-            {
-                PERF_SCOPE(PerfScan::Id::PV_Pix_Update);
-                pixReader->Update();
-            }
+            pixReader->Update();
             phaseStep(90, tr("Preparing geometry…"));
             pump();
 
@@ -692,7 +677,6 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             volume = pixReader->GetOutput();
             srcPort = pixReader->GetOutputPort();
             {
-                PERF_SCOPE(PerfScan::Id::PV_Geometry);
                 // Геометрия LPS
                 double iop[6]{ 1,0,0, 0,1,0 };
                 if (md->Has(DC::ImageOrientationPatient)) {
@@ -701,12 +685,14 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
                 }
                 const QVector3D RR(iop[0], iop[1], iop[2]);
                 const QVector3D CC(iop[3], iop[4], iop[5]);
+
                 const QVector3D NN = QVector3D::crossProduct(RR, CC);
                 mDir = QMatrix3x3();
                 mDir(0, 0) = RR.x(); mDir(1, 0) = RR.y(); mDir(2, 0) = RR.z();
                 mDir(0, 1) = CC.x(); mDir(1, 1) = CC.y(); mDir(2, 1) = CC.z();
                 mDir(0, 2) = NN.x(); mDir(1, 2) = NN.y(); mDir(2, 2) = NN.z();
-                if (md->Has(DC::ImagePositionPatient)) {
+                if (md->Has(DC::ImagePositionPatient)) 
+                {
                     const auto ipp = md->Get(DC::ImagePositionPatient);
                     mOrg[0] = ipp.GetDouble(0); mOrg[1] = ipp.GetDouble(1); mOrg[2] = ipp.GetDouble(2);
                 }
@@ -714,7 +700,6 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             // DICOM-диапазоны/VOI
             phaseDone();
             {
-                PERF_SCOPE(PerfScan::Id::PV_GetDicomRanges);
                 Dicom = GetDicomRangesVTK(pixReader);
             }
             pump();
@@ -770,7 +755,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
             auto finalizeSpacing = [&](double sp[3]) {
                 // стартуем с того, что отдал ридер
                 volume->GetSpacing(sp);
-
+                OriginSpZ = sp[2];
                 const bool zLooksWrong = !(sp[2] > 0.0) || sp[2] == 1.0; // частая «затычка» по умолчанию
                 if (zLooksWrong) {
                     // Собираем скаляр s = dot(IPP, N) по всем файлам и берём медианный шаг
@@ -818,6 +803,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
                 Dicom.mSpX = mSpX;
                 Dicom.mSpY = mSpY;
                 Dicom.mSpZ = mSpZ;
+                Dicom.OriginSpZ = OriginSpZ;
             }
 
             phaseDone();
@@ -888,10 +874,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     emit showInfo(tr("Caching slices… 0/%1").arg(Z));
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
-    {
-        PERF_SCOPE(PerfScan::Id::PV_BuildCache);
-        buildCache(volume, srcPort, invertMono1, Dicom);
-    }
+    buildCache(volume, srcPort, invertMono1, Dicom);
     avalibletoreconstruction = (Z > 1) && !mSlices.isEmpty();
 
     // --- UI финализация ---
@@ -914,9 +897,6 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
     else
         mScroll->hide();
 
-#ifdef QT_DEBUG
-    PerfScan::dumpTop(25);
-#endif
 }
 
 // ===== cache / display ======================================================
@@ -929,19 +909,29 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
     {
         if (v > max + window)
             v = max;
-        else if (v > max - window / 20)
-            v = max - window / 20;
+
+        //электроды в видимую область
+        /*else if (v > max - window / 20)
+            v = max - window / 20;*/
     }
 
     // проекция значения в шкалу [HistMin..HistMax]
     double xf = (v - min) * scale / window;
     int y = static_cast<int>(std::floor(xf));
 
+    //электроды в видимую область
+    //// зажимаем в допустимый диапазон
+    //if (y < static_cast<int>(HistMin))
+    //    y = static_cast<int>(HistMin);
+    //if (y > static_cast<int>(HistMax))
+    //    y = static_cast<int>(HistMax);
+
     // зажимаем в допустимый диапазон
-    if (y < static_cast<int>(HistMin))
-        y = static_cast<int>(HistMin);
+    if (y < static_cast<int>(HistMin + 8))
+        y = 0;
     if (y > static_cast<int>(HistMax))
-        y = static_cast<int>(HistMax);
+        y = 0;
+
 
     int bin = y;
 
@@ -952,171 +942,6 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
     // тут bin гарантированно в [0..255], так что каст безопасен
     return static_cast<uchar>(bin);
 }
-
-//void PlanarView::buildCache(vtkImageData* volume, vtkAlgorithmOutput* srcPort, bool invertMono1, DicomInfo Dicom)
-//{
-//    if (!volume) {
-//        mSlices.clear();
-//        emit loadProgress(0, 0);
-//        return;
-//    }
-//
-//    PERF_SCOPE(PerfScan::Id::BC_Total);
-//
-//    int ext[6]; volume->GetExtent(ext);
-//    const int x0 = ext[0], x1 = ext[1];
-//    const int y0 = ext[2], y1 = ext[3];
-//    const int z0 = ext[4], z1 = ext[5];
-//
-//    const int w = x1 - x0 + 1;
-//    const int h = y1 - y0 + 1;
-//    const int total = z1 - z0 + 1;
-//
-//    if (w <= 0 || h <= 0 || total <= 0) {
-//        mSlices.clear();
-//        emit loadProgress(0, 0);
-//        return;
-//    }
-//
-//    // --- Универсальный вход: ВСЕГДА от готового vtkImageData ---
-//    vtkNew<vtkImageCast> cast;
-//    cast->SetInputData(volume);
-//    cast->SetOutputScalarTypeToDouble();
-//    cast->Update();
-//
-//    vtkImageData* imgD = cast->GetOutput();
-//    if (!imgD) {
-//        mSlices.clear();
-//        emit loadProgress(0, 0);
-//        return;
-//    }
-//
-//    mSlices.clear();
-//    mSlices.reserve(total);
-//
-//    if (Dicom.TypeOfRecord == CT)
-//    {
-//        QVector<uint32_t> mH(HistScale, 0);
-//
-//        // Приведём к double, чтобы не париться с типами
-//        vtkNew<vtkImageCast> cast;
-//        cast->SetInputData(volume);
-//        cast->SetOutputScalarTypeToDouble();
-//        cast->Update();
-//        vtkImageData* imgD = cast->GetOutput();
-//
-//        const double minPhys = Dicom.physicalMin;
-//        const double maxPhys = Dicom.physicalMax;
-//        const double window = std::max(1.0, maxPhys - minPhys);
-//
-//        for (int z = z1; z >= z0; --z)
-//        {
-//            // Определяем фактические инкременты по X/Y как разницу указателей
-//            auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
-//            auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
-//            auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
-//            if (!p00 || !p10 || !p01) continue;
-//
-//            const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
-//            const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
-//            const bool xPositive = (incXb_raw >= 0);
-//            const bool yPositive = (incYb_raw >= 0);
-//            const int  xStart = xPositive ? x0 : x1;
-//            const int  yStart = yPositive ? y0 : y1;
-//            const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
-//
-//            for (int yy = 0; yy < h; ++yy)
-//            {
-//                const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
-//                auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
-//                if (!row0) continue;
-//
-//                for (int xx = 0; xx < w; ++xx)
-//                {
-//                    const double raw = *reinterpret_cast<const double*>(row0 + stepXb * xx);
-//                    const double vHU = raw * Dicom.slope - Dicom.intercept;
-//
-//                    double x = (vHU - minPhys) * static_cast<double>(HistScale) / window;
-//                    int y = static_cast<int>(std::floor(x));
-//                    if (y < HistMin + 1)
-//                        y = HistMin;
-//                    if (y > HistMax)
-//                        y = HistMax;
-//                    mH[y]++;
-//                }
-//            }
-//            mH[0] = 0;
-//        }
-//
-//        int peakHU = 0;
-//
-//        if (detectFirstPeakAfter(mH, HistScale / 4, peakHU))
-//        {
-//            const double vHU = window / 2 - peakHU / static_cast<double>(HistScale) * window;
-//            int y = static_cast<int>(std::floor(vHU));
-//            int x = 0;
-//            Dicom.physicalMax -= (2 * y);
-//        }
-//    }
-//
-//    // Идём сверху вниз (как у тебя было: z = z1..z0), с периодической прокачкой прогресса
-//    for (int z = z1, idx = 0; z >= z0; --z, ++idx)
-//    {
-//        // Измеряем реальные байтовые шаги по X/Y, чтобы корректно читать даже при инвертированных stride
-//        auto* p00 = static_cast<char*>(imgD->GetScalarPointer(x0, y0, z));
-//        auto* p10 = static_cast<char*>(imgD->GetScalarPointer(std::min(x0 + 1, x1), y0, z));
-//        auto* p01 = static_cast<char*>(imgD->GetScalarPointer(x0, std::min(y0 + 1, y1), z));
-//
-//        // Если что-то пошло не так — перестраховка
-//        if (!p00 || !p10 || !p01) {
-//            // попытаемся мягко пропустить этот срез
-//            QImage empty(w, h, QImage::Format_Grayscale8);
-//            empty.fill(0);
-//            mSlices.push_back(std::move(empty));
-//            continue;
-//        }
-//
-//        const ptrdiff_t incXb_raw = (w > 1) ? (p10 - p00) : ptrdiff_t(sizeof(double));
-//        const ptrdiff_t incYb_raw = (h > 1) ? (p01 - p00) : ptrdiff_t(sizeof(double));
-//
-//        const bool xPositive = (incXb_raw >= 0);
-//        const bool yPositive = (incYb_raw >= 0);
-//
-//        const int  xStart = xPositive ? x0 : x1;
-//        const int  yStart = yPositive ? y0 : y1;
-//        const ptrdiff_t stepXb = (xPositive ? +1 : -1) * std::abs(incXb_raw);
-//
-//        QImage q(w, h, QImage::Format_Grayscale8);
-//
-//        for (int yy = 0; yy < h; ++yy)
-//        {
-//            const int ySrc = yPositive ? (yStart + yy) : (yStart - yy);
-//            auto* row0 = static_cast<char*>(imgD->GetScalarPointer(xStart, ySrc, z));
-//            uchar* dst = q.scanLine(yy);
-//
-//            // safety
-//            if (!row0 || !dst) {
-//                std::memset(dst, 0, size_t(w));
-//                continue;
-//            }
-//
-//            for (int xx = 0; xx < w; ++xx)
-//            {
-//                auto* p = reinterpret_cast<const double*>(row0 + stepXb * xx);
-//                const double vHU = (*p * Dicom.slope) - Dicom.intercept;
-//                dst[xx] = wl8(vHU, Dicom.physicalMin, Dicom.physicalMax, Dicom.TypeOfRecord, invertMono1);
-//            }
-//        }
-//
-//        q = q.mirrored();
-//        mSlices.push_back(std::move(q));
-//
-//        if (((idx + 1) % 8) == 0 || idx + 1 == total) {
-//            emit loadProgress(idx + 1, total);
-//            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-//        }
-//    }
-//}
 
 void PlanarView::buildCache(vtkImageData* volume,
     vtkAlgorithmOutput* /*srcPort*/,
@@ -1231,12 +1056,19 @@ void PlanarView::buildCache(vtkImageData* volume,
 
         hist[0] = 0;
 
+
         int peakHU = 0;
         if (detectFirstPeakAfter(hist, HistScale / 4, peakHU))
         {
+            peakHU -= 2;
             const float vHU = window * (0.5f - float(peakHU) / float(HistScale));
             const int y = fastFloorToInt(vHU);
             Dicom.physicalMax -= (2 * y);
+
+            /*qDebug() << "peakHU" << "  " << peakHU;
+            qDebug() << "vHU" << "  " << vHU;
+            qDebug() << "y" << "  " << y;
+            qDebug() << "physicalMax" << "  " << Dicom.physicalMax;*/
         }
     }
 
