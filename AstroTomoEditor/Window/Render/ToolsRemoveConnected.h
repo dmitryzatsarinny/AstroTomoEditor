@@ -187,7 +187,7 @@ private:
     double mVisibleEps = 0.001; // порог по opacity
 
     void  rebuildVisibilityLUT(); // дергаем при attach() и смене TF / hist-mask
-    bool  isVisible(const short v) const; // быстрый тест через LUT
+    bool  isVisible(double v) const; // быстрый тест через LUT
 
     QPoint m_lastMouse{};
     bool   m_hasHover{ false };

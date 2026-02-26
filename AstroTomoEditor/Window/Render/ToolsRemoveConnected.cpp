@@ -1404,10 +1404,14 @@ void ToolsRemoveConnected::makeBinaryMask(vtkImageData* image)
             if (v <= 0u)
                 return 0u;
 
-            if (mVisibleLut.empty() || mLutBins < 255 || v >= 255u)
+            if (mVisibleLut.empty() || mLutBins <= 0)
                 return 1u;
 
-            return mVisibleLut[v];
+            const int idx = int(v) - int(mLutMin);
+            if (idx < 0 || idx >= int(mVisibleLut.size()))
+                return 0u;
+
+            return mVisibleLut[size_t(idx)];
         });
 }
 
@@ -2150,11 +2154,11 @@ void ToolsRemoveConnected::ErodeBy6Neighbors(Volume& volume)
             volume.at(idx) = 0u;
 }
 
-bool ToolsRemoveConnected::isVisible(const short v) const
+bool ToolsRemoveConnected::isVisible(double v) const
 {
     if (mVisibleLut.empty()) return true;
 
-    const int idx = int(v) - int(mLutMin);
+    const int idx = int(std::lround(v)) - int(mLutMin);
     if (idx < 0 || idx >= (int)mVisibleLut.size())
         return false;
 

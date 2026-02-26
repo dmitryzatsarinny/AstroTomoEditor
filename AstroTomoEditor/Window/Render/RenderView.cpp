@@ -543,8 +543,18 @@ void RenderView::buildOverlay()
         if (!mHistDlg)
             return;
 
-        // и вызываем нужную функцию
         mHistDlg->HideAutoRange(mImage);
+        });
+
+    auto* scHistAutoReturn = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
+    connect(scHistAutoReturn, &QShortcut::activated, this, [this] {
+        if (!mImage)
+            return;
+
+        if (!mHistDlg)
+            return;
+
+        mHistDlg->HideAllShow(mImage);
         });
 
     auto* scGradOpacity = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_T), this);
@@ -697,18 +707,25 @@ void RenderView::beginElectrodesPreview()
     Volume volPreview;
     volPreview.clear();
     volPreview.copy(mElectrodesPreviewImage);
+
     if (!volPreview.raw() || !volPreview.u8().valid)
         return;
 
-    const Volume& templ = s->data;
+
+
+    Volume templ = s->data;
     if (!templ.raw() || !templ.u8().valid)
         return;
+
+    if (mRemoveConn)
+        mRemoveConn->AddBy6Neighbors(templ, 250);
 
     const size_t total = std::min(volPreview.u8().size(), templ.u8().size());
     for (size_t i = 0; i < total; ++i)
     {
         const uint8_t tv = templ.at(i);
-        if (tv)
+        const uint8_t tvp = volPreview.at(i);
+        if (tv && tvp)
             volPreview.at(i) = tv; // прямое наложение (250..255)
     }
 

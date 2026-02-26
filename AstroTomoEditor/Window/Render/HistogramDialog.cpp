@@ -190,6 +190,12 @@ void HistogramDialog::HideAutoRange(vtkImageData* image)
     autoRange(false);
 }
 
+void HistogramDialog::HideAllShow(vtkImageData* image)
+{
+    refreshFromImage(image);
+    setRange(HistMin, HistMax, true);
+}
+
 void HistogramDialog::HideRangeIfCT(vtkImageData* image, int HLeft, int HRight)
 {
     if (Dicom.TypeOfRecord == CT || Dicom.TypeOfRecord == CT3DR) 

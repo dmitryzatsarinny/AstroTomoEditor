@@ -37,6 +37,7 @@ public:
     double axisMax() const { return mAxisMax; }
 
     void HideAutoRange(vtkImageData* image);
+    void HideAllShow(vtkImageData* image);
     void HideRangeIfCT(vtkImageData* image, int HLeft, int HRight);
 
 signals:
