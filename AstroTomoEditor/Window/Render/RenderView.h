@@ -26,6 +26,8 @@
 #include "TemplateDialog.h"
 #include "ElectrodePanel.h"
 #include <algorithm>
+#include "ElectrodeSurfaceDetector.h"
+#include <memory>
 
 class QVTKOpenGLNativeWidget;
 class vtkRenderer;
@@ -216,6 +218,7 @@ private:
     int mShiftValue = 3;
 
     ElectrodePanel* mElectrodePanel{ nullptr };
+    std::unique_ptr<ElectrodeSurfaceDetector> mElectrodeDetector;
     void setElectrodesUiActive(bool on);
     void updateElectrodeOverlayMask();
     void updateElectrodePickContext();

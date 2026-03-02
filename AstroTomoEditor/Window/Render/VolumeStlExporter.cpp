@@ -780,9 +780,9 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     // =========================================================
     vtkNew<vtkImageThreshold> to01;
     to01->SetInputConnection(roi->GetOutputPort());
-    to01->ThresholdByLower(1);
-    to01->SetInValue(1);
-    to01->SetOutValue(0);
+    to01->ThresholdByLower(0);
+    to01->SetInValue(0);
+    to01->SetOutValue(1);
     to01->ReplaceInOn();
     to01->ReplaceOutOn();
     to01->SetOutputScalarTypeToUnsignedChar();

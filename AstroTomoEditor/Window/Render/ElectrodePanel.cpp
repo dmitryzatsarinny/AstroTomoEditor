@@ -304,11 +304,31 @@ void ElectrodePanel::buildUi()
     column--;
     addBtn(ElectrodeId::R, "R", grid, 0, column);
 
-    // ---------- ПРАВАЯ ЧАСТЬ: Save ----------
+    // ---------- ПРАВАЯ ЧАСТЬ: Auto + Save ----------
     auto* right = new QVBoxLayout();
-    right->setSpacing(10);
+    right->setSpacing(8);
     right->setContentsMargins(0, 0, 0, 0);
 
+    // горизонтальная строка для кнопок
+    auto* buttonsRow = new QHBoxLayout();
+    buttonsRow->setSpacing(8);
+    buttonsRow->setContentsMargins(0, 0, 0, 0);
+
+    // NEW: Auto
+    mBtnAuto = new QPushButton(tr("Auto detect"), this);
+    mBtnAuto->setCursor(Qt::PointingHandCursor);
+    mBtnAuto->setFixedHeight(26);
+    mBtnAuto->setStyleSheet(
+        "QPushButton{"
+        "   background:rgba(60,60,60,140);"
+        "   border:1px solid rgba(255,255,255,60);"
+        "   border-radius:6px; padding:0 8px; text-align:center; color:#fff;}"
+        "QPushButton:hover{ background:rgba(90,90,90,170); }"
+        "QPushButton:pressed{ background:rgba(120,120,120,190); }"
+    );
+    connect(mBtnAuto, &QPushButton::clicked, this, &ElectrodePanel::autoRequested);
+
+    // Save
     mBtnSave = new QPushButton(tr("Save electrodes coords"), this);
     mBtnSave->setCursor(Qt::PointingHandCursor);
     mBtnSave->setFixedHeight(26);
@@ -320,10 +340,12 @@ void ElectrodePanel::buildUi()
         "   border-radius:6px; padding:0 8px; text-align:center;}"
         "QPushButton:hover{background:rgba(0,180,100,200);}"
     );
-
     connect(mBtnSave, &QPushButton::clicked, this, &ElectrodePanel::saveRequested);
 
-    right->addWidget(mBtnSave);
+    buttonsRow->addWidget(mBtnAuto, 1);
+    buttonsRow->addWidget(mBtnSave, 2);
+
+    right->addLayout(buttonsRow);
     right->addStretch(1);
 
     auto* rightWrap = new QWidget(this);
@@ -388,13 +410,16 @@ void ElectrodePanel::rebuildMask()
             reg |= QRegion(cb.adjusted(-2, -2, 2, 2));
     }
 
-    if (mBtnSave)
-    {
-        // mBtnSave теперь может быть внутри rightWrap, поэтому мапим в координаты панели
-        const QPoint topLeft = mBtnSave->mapTo(this, QPoint(0, 0));
-        QRect r(topLeft, mBtnSave->size());
-        reg |= QRegion(r.adjusted(0, 0, 0, 0));
-    }
+    auto addBtnToMask = [&](QPushButton* btn)
+        {
+            if (!btn) return;
+            const QPoint topLeft = btn->mapTo(this, QPoint(0, 0));
+            QRect r(topLeft, btn->size());
+            reg |= QRegion(r);
+        };
+
+    addBtnToMask(mBtnAuto);
+    addBtnToMask(mBtnSave);
 
     setMask(reg);
 }
@@ -532,6 +557,8 @@ void ElectrodePanel::clearCurrent()
 
 void ElectrodePanel::retranslateUi()
 {
+    if (mBtnAuto)
+        mBtnAuto->setText(tr("Auto detect"));
     if (mBtnSave)
         mBtnSave->setText(tr("Save electrodes coords"));
 }

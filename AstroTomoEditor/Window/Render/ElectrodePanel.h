@@ -95,6 +95,7 @@ signals:
     void electrodeClearRequested(ElectrodeId id); // нажали крестик
     void saveRequested(); // сохранить координаты
     void pickCommitted(ElectrodeId id, std::array<int, 3> ijk, std::array<double, 3> world);
+    void autoRequested();
 
 public slots:
     void beginPick(ElectrodeId id);   // пользователь нажал кнопку электрода
@@ -121,6 +122,7 @@ private:
     QButtonGroup* mGroup = nullptr;
 
     QPushButton* mBtnSave = nullptr;
+    QPushButton* mBtnAuto = nullptr;
 
     ElectrodeId mCurrent{ ElectrodeId::Count }; // none
 

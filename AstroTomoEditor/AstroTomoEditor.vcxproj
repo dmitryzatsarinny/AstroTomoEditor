@@ -46,6 +46,7 @@
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Release|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(Filename).moc</QtMocFileName>
     </ClCompile>
+    <ClCompile Include="Window\Render\ElectrodeSurfaceDetector.cpp" />
     <ClCompile Include="Window\Render\FaceOnlyBoxRepresentation.cpp" />
     <ClCompile Include="Window\Render\FaceOnlyBoxWidget.cpp" />
     <ClCompile Include="Window\Render\TemplateDialog.cpp" />
@@ -95,6 +96,7 @@
     <QtMoc Include="Window\MainWindow\PatientDialog.h" />
     <QtMoc Include="Window\MainWindow\SettingsDialog.h" />
     <QtMoc Include="Window\Render\ElectrodePanel.h" />
+    <ClInclude Include="Window\Render\ElectrodeSurfaceDetector.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxRepresentation.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxWidget.h" />
     <ClInclude Include="Window\Render\HoverDelegate.h" />

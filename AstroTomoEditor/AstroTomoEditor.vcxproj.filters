@@ -167,6 +167,9 @@
     <ClCompile Include="Window\ServiceWindow\ShellFileDialog.cpp">
       <Filter>Source Files\Window\ServiceWindow</Filter>
     </ClCompile>
+    <ClCompile Include="Window\Render\ElectrodeSurfaceDetector.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -228,6 +231,9 @@
     </ClInclude>
     <ClInclude Include="Services\FastDicomHeaderReader.h">
       <Filter>Header Files\Services</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\ElectrodeSurfaceDetector.h">
+      <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

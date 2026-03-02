@@ -403,6 +403,28 @@ void RenderView::buildOverlay()
 
     the->addWidget(mElectrodePanel);
 
+    connect(mElectrodePanel, &ElectrodePanel::autoRequested, this, [this]()
+        {
+            if (!mImage || !mRenderer) return;
+
+            if (!mElectrodeDetector)
+                mElectrodeDetector = std::make_unique<ElectrodeSurfaceDetector>();
+
+            // тут можно покрутить пороги под твои КТ
+            ElectrodeSurfaceDetector::Options opt = mElectrodeDetector->options();
+            // opt.metalHuThreshold = 1800; // если надо
+            // opt.airHuThreshold = -300;   // если надо
+            // opt.sphereRadiusMm = 2.5;
+            mElectrodeDetector->setOptions(opt);
+
+            const auto centers = mElectrodeDetector->detectAndShow(mImage, mRenderer);
+
+            qDebug() << "[AutoElectrodes] detected:" << int(centers.size());
+
+            if (mVtk && mVtk->renderWindow())
+                mVtk->renderWindow()->Render();
+        });
+
     mBtnTF = makeBigBtn(topPanel, tr("Transfer function"));
     reloadTfMenu();
     mBtnTF->setPopupMode(QToolButton::InstantPopup);
@@ -969,11 +991,32 @@ void RenderView::onTemplateCapture(TemplateId id)
     mTemplateDlg->setCaptured(id, m_vol);
 }
 
+QString getParentPath(const QString& path)
+{
+    QFileInfo fi(path);
+
+    if (fi.isDir())
+    {
+        QDir dir(fi.absoluteFilePath());
+        if (dir.cdUp())
+            return dir.absolutePath();
+        return QString(); // уже корень
+    }
+    else
+    {
+        return fi.absolutePath(); // папка файла
+    }
+}
+
 QString RenderView::defaultStlDirectory() const
 {
     const QString dicomDir = DI.DicomDirPath.trimmed();
-    if (!dicomDir.isEmpty() && QDir(dicomDir).exists())
-        return QDir(dicomDir).filePath("chamber0");
+    QString parentDir = getParentPath(dicomDir);
+
+    if (!parentDir.isEmpty() && QDir(parentDir).exists())
+        return QDir(parentDir).filePath("chamber0");
+
+
 
     QSettings s;
     return s.value(
@@ -1320,6 +1363,9 @@ void RenderView::onUndo()
 
     // текущий в Redo
     mRedoStack.push_back(cloneImage(mImage));
+    while (mRedoStack.size() > mHistoryLimit)
+        mRedoStack.pop_front();
+
     auto prev = mUndoStack.takeLast();
 
     mImage = prev;
@@ -1332,6 +1378,9 @@ void RenderView::onRedo()
 
     // текущий в Undo
     mUndoStack.push_back(cloneImage(mImage));
+    while (mUndoStack.size() > mHistoryLimit)
+        mUndoStack.pop_front();
+
     auto next = mRedoStack.takeLast();
 
     mImage = next;
@@ -2232,8 +2281,9 @@ void RenderView::updateGradientOpacity()
     if (!prop)
         return;
 
-    if (mGradientOpacityOn) 
+    if (mGradientOpacityOn)
     {
+        prop->SetDisableGradientOpacity(false);
         auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
         gtf->AddPoint(0, 0.00);
         gtf->AddPoint(15, 0.25);
@@ -2242,11 +2292,6 @@ void RenderView::updateGradientOpacity()
     }
     else 
     {
-        auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
-        gtf->AddPoint(0.0, 0.0);
-        gtf->AddPoint(0.5, 0.0);
-        gtf->AddPoint(1.0, 0.02);
-        gtf->AddPoint(255.0, 0.8);
         prop->SetDisableGradientOpacity(true);
     }
 
@@ -2373,7 +2418,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     DI.mSpX = sp[0];
     DI.mSpY = sp[1];
     DI.mSpZ = sp[2];
-    const double factor = std::clamp(mSamplingFactor, 0.05, 10.0);
+    const double factor = std::clamp(mSamplingFactor, 0.5, 10.0);
 
     // 2) настраиваем mapper/prop
     auto mapper = vtkSmartPointer<vtkGPUVolumeRayCastMapper>::New();
@@ -2920,7 +2965,7 @@ void RenderView::loadRenderSettings()
     mInterpolation = (im == 1) ? VolumeInterpolation::Linear : VolumeInterpolation::Nearest;
 
     mSamplingFactor = s.value(kSamplingFactorKey, 0.35).toDouble();
-    mSamplingFactor = std::clamp(mSamplingFactor, 0.05, 10.0);
+    mSamplingFactor = std::clamp(mSamplingFactor, 0.5, 10.0);
 }
 
 void RenderView::saveRenderSettings()
@@ -2933,7 +2978,7 @@ void RenderView::saveRenderSettings()
 
 void RenderView::setSamplingFactor(double f)
 {
-    f = std::clamp(f, 0.05, 10.0);
+    f = std::clamp(f, 0.5, 10.0);
     if (std::abs(mSamplingFactor - f) < 1e-9)
         return;
 
@@ -2956,7 +3001,7 @@ void RenderView::updateSamplingFromImage()
     mImage->GetSpacing(sp);
     const double smin = std::min({ sp[0], sp[1], sp[2] });
 
-    const double factor = std::clamp(mSamplingFactor, 0.05, 10.0);
+    const double factor = std::clamp(mSamplingFactor, 0.5, 10.0);
     const double sd = std::max(factor * smin, 0.05); // 0.05 чтобы не улететь в ноль
     const double ud = std::max(factor * smin, 1e-3);
 
@@ -2979,10 +3024,9 @@ void RenderView::onSaveElectrodesCoords()
         return;
 
     const QString dicomDir = DI.DicomDirPath.trimmed();
-    if (dicomDir.isEmpty())
-        return;
+    QString parentDir = getParentPath(dicomDir);
 
-    QDir base(dicomDir);
+    QDir base(parentDir);
     if (!base.exists())
         return;
 

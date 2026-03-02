@@ -70,7 +70,7 @@ static int findNextValley(const QVector<double>& s, int from) {
 }
 static int findPrevValley(const QVector<double>& s, int from) {
     for (int i = std::clamp(from - 1, 1, (int)(s.size() - 2)); i >= 1; --i)
-        if (s[i - 1] < s[i] && s[i] < s[i + 1]) return i;
+        if (s[i - 1] > s[i] && s[i] < s[i + 1]) return i;
     return 0;
 }
 
@@ -117,6 +117,8 @@ static QVector<double> smoothBox(const QVector<quint64>& h, int win = 9)
     }
     return out;
 }
+
+
 
 HistogramDialog::HistogramDialog(QWidget* parent, DicomInfo DI, vtkImageData* image)
     : DialogShell(parent, tr("Histogram"), WindowType::Histogram), mImage(image)
@@ -621,6 +623,49 @@ int findLeftValleySimple(const QVector<double>& s, int peakBin, int limit)
     return best;
 }
 
+static GaussianPeak findRightmostMeaningfulPeakBins(const QVector<double>& s,
+    int binLo, int binHi,
+    double globalMax)
+{
+    GaussianPeak best;
+    const int N = s.size();
+    if (N < 5 || globalMax <= 0.0) return best;
+
+    binLo = std::clamp(binLo, 1, N - 2);
+    binHi = std::clamp(binHi, 1, N - 2);
+    if (binLo >= binHi) return best;
+
+    const double minProm = std::max(globalMax * 0.00035, 1.0);
+    const int minWidth = 1;
+
+    for (int i = binHi - 1; i >= binLo + 1; --i) {
+        if (!isLocalPeak(s, i))
+            continue;
+
+        PeakInfo P = analyzePeak(s, i);
+        if (P.prominence < minProm)
+            continue;
+        if (P.fwhmBins < minWidth)
+            continue;
+
+        int L = std::max(P.leftValley, binLo);
+        int R = std::min(P.rightValley, binHi);
+
+        double muBin = 0.0, sigmaBin = 0.0;
+        const double err = gaussianFitErrorBins(s, L, R, muBin, sigmaBin);
+        if (!std::isfinite(err) || sigmaBin <= 0.0)
+            continue;
+
+        best.peakBin = i;
+        best.muBin = muBin;
+        best.sigmaBin = sigmaBin;
+        best.error = err;
+        return best;
+    }
+
+    return best;
+}
+
 GaussianPeak HistogramDialog::FindSecondPeak(const QVector<double>& s)
 {
     GaussianPeak mSecondPeak;
@@ -725,16 +770,21 @@ void HistogramDialog::autoRange(bool refresh)
     }
 
     GaussianPeak gp = findMostGaussianPeakBins(s, binA, binB);
-    //qDebug() << "peakBin" << gp.peakBin << "muBin" << gp.muBin << "sigmaBin" << gp.sigmaBin << "error" << gp.error;
+    GaussianPeak rightPeak = findRightmostMeaningfulPeakBins(s, binA, binB, gmax);
+
+
+    //qDebug() << "GP peakBin" << gp.peakBin << "muBin" << gp.muBin << "sigmaBin" << gp.sigmaBin << "error" << gp.error;
+    //qDebug() << "RightPeak peakBin" << rightPeak.peakBin << "muBin" << rightPeak.muBin << "sigmaBin" << rightPeak.sigmaBin << "error" << rightPeak.error;
+    if (rightPeak.peakBin >= 0 &&
+        (gp.peakBin < 0 || rightPeak.peakBin > gp.peakBin + int(HistScale / 16)))
+    {
+        gp = rightPeak;
+    }
     if (gp.peakBin < 0 || gp.sigmaBin <= 0.0)
     {
         setRange(binA, binB, true);
         return;
     }
-
-    //for (int i = binA - 1; i < binB + 1; ++i) {
-    //    qDebug() << " i " << i << " axis " << axisFromData(i) << " s " << s[i];
-    //}
 
     // === 2. Левая граница: как раньше (впадина или перегиб) ===
     PeakInfo P = analyzePeak(s, gp.peakBin);

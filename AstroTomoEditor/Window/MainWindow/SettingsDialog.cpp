@@ -104,7 +104,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, bool mainstate)
             });
 
         // --- Render: Sampling factor (quality/speed)
-        lblSampling = new QLabel(QObject::tr("Sampling:"), content);
+        lblSampling = new QLabel(QObject::tr("Quality/Speed:"), content);
         lblSampling->setProperty("role", "label");
 
         // справа текст: 0.35
@@ -115,7 +115,7 @@ SettingsDialog::SettingsDialog(QWidget* parent, bool mainstate)
 
         // сам слайдер
         mSampling = new QSlider(Qt::Horizontal, content);
-        mSampling->setRange(5, 1000);     // 0.05..10.00
+        mSampling->setRange(50, 1000);     // 0.5..10.00
         mSampling->setSingleStep(1);
         mSampling->setPageStep(5);
 
@@ -305,7 +305,7 @@ void SettingsDialog::retranslateUi()
         lblLang->setText(tr("Language:"));
 
     if (lblSampling)
-        lblSampling->setText(tr("Sampling:"));
+        lblSampling->setText(tr("Quality/Speed:"));
 
     if (mLangCombo)
     {
