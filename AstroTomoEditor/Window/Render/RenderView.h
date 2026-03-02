@@ -73,9 +73,12 @@ public:
 
     enum class VolumeInterpolation { Nearest = 0, Linear = 1 };
 
+    void updateSamplingFromImage();
     void setGradientOpacityEnabled(bool on);
     void setVolumeInterpolation(VolumeInterpolation m);
     void saveTemplates(QString savedir);
+    void setSamplingFactor(double f);
+    double samplingFactor() const { return mSamplingFactor; }
 
 signals:
     void renderStarted();
@@ -85,6 +88,7 @@ signals:
     void showInfo(const QString& text);
     void showWarning(const QString& text);
     void gradientOpacityChanged(bool on);
+    void samplingFactorChanged(double f);
 
 protected:
     void resizeEvent(QResizeEvent* e) override;
@@ -247,10 +251,14 @@ private:
     void addStlPreview();
     void clearStlPreview();
     void updateStlSizeLabel();
+    QString defaultStlDirectory() const;
+    QString defaultStlFileName() const;
 
     bool mGradientOpacityOn = false;
     void updateGradientOpacity();
     
+    TemplateId mLastTemplateForStl{ TemplateId::Count };
+
     void retranslateUi();
     void reloadToolsMenu();
     void reloadAppsMenu();
@@ -260,6 +268,9 @@ private:
     void loadRenderSettings();
     void saveRenderSettings();
     VolumeInterpolation mInterpolation = VolumeInterpolation::Nearest;
+
+    double mSamplingFactor = 0.35; // дефолт
+    static constexpr const char* kSamplingFactorKey = "Render/SamplingFactor";
 };
 
 static constexpr double kMB = 1024.0 * 1024.0;

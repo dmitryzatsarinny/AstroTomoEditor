@@ -33,6 +33,7 @@ struct DicomInfo
     QString Sequence = "Null";
     QString SeriesNumber = "0";
     QString DicomPath = "C:\\";
+    QString DicomDirPath = "C:\\";
 
     double VolumeOriginX{ 0.0 };
     double VolumeOriginY{ 0.0 };

@@ -8,10 +8,13 @@
 #include <Services/AppConfig.h>
 #include <QCheckBox>
 #include <Services/TooltipsFilter.h>
+#include <algorithm>
+#include <cmath>
 
 static constexpr const char* kLangKey = "ui/language"; // "ru" / "en"
 static constexpr const char* kGradOpacityKey = "render/gradientOpacity";
 static constexpr const char* kInterpKey = "render/volumeInterpolation"; // 0 nearest, 1 linear
+static constexpr const char* kSamplingKey = "render/samplingFactor";
 
 SettingsDialog::SettingsDialog(QWidget* parent, bool mainstate)
     : DialogShell(parent, QObject::tr("Settings"), WindowType::Settings)
@@ -100,6 +103,40 @@ SettingsDialog::SettingsDialog(QWidget* parent, bool mainstate)
                 enableGradientOpacity(on);
             });
 
+        // --- Render: Sampling factor (quality/speed)
+        lblSampling = new QLabel(QObject::tr("Sampling:"), content);
+        lblSampling->setProperty("role", "label");
+
+        // справа текст: 0.35
+        mSamplingVal = new QLabel(content);
+        mSamplingVal->setMinimumWidth(52);
+        mSamplingVal->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        mSamplingVal->setText("0.35");
+
+        // сам слайдер
+        mSampling = new QSlider(Qt::Horizontal, content);
+        mSampling->setRange(5, 1000);     // 0.05..10.00
+        mSampling->setSingleStep(1);
+        mSampling->setPageStep(5);
+
+        // маленький layout: [slider][value]
+        auto* samplingRow = new QWidget(content);
+        auto* samplingLay = new QHBoxLayout(samplingRow);
+        samplingLay->setContentsMargins(0, 0, 0, 0);
+        samplingLay->setSpacing(10);
+        samplingLay->addWidget(mSampling, 1);
+        samplingLay->addWidget(mSamplingVal, 0);
+
+        mForm->addRow(lblSampling, samplingRow);
+
+        connect(mSampling, &QSlider::valueChanged, this, [this](int v)
+            {
+                const double f = v / 100.0;
+                updateSamplingFactorLabel(f);
+                saveSamplingFactor(f);
+                emit samplingFactorChanged(f);
+            });
+
         QSize targetSize = mSize;
         targetSize.setHeight(targetSize.height() + 90);
         targetSize.setWidth(targetSize.width() + 90);
@@ -135,6 +172,21 @@ SettingsDialog::SettingsDialog(QWidget* parent, bool mainstate)
         "  border:1px solid rgba(255,255,255,0.8);"
         "  border-radius:5px;"
         "}"
+        "QSlider::groove:horizontal {"
+        "  height:6px;"
+        "  background:rgba(255,255,255,0.14);"
+        "  border-radius:3px;"
+        "}"
+        "QSlider::handle:horizontal {"
+        "  width:14px;"
+        "  margin:-5px 0;"
+        "  border-radius:7px;"
+        "  background:rgba(255,255,255,0.75);"
+        "  border:1px solid rgba(0,0,0,0.25);"
+        "}"
+        "QSlider::handle:horizontal:hover {"
+        "  background:rgba(255,255,255,0.85);"
+        "}"
     );
 
     loadSettings();
@@ -169,8 +221,34 @@ void SettingsDialog::loadSettings()
         if (ii >= 0)
             mInterpolationCombo->setCurrentIndex(ii);
     }
+
+    const double sampling = s.value(kSamplingKey, 0.35).toDouble();
+    syncSamplingFactorUi(sampling);
 }
 
+void SettingsDialog::saveSamplingFactor(double f)
+{
+    f = std::clamp(f, 0.05, 2.0);
+    QSettings s;
+    s.setValue(kSamplingKey, f);
+}
+
+void SettingsDialog::syncSamplingFactorUi(double f)
+{
+    if (!mSampling || !mSamplingVal) return;
+
+    f = std::clamp(f, 0.05, 2.0);
+
+    QSignalBlocker b(mSampling);
+    mSampling->setValue(int(std::lround(f * 100.0)));
+    updateSamplingFactorLabel(f);
+}
+
+void SettingsDialog::updateSamplingFactorLabel(double f)
+{
+    if (!mSamplingVal) return;
+    mSamplingVal->setText(QString::number(f, 'f', 2));
+}
 
 void SettingsDialog::saveLanguage(const QString& code)
 {
@@ -225,6 +303,9 @@ void SettingsDialog::retranslateUi()
 
     if (lblLang)
         lblLang->setText(tr("Language:"));
+
+    if (lblSampling)
+        lblSampling->setText(tr("Sampling:"));
 
     if (mLangCombo)
     {

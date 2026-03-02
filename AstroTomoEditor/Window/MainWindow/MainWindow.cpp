@@ -219,6 +219,13 @@ void MainWindow::buildUi()
                 : RenderView::VolumeInterpolation::Nearest);
         });
 
+    connect(mSettingsDlg, &SettingsDialog::samplingFactorChanged,
+        this, [this](double f)
+        {
+            if (!mRenderView) return;
+            mRenderView->setSamplingFactor(f);
+        });
+
     retranslateUi(true);
     connect(&LanguageManager::instance(), &LanguageManager::languageChanged,
         this, [this] { retranslateUi(false); });
@@ -877,6 +884,7 @@ void MainWindow::onShowVolume3D()
         return;
     }
 
+    mCurrentPatient.DicomDirPath = mDicomPath;
     mRenderView->setVolume(vtkVol, mPlanar->GetDicomInfo(), mCurrentPatient);
     mViewerStack->setCurrentWidget(mRenderView);
 

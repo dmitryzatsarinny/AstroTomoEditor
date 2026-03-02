@@ -59,15 +59,17 @@ ToolsRemoveConnected::ToolsRemoveConnected(QWidget* hostParent)
 void ToolsRemoveConnected::attach(QVTKOpenGLNativeWidget* vtk,
     vtkRenderer* renderer,
     vtkImageData* image,
-    vtkVolume* volume)
+    vtkVolume* volume,
+    double HistLo,
+    double HistHi)
 {
     m_vtk = vtk;
     m_renderer = renderer;
     m_image = image;
     m_volume = volume;
 
-    mHistLo = HistMin;
-    mHistHi = HistMax;
+    mHistLo = HistLo;
+    mHistHi = HistHi;
 
     rebuildVisibilityLUT();
     onViewResized();
@@ -174,9 +176,10 @@ void ToolsRemoveConnected::rebuildVisibilityLUT()
     mLutBins = bins;
     mVisibleLut.assign(bins, 0);
 
-    for (int v = lo; v <= hi; ++v) {
+    for (int v = lo; v <= hi; ++v) 
+    {
         const double op = pwf->GetValue(static_cast<double>(v));
-        mVisibleLut[v - lo] = (op > mVisibleEps) ? 1 : 0;
+        mVisibleLut[v - lo] = (op > 0) ? 1 : 0;
     }
 }
 
@@ -550,68 +553,6 @@ void ToolsRemoveConnected::updateHover(const QPoint& pDevice)
         if (m_overlay) m_overlay->setCursor(Qt::ForbiddenCursor);
     }
 }
-
-//vtkImageData* ToolsRemoveConnected::ClearImage(
-//    QVTKOpenGLNativeWidget* vtk,
-//    vtkRenderer* renderer,
-//    vtkImageData* image,
-//    vtkVolume* volume)
-//{
-//    m_vtk = vtk;
-//    m_renderer = renderer;
-//    m_image = image;
-//    m_volume = volume;
-//
-//    if (!m_vtk || !m_renderer || !m_volume || !m_image)
-//        return nullptr;
-//
-//    // актуальные границы гист окна (если у тебя они где-то выставляются извне - ок)
-//    mHistLo = HistMin;
-//    mHistHi = HistMax;
-//
-//    // 1) пересобираем LUT видимости под текущую opacity-функцию
-//    rebuildVisibilityLUT();
-//
-//    // 2) делаем копию тома в m_vol
-//    m_vol.clear();
-//    m_vol.copy(m_image);
-//
-//    if (!m_vol.u8().valid || !m_vol.raw())
-//        return nullptr;
-//
-//    // 3) строим бинарную маску "видимое"
-//    m_bin.clear();
-//    makeBinaryMask(m_vol.raw());
-//
-//    // если видимого вообще нет - просто обнулим всё (или вернём как есть - на твой вкус)
-//    if (CountNonZero(m_bin) == 0)
-//    {
-//        const size_t total = m_vol.u8().size();
-//        for (size_t n = 0; n < total; ++n)
-//            m_vol.at(n) = 0u;
-//
-//        m_vol.raw()->Modified();
-//        if (m_onImageReplaced) m_onImageReplaced(m_vol.raw());
-//        if (m_vtk && m_vtk->renderWindow()) m_vtk->renderWindow()->Render();
-//        return m_vol.raw();
-//    }
-//
-//    // 4) чистим: всё, что НЕ видно - в ноль
-//    const size_t total = m_vol.u8().size();
-//    for (size_t n = 0; n < total; ++n)
-//    {
-//        if (!m_bin.at(n))
-//            m_vol.at(n) = 0u;
-//    }
-//
-//    // 5) финализация
-//    m_vol.raw()->Modified();
-//    if (m_onImageReplaced) m_onImageReplaced(m_vol.raw());
-//    if (m_vtk && m_vtk->renderWindow()) m_vtk->renderWindow()->Render();
-//
-//    return m_vol.raw();
-//}
-
 
 void ToolsRemoveConnected::start(Action a, HoverMode hm)
 {
@@ -1344,7 +1285,7 @@ void ToolsRemoveConnected::RemoveConnectedRegions(const std::vector<uint8_t>& ma
         return;
 
     for (size_t n = 0; n < total; ++n)
-        if (!newmark[n])
+        if (!newmark[n] )
             volNew.at(n) = 0u;
 
     if (steps == 1)
@@ -1396,6 +1337,27 @@ void ToolsRemoveConnected::SmartDeleting(const int seedIn[3])
     m_vol = volNew;
 }
 
+void ToolsRemoveConnected::applyThreshold3D(vtkImageData* image, double threshold)
+{
+    if (!image) return;
+
+    int ext[6];
+    image->GetExtent(ext);
+
+    for (int k = ext[4]; k <= ext[5]; ++k)
+        for (int j = ext[2]; j <= ext[3]; ++j)
+            for (int i = ext[0]; i <= ext[1]; ++i)
+            {
+                auto* p = static_cast<unsigned char*>(image->GetScalarPointer(i, j, k));
+                if (!p) continue;
+
+                if (double(*p) < threshold)
+                    *p = 0u;
+            }
+
+    image->Modified();
+}
+
 // ---- ядро ----
 void ToolsRemoveConnected::makeBinaryMask(vtkImageData* image)
 {
@@ -1404,17 +1366,12 @@ void ToolsRemoveConnected::makeBinaryMask(vtkImageData* image)
             if (v <= 0u)
                 return 0u;
 
-            if (mVisibleLut.empty() || mLutBins <= 0)
+            if (mVisibleLut.empty() || mLutBins < 255 || v >= 255u)
                 return 1u;
 
-            const int idx = int(v) - int(mLutMin);
-            if (idx < 0 || idx >= int(mVisibleLut.size()))
-                return 0u;
-
-            return mVisibleLut[size_t(idx)];
+            return mVisibleLut[v];
         });
 }
-
 
 double ToolsRemoveConnected::ClearingVolume(Volume& vol,
     const int seedIn[3],
@@ -3727,8 +3684,10 @@ void ToolsRemoveConnected::applyKeepOnlySelected(const std::vector<uint8_t>& mar
 
     for (size_t n = 0; n < total; ++n)
     {
-        if (!mark[n])               // если маска 0 → обнуляем воксель
+        if (!mark[n])
             m_vol.at(n) = 0u;
+        //if (!mark[n] && m_bin.at(n))
+        //    m_vol.at(n) = 0u;
     }
 }
 

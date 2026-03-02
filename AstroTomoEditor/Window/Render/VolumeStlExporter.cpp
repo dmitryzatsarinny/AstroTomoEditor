@@ -646,8 +646,43 @@ namespace
     }
 }
 
+static inline void ClampBBoxToExtent(int b[6], const int ext[6])
+{
+    b[0] = std::max(b[0], ext[0]);
+    b[1] = std::min(b[1], ext[1]);
+    b[2] = std::max(b[2], ext[2]);
+    b[3] = std::min(b[3], ext[3]);
+    b[4] = std::max(b[4], ext[4]);
+    b[5] = std::min(b[5], ext[5]);
+}
+
+static inline void ExpandBBoxByVoxels(int b[6], int m)
+{
+    b[0] -= m; b[1] += m;
+    b[2] -= m; b[3] += m;
+    b[4] -= m; b[5] += m;
+}
+
+static inline void ExpandBBoxByPercent(int b[6], double percent /*0.10 = 10%*/)
+{
+    const int sx = b[1] - b[0] + 1;
+    const int sy = b[3] - b[2] + 1;
+    const int sz = b[5] - b[4] + 1;
+
+    // расширяем симметрично, минимум 1 воксель, чтобы эффект был
+    const int dx = std::max(1, int(std::ceil(sx * percent)));
+    const int dy = std::max(1, int(std::ceil(sy * percent)));
+    const int dz = std::max(1, int(std::ceil(sz * percent)));
+
+    b[0] -= dx; b[1] += dx;
+    b[2] -= dy; b[3] += dy;
+    b[4] -= dz; b[5] += dz;
+}
+
 #include <vtkReverseSense.h>
 #include <vtkMassProperties.h>
+#include <vtkImageTranslateExtent.h>
+#include <vtkImageChangeInformation.h>
 
 
 vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
@@ -707,8 +742,14 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         return nullptr;
     }
 
-    constexpr int ROI_MARGIN = 5;
-    ExpandClampBBox(bbox, ext, ROI_MARGIN);
+    constexpr double ROI_PERCENT = 0.10;
+    constexpr int    ROI_MARGIN = 5;
+
+    ExpandBBoxByPercent(bbox, ROI_PERCENT);
+    ExpandBBoxByVoxels(bbox, ROI_MARGIN);
+    ClampBBoxToExtent(bbox, ext);
+
+    if (bbox[0] > bbox[1] || bbox[2] > bbox[3] || bbox[4] > bbox[5]) return nullptr;
 
     qDebug() << "[STL] input extent"
         << ext[0] << ext[1] << ext[2] << ext[3] << ext[4] << ext[5];
@@ -765,11 +806,36 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     );
     pad->Update();
     if (opt.progress) opt.progress(25, tr("Padding"));
+
+    // --- НОРМАЛИЗАЦИЯ EXTENT В 0-БАЗУ ---
+    int ePadPad[6];
+    pad->GetOutput()->GetExtent(ePadPad);
+
+    vtkNew<vtkImageTranslateExtent> shiftExt;
+    shiftExt->SetInputConnection(pad->GetOutputPort());
+    shiftExt->SetTranslation(-ePadPad[0], -ePadPad[2], -ePadPad[4]);
+    shiftExt->Update();
+
+    // поправим origin, чтобы физика осталась та же
+    double o[3], s[3];
+    pad->GetOutput()->GetOrigin(o);
+    pad->GetOutput()->GetSpacing(s);
+
+    double o2[3] = {
+        o[0] + double(ePadPad[0]) * s[0],
+        o[1] + double(ePadPad[2]) * s[1],
+        o[2] + double(ePadPad[4]) * s[2]
+    };
+
+    vtkNew<vtkImageChangeInformation> padded0;
+    padded0->SetInputConnection(shiftExt->GetOutputPort());
+    padded0->SetOutputOrigin(o2);
+    padded0->Update();
     // =========================================================
     // Diagnostics + mode selection
     // =========================================================
     int ePad[6];
-    pad->GetOutput()->GetExtent(ePad);
+    padded0->GetOutput()->GetExtent(ePad);
 
     int nx = 0, ny = 0, nz = 0;
     extentToDims(ePad, nx, ny, nz);
@@ -777,7 +843,7 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     const quint64 vox = quint64(nx) * quint64(ny) * quint64(nz);
 
     double spPad[3];
-    pad->GetOutput()->GetSpacing(spPad);
+    padded0->GetOutput()->GetSpacing(spPad);
 
     qDebug() << "[STL] padded extent"
         << ePad[0] << ePad[1] << ePad[2] << ePad[3] << ePad[4] << ePad[5];
@@ -807,7 +873,7 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         if (opt.progress) opt.progress(35, tr("Fast surface"));
 
         vtkNew<vtkFlyingEdges3D> fe;
-        fe->SetInputConnection(pad->GetOutputPort());
+        fe->SetInputConnection(padded0->GetOutputPort());
         fe->SetValue(0, 0.5);
         fe->ComputeNormalsOff();
         fe->ComputeGradientsOff();
@@ -861,7 +927,7 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     // SDF PATH
     // =========================================================
 
-    vtkAlgorithmOutput* sdfMaskU8 = pad->GetOutputPort();
+    vtkAlgorithmOutput* sdfMaskU8 = padded0->GetOutputPort();
 
     vtkNew<vtkExtractVOI> shrinkVoi;
     int shrinkFactor = 1;
@@ -873,9 +939,9 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         qDebug() << "[STL] shrinkFactor" << shrinkFactor;
 
         int ePad2[6];
-        pad->GetOutput()->GetExtent(ePad2);
+        padded0->GetOutput()->GetExtent(ePad2);
 
-        shrinkVoi->SetInputConnection(pad->GetOutputPort());
+        shrinkVoi->SetInputConnection(padded0->GetOutputPort());
         shrinkVoi->SetVOI(ePad2);
         shrinkVoi->SetSampleRate(shrinkFactor, shrinkFactor, shrinkFactor);
         shrinkVoi->Update();
@@ -969,7 +1035,7 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
 
     double spS[3];
     if (usedShrink) shrinkVoi->GetOutput()->GetSpacing(spS);
-    else           pad->GetOutput()->GetSpacing(spS);
+    else           padded0->GetOutput()->GetSpacing(spS);
 
     double sigmaXY = 0.9;     // было 0.8
     double sigmaZ = 1.4;     // усилить вдоль срезов
@@ -1012,8 +1078,8 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     }
     else
     {
-        pad->GetOutput()->GetBounds(b);
-        pad->GetOutput()->GetSpacing(sp2);
+        padded0->GetOutput()->GetBounds(b);
+        padded0->GetOutput()->GetSpacing(sp2);
     }
 
     const double mX = 2.0 * sp2[0];

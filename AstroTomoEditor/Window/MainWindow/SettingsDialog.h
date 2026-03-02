@@ -5,6 +5,7 @@
 #include <QEvent>
 #include "TitleBar.h"
 #include <qmessagebox.h>
+#include <QSlider>
 
 class QLabel;
 class QFormLayout;
@@ -28,6 +29,7 @@ signals:
     void languageChanged(const QString& code);
     void gradientOpacityChanged(bool on);
     void volumeInterpolationChanged(int mode); // 0 nearest, 1 linear
+    void samplingFactorChanged(double f);
 
 private:
     void saveLanguage(const QString& code);
@@ -36,6 +38,9 @@ private:
     void loadSettings();
     void saveGradientOpacity(bool on);
     void saveVolumeInterpolation(int mode);
+    void saveSamplingFactor(double f);
+    void syncSamplingFactorUi(double f);
+    void updateSamplingFactorLabel(double f);
 
 private:
 
@@ -53,5 +58,9 @@ private:
     QLabel* lblInterpolation = nullptr;
     FixedDownComboBox* mInterpolationCombo = nullptr;
 
-    const QSize mSize{ 420, 140 };
+    QLabel* lblSampling = nullptr;
+    QSlider* mSampling = nullptr;
+    QLabel* mSamplingVal = nullptr;
+
+    const QSize mSize{ 420, 180 };
 };

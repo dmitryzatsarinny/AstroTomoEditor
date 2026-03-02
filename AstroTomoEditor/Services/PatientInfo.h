@@ -27,6 +27,7 @@ struct PatientInfo
 
 	QString DicomPath;
 	QString SeriesNumber;
+	QString DicomDirPath;
 
 	double patientPosX;
 	double patientPosY;

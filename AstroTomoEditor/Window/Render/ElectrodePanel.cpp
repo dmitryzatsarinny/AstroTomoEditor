@@ -1060,30 +1060,9 @@ void ElectrodePanel::updateMarker(ElectrodeId id,
     // размер сферы
     const double r = 10.0 * smin;
 
-    // 1) СФЕРА: хотим, чтобы поверхность шара была на поверхности модели,
-    // поэтому центр утапливаем внутрь по направлению от камеры.
-    double nCam[3]{ 0,0,1 };
-    if (auto* cam = (mPick.renderer ? mPick.renderer->GetActiveCamera() : nullptr))
-    {
-        double cpos[3]{};
-        cam->GetPosition(cpos);
 
-        double v[3]{ cpos[0] - w[0], cpos[1] - w[1], cpos[2] - w[2] };
-        const double L = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
-        if (L > 1e-9) { nCam[0] = v[0] / L; nCam[1] = v[1] / L; nCam[2] = v[2] / L; }
-    }
 
-    // коэффициент утопления: 1.0 = ровно на радиус (верх шара примерно в точке w)
-    // 0.8..1.1 подбирай по ощущению
-    const double sink = 0.95;
-
-    const double c[3]{
-        w[0] - nCam[0] * (r * sink),
-        w[1] - nCam[1] * (r * sink),
-        w[2] - nCam[2] * (r * sink)
-    };
-
-    it->sphere->SetCenter(c[0], c[1], c[2]);
+    it->sphere->SetCenter(w[0], w[1], w[2]);
     it->sphere->SetRadius(r);
     it->sphere->Modified();
 

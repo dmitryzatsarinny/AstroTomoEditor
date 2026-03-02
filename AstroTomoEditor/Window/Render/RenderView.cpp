@@ -38,6 +38,8 @@
 #include <vtkFlyingEdges3D.h>
 #include "..\..\Services\LanguageManager.h"
 #include <QSettings>
+#include <QDir>
+#include <QFileInfo>
 #include <QStandardPaths>
 #include <Window/ServiceWindow/ShellFileDialog.h>
 
@@ -957,6 +959,8 @@ void RenderView::onTemplateCapture(TemplateId id)
 {
     if (!mTemplateDlg) return;
 
+    qDebug() << (int)mLastTemplateForStl;
+
     Volume m_vol;
     m_vol.clear();
     m_vol.copy(mImage);
@@ -965,9 +969,49 @@ void RenderView::onTemplateCapture(TemplateId id)
     mTemplateDlg->setCaptured(id, m_vol);
 }
 
+QString RenderView::defaultStlDirectory() const
+{
+    const QString dicomDir = DI.DicomDirPath.trimmed();
+    if (!dicomDir.isEmpty() && QDir(dicomDir).exists())
+        return QDir(dicomDir).filePath("chamber0");
+
+    QSettings s;
+    return s.value(
+        "Paths/LastStlDir",
+        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+    ).toString();
+}
+
+QString RenderView::defaultStlFileName() const
+{
+    switch (mLastTemplateForStl)
+    {
+    case TemplateId::LA:
+    case TemplateId::LA_Endo:
+        qDebug() << "heart0.stl";
+        return "heart0.stl";
+    case TemplateId::LV:
+    case TemplateId::LV_Endo:
+        qDebug() << "heart1.stl";
+        return "heart1.stl";
+    case TemplateId::RA:
+    case TemplateId::RA_Endo:
+        qDebug() << "heart2.stl";
+        return "heart2.stl";
+    case TemplateId::RV:
+    case TemplateId::RV_Endo:
+        qDebug() << "heart3.stl";
+        return "heart3.stl";
+    default:
+        return "tors.stl";
+    }
+}
+
 void RenderView::onTemplateSetVisible(TemplateId id, bool on)
 {
     if (!mTemplateDlg) return;
+
+    mLastTemplateForStl = id;
 
     const auto* s = mTemplateDlg->slot(id);
     if (!s || !s->hasData()) return;
@@ -1149,7 +1193,12 @@ vtkSmartPointer<vtkImageData> RenderView::cloneImage(vtkImageData* src)
 
 void RenderView::setMapperInput(vtkImageData* im)
 {
-    if (!mVolume || !mVolume->GetMapper()) return;
+    if (!im || !mVolume || !mVolume->GetMapper())
+        return;
+
+    if (auto* sc = im->GetPointData() ? im->GetPointData()->GetScalars() : nullptr)
+        sc->Modified();
+    im->Modified();
 
     if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mVolume->GetMapper()))
         gm->SetInputData(im);
@@ -1222,10 +1271,12 @@ void RenderView::updateAfterImageChange(bool reattachTools)
 {
     if (mVolume && mVolume->GetProperty())
     {
+        updateSamplingFromImage();
+
         if (mInterpolation == VolumeInterpolation::Linear)
             mVolume->GetProperty()->SetInterpolationTypeToLinear();
         else
-            mVolume->GetProperty()->SetInterpolationTypeToNearest();
+            mVolume->GetProperty()->SetInterpolationTypeToNearest(); 
     }
 
     setMapperInput(mImage);
@@ -1233,7 +1284,7 @@ void RenderView::updateAfterImageChange(bool reattachTools)
     if (reattachTools)
     {
         if (mRemoveConn)
-            mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+            mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
         if (mScissors)
             mScissors->attach(mVtk, mRenderer, mImage, mVolume);
     }
@@ -1354,7 +1405,7 @@ bool RenderView::ToolModeChanged(Action a)
         a == Action::PeelRecovery))
     {
         setToolUiActive(true, a);
-        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
         mRemoveConn->handle(a);
         return true;
     }
@@ -1370,7 +1421,7 @@ bool RenderView::ToolModeChanged(Action a)
         setViewPreset(ViewPreset::AP);
         centerOnVolume();
         setToolUiActive(true, a);
-        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+        mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
         mRemoveConn->handle(a);
         captureElectrodesTemplateFromCurrentVolume();
         return true;
@@ -1770,23 +1821,22 @@ void RenderView::onSaveBuiltStl()
     }
 
     QSettings s;
-    const QString defDir = s.value(
-        "Paths/LastStlDir",
-        QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-    ).toString();
+    const QString defDir = defaultStlDirectory();
+    const QString defPath = QDir(defDir).filePath(defaultStlFileName());
+    qDebug() << defPath;
 
     ShellFileDialog shell(this,
         QObject::tr("Save STL"),
         ServiceWindow,
-        QDir(defDir).filePath("mesh.stl"),
+        defPath,
         QObject::tr("STL binary (*.stl)")
     );
 
     auto* dlg = shell.fileDialog();
     dlg->setAcceptMode(QFileDialog::AcceptSave);
     dlg->setFileMode(QFileDialog::AnyFile);
-    dlg->setOption(QFileDialog::ShowDirsOnly, true);
-    dlg->setFilter(QDir::AllDirs | QDir::Drives | QDir::NoDotAndDotDot);
+    dlg->setOption(QFileDialog::ShowDirsOnly, false);
+    dlg->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);
     dlg->setDefaultSuffix("stl");
     dlg->setOption(QFileDialog::DontConfirmOverwrite, true);
 
@@ -1804,6 +1854,13 @@ void RenderView::onSaveBuiltStl()
     while (path.endsWith('.')) path.chop(1);
     if (!path.endsWith(".stl", Qt::CaseInsensitive))
         path += ".stl";
+
+    const QFileInfo outInfo(path);
+    const QString outPath = outInfo.absolutePath();
+    if (!QDir(outPath).exists() && !QDir().mkpath(outPath)) {
+        emit showWarning(tr("Save failed"));
+        return;
+    }
 
     s.setValue("Paths/LastStlDir", QFileInfo(path).absolutePath());
 
@@ -2186,9 +2243,11 @@ void RenderView::updateGradientOpacity()
     else 
     {
         auto gtf = vtkSmartPointer<vtkPiecewiseFunction>::New();
-        gtf->AddPoint(0, 1.0);
-        gtf->AddPoint(255, 1.0);
-        prop->SetGradientOpacity(gtf);
+        gtf->AddPoint(0.0, 0.0);
+        gtf->AddPoint(0.5, 0.0);
+        gtf->AddPoint(1.0, 0.02);
+        gtf->AddPoint(255.0, 0.8);
+        prop->SetDisableGradientOpacity(true);
     }
 
     if (auto* rw = mVtk->renderWindow())
@@ -2309,12 +2368,22 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
 
     DI = Dicom;
 
+    double sp[3]{ 1,1,1 };
+    image->GetSpacing(sp);
+    DI.mSpX = sp[0];
+    DI.mSpY = sp[1];
+    DI.mSpZ = sp[2];
+    const double factor = std::clamp(mSamplingFactor, 0.05, 10.0);
+
     // 2) настраиваем mapper/prop
     auto mapper = vtkSmartPointer<vtkGPUVolumeRayCastMapper>::New();
     mapper->SetInputData(image);
     mapper->SetBlendModeToComposite();
-    mapper->SetAutoAdjustSampleDistances(true);
+    mapper->SetAutoAdjustSampleDistances(false);
+    const double smin = std::min({ sp[0], sp[1], sp[2] });
+    mapper->SetSampleDistance(std::max(1 * smin, 0.05));
     mapper->SetUseJittering(true);
+
 
     auto ctf = vtkSmartPointer<vtkColorTransferFunction>::New();
     ctf->AddRGBPoint(HistMin, 0, 0, 0);
@@ -2322,29 +2391,27 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     ctf->SetColorSpaceToLab();
 
     auto otf = vtkSmartPointer<vtkPiecewiseFunction>::New();
-    otf->AddPoint(HistMin, 0.00);
-    otf->AddPoint(HistMax, 0.80);
+    otf->AddPoint(0.0, 0.0);
+    otf->AddPoint(0.5, 0.0);
+    otf->AddPoint(1.0, 0.02);
+    otf->AddPoint(255.0, 0.8);
 
     auto prop = vtkSmartPointer<vtkVolumeProperty>::New();
     prop->SetIndependentComponents(true);
     prop->SetColor(0, ctf);
     prop->SetScalarOpacity(0, otf);
     prop->ShadeOn();
-    prop->SetAmbient(0.05);
-    prop->SetDiffuse(0.9);
-    prop->SetSpecular(0.1);
+    prop->SetAmbient(0.15);
+    prop->SetDiffuse(0.85);
+    prop->SetSpecular(0.08);
+    prop->SetSpecularPower(20.0);
     if (mInterpolation == VolumeInterpolation::Linear)
         prop->SetInterpolationTypeToLinear();
     else
         prop->SetInterpolationTypeToNearest();
     
-    double sp[3]{ 1,1,1 };
-    image->GetSpacing(sp);
-    DI.mSpX = sp[0];
-    DI.mSpY = sp[1];
-    DI.mSpZ = sp[2];
-    const double smin = std::min({ sp[0],sp[1],sp[2] });
-    prop->SetScalarOpacityUnitDistance(std::max(0.3 * smin, 1e-3));
+
+    prop->SetScalarOpacityUnitDistance(std::max(1 * smin, 1e-3));
     pump(40);
 
 
@@ -2357,7 +2424,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     vol->SetMapper(mapper);
     vol->SetProperty(prop);
 
-    mRenderer->RemoveAllViewProps();
+    if (mVolume) mRenderer->RemoveViewProp(mVolume);
     mRenderer->AddVolume(vol);
     mRenderer->ResetCamera();
     pump(58);
@@ -2416,7 +2483,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                     });
                 emit Progress(100);
                 commitNewImage(im);
-                mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+                mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
             });
         mRemoveConn->Unsuccessful([this](vtkImageData* im)
             {
@@ -2424,7 +2491,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                     emit showInfo(tr("Ready"));
                     });
                 emit Progress(100);
-                mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+                mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
             });
         mRemoveConn->setOnFinished([this]() 
             {
@@ -2445,7 +2512,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
             }
         );
     }
-    mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume);
+    mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
 
     mUndoStack.clear();
     mRedoStack.clear();
@@ -2479,7 +2546,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     DI.Sequence = info.Sequence;
     DI.SeriesNumber = info.SeriesNumber;
     DI.DicomPath = info.DicomPath;
-
+    DI.DicomDirPath = info.DicomDirPath;
 
 
     auto sexStr = info.sex.trimmed().toLower();
@@ -2736,21 +2803,6 @@ void RenderView::setGradientOpacityEnabled(bool on)
     emit gradientOpacityChanged(mGradientOpacityOn);
 }
 
-void RenderView::loadRenderSettings()
-{
-    QSettings s;
-    mGradientOpacityOn = s.value(kGradOpacityKey, false).toBool();
-    const int im = s.value(kInterpKey, 0).toInt();
-    mInterpolation = (im == 1) ? VolumeInterpolation::Linear : VolumeInterpolation::Nearest;
-}
-
-void RenderView::saveRenderSettings()
-{
-    QSettings s;
-    s.setValue(kGradOpacityKey, mGradientOpacityOn);
-    s.setValue(kInterpKey, (mInterpolation == VolumeInterpolation::Linear) ? 1 : 0);
-}
-
 void RenderView::setVolumeInterpolation(VolumeInterpolation m)
 {
     mInterpolation = m;
@@ -2860,29 +2912,79 @@ struct ElectrodeOut
     double x, y, z;
 };
 
+void RenderView::loadRenderSettings()
+{
+    QSettings s;
+    mGradientOpacityOn = s.value(kGradOpacityKey, false).toBool();
+    const int im = s.value(kInterpKey, 0).toInt();
+    mInterpolation = (im == 1) ? VolumeInterpolation::Linear : VolumeInterpolation::Nearest;
+
+    mSamplingFactor = s.value(kSamplingFactorKey, 0.35).toDouble();
+    mSamplingFactor = std::clamp(mSamplingFactor, 0.05, 10.0);
+}
+
+void RenderView::saveRenderSettings()
+{
+    QSettings s;
+    s.setValue(kGradOpacityKey, mGradientOpacityOn);
+    s.setValue(kInterpKey, (mInterpolation == VolumeInterpolation::Linear) ? 1 : 0);
+    s.setValue(kSamplingFactorKey, mSamplingFactor);
+}
+
+void RenderView::setSamplingFactor(double f)
+{
+    f = std::clamp(f, 0.05, 10.0);
+    if (std::abs(mSamplingFactor - f) < 1e-9)
+        return;
+
+    mSamplingFactor = f;
+    saveRenderSettings();
+
+    updateSamplingFromImage();
+
+    if (mVtk && mVtk->renderWindow())
+        mVtk->renderWindow()->Render();
+
+    emit samplingFactorChanged(mSamplingFactor);
+}
+
+void RenderView::updateSamplingFromImage()
+{
+    if (!mImage || !mVolume) return;
+
+    double sp[3]{ 1,1,1 };
+    mImage->GetSpacing(sp);
+    const double smin = std::min({ sp[0], sp[1], sp[2] });
+
+    const double factor = std::clamp(mSamplingFactor, 0.05, 10.0);
+    const double sd = std::max(factor * smin, 0.05); // 0.05 чтобы не улететь в ноль
+    const double ud = std::max(factor * smin, 1e-3);
+
+    if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(mVolume->GetMapper())) {
+        gm->SetAutoAdjustSampleDistances(false);
+        gm->SetSampleDistance(sd);
+        gm->SetUseJittering(true);
+        gm->Modified();
+    }
+
+    //if (auto* prop = mVolume->GetProperty()) {
+    //    prop->SetScalarOpacityUnitDistance(ud);
+    //    prop->Modified();
+    //}
+}
+
 void RenderView::onSaveElectrodesCoords()
 {
     if (!mElectrodePanel)
         return;
 
-    const QString dicomDir = DI.DicomPath.trimmed();
-    QString series = DI.SeriesNumber.trimmed();
+    const QString dicomDir = DI.DicomDirPath.trimmed();
     if (dicomDir.isEmpty())
         return;
 
     QDir base(dicomDir);
     if (!base.exists())
         return;
-
-    series = QString("Templates-Series-%1").arg(series);
-
-    QString outDirPath = dicomDir;
-    if (!series.isEmpty())
-        outDirPath = base.filePath(series);
-
-    QDir outDir(outDirPath);
-    if (!outDir.exists())
-        outDir.mkpath(".");
 
     const auto coords = mElectrodePanel->coordsIJK(); // как у тебя сейчас
     const int count = coords.size();
@@ -2918,7 +3020,7 @@ void RenderView::onSaveElectrodesCoords()
             return a.n < b.n;
         });
 
-    const QString filePath = outDir.filePath(fileName);
+    const QString filePath = base.filePath(fileName);
 
     QFile f(filePath);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text))

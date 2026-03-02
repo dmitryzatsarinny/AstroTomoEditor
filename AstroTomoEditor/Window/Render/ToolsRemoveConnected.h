@@ -45,7 +45,9 @@ public:
     void attach(QVTKOpenGLNativeWidget* vtk,
         vtkRenderer* renderer,
         vtkImageData* image,
-        vtkVolume* volume);
+        vtkVolume* volume,
+        double HistLo,
+        double HistHi);
 
     // включить / запретить навигацию под инструментом (если true — колёсико/панорамирование работают)
     void setAllowNavigation(bool on) { m_allowNav = on; }
@@ -99,6 +101,8 @@ private:
     // ядро
     void RecoveryNonVisibleVoxels(Volume& volume);
     void makeBinaryMask(vtkImageData* image);  // uchar 0/1
+    void applyThreshold3D(vtkImageData* image, double threshold);
+    void makeRealBinaryMask(vtkImageData* image);
     bool screenToSeedIJK(const QPoint& pDevice, int ijk[3]) const;
     int  floodFill6(const Volume& bin, const int seed[3], std::vector<uint8_t>& mark) const;
     int floodFill6MultiSeed(const Volume& bin, const std::vector<size_t>& seeds, std::vector<uint8_t>& mark) const;
