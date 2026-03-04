@@ -179,4 +179,6 @@ private:
     void updateMarker(ElectrodeId id, const std::array<double, 3>& w, const std::array<int, 3>& ijk);
     void clearAllElectrodesState();
     bool snapToSurfaceTowardsCamera(const std::array<double, 3>& w0, std::array<int, 3>& inOutIJK, std::array<double, 3>& outW) const;
+    void clearElectrode(ElectrodeId id);
+    bool removeElectrodeAtDisplay(const QPoint& pDevice);
 };

@@ -13,6 +13,7 @@
 #include <QStyleOptionToolButton>
 #include <functional>
 #include <vtkTextProperty.h>
+#include <limits>
 #include <vtkCamera.h>
 #include <vtkProp3D.h>
 #include <cmath>
@@ -246,29 +247,7 @@ void ElectrodePanel::buildUi()
 
             b->onClear = [this, b](ElectrodeId)
                 {
-                    const auto id = b->id();
-
-                    // если вдруг это был текущий pick
-                    if (mPicking && mPickId == id)
-                        endPick();
-
-                    // вернуть вырезание этого электрода (и учесть refcount)
-                    restoreCut(id);
-
-                    mCutByElectrode.remove(id);
-                    mCutCenterIJK.remove(id);
-                    mCutVisible[id] = false;
-
-                    setMarkerVisible(id, false);
-                    mCutCenterWorld.remove(id);
-
-                    // убрать координаты -> крестик исчезнет, состояние пустое
-                    b->setHasCoord(false);
-
-                    mCurrent = ElectrodeId::Count;
-                    b->setChecked(false);
-
-                    emit electrodeClearRequested(id);
+                    clearElectrode(b->id());
                 };
 
 
@@ -464,25 +443,29 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
         if (ev->type() == QEvent::MouseButtonPress)
         {
             auto* me = static_cast<QMouseEvent*>(ev);
+
             if (me->button() == Qt::RightButton)
             {
                 if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
                     return false;
 
-                const double dpr = mPick.vtkWidget->devicePixelRatioF();
-                const int x = int(std::lround(me->pos().x() * dpr));
-                const int yQt = int(std::lround(me->pos().y() * dpr));
-                const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
-                const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
-                const int y = winH - 1 - yQt;
+                //const double dpr = mPick.vtkWidget->devicePixelRatioF();
+                //const int x = int(std::lround(me->pos().x() * dpr));
+                //const int yQt = int(std::lround(me->pos().y() * dpr));
+                //const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+                //const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+                //const int y = winH - 1 - yQt;
 
-                auto& detector = ElectrodeSurfaceDetector::instance();
-                const bool removed = detector.removeSphereAtDisplay(mPick.renderer, x, y, mPick.vtkWidget->renderWindow());
-                if (removed)
-                {
-                    mPick.vtkWidget->renderWindow()->Render();
+                //auto& detector = ElectrodeSurfaceDetector::instance();
+                //const bool removed = detector.removeSphereAtDisplay(mPick.renderer, x, y, mPick.vtkWidget->renderWindow());
+                //if (removed)
+                //{
+                //    mPick.vtkWidget->renderWindow()->Render();
+                //    return true;
+                //}
+
+                if (removeElectrodeAtDisplay(me->pos()))
                     return true;
-                }
 
                 if (!mManualAddEnabled || !(me->modifiers() & Qt::AltModifier))
                     return false;
@@ -557,6 +540,75 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
     return QWidget::eventFilter(obj, ev);
 }
 
+
+void ElectrodePanel::clearElectrode(ElectrodeId id)
+{
+    auto itBtn = mById.find(id);
+    if (itBtn == mById.end())
+        return;
+
+    auto* b = itBtn.value();
+
+    if (mPicking && mPickId == id)
+        endPick();
+
+    restoreCut(id);
+
+    mCutByElectrode.remove(id);
+    mCutCenterIJK.remove(id);
+    mCutVisible[id] = false;
+
+    setMarkerVisible(id, false);
+    mCutCenterWorld.remove(id);
+
+    b->setHasCoord(false);
+
+    mCurrent = ElectrodeId::Count;
+    b->setChecked(false);
+
+    emit electrodeClearRequested(id);
+}
+
+bool ElectrodePanel::removeElectrodeAtDisplay(const QPoint& pDevice)
+{
+    std::array<int, 3> ijk;
+    std::array<double, 3> w;
+    if (!pickAt(pDevice, ijk, w))
+        return false;
+
+    const double sp[3] = { DI.mSpX, DI.mSpY, DI.mSpZ };
+    const double maxSp = std::max({ std::abs(sp[0]), std::abs(sp[1]), std::abs(sp[2]) });
+    const double pickTolMm = std::max(1.5 * maxSp, 2.0);
+    const double pickTol2 = pickTolMm * pickTolMm;
+
+    ElectrodeId toRemove = ElectrodeId::Count;
+    double bestD2 = std::numeric_limits<double>::max();
+
+    for (auto it = mCutCenterWorld.constBegin(); it != mCutCenterWorld.constEnd(); ++it)
+    {
+        const auto id = it.key();
+        if (!hasCoord(id))
+            continue;
+
+        const auto& c = it.value();
+        const double dx = c[0] - w[0];
+        const double dy = c[1] - w[1];
+        const double dz = c[2] - w[2];
+        const double d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 <= pickTol2 && d2 < bestD2)
+        {
+            bestD2 = d2;
+            toRemove = id;
+        }
+    }
+
+    if (toRemove == ElectrodeId::Count)
+        return false;
+
+    clearElectrode(toRemove);
+    requestRender();
+    return true;
+}
 
 void ElectrodePanel::setModeEnabled(bool on)
 {
