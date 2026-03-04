@@ -15,7 +15,6 @@
 #include <vtkProperty.h>
 #include <vtkMath.h>
 #include <vtkRenderWindow.h>
-#include <vtkPropPicker.h>
 
 #include <QDebug>
 
@@ -234,15 +233,20 @@ bool ElectrodeSurfaceDetector::removeSphereAtDisplay(vtkRenderer* ren, int x, in
         return false;
 
     (void)rw;
-    vtkNew<vtkPropPicker> picker;
-    picker->Pick(x, y, 0.0, ren);
-
-    vtkActor* pickedActor = vtkActor::SafeDownCast(picker->GetActor());
-    if (!pickedActor)
+    std::array<double, 3> world{};
+    if (!closestSphereAtDisplay(ren, x, y, 32.0, world))
         return false;
 
     const auto it = std::find_if(actors_.begin(), actors_.end(),
-        [pickedActor](const SphereMarker& a) { return a.actor.GetPointer() == pickedActor; });
+        [&world](const SphereMarker& a)
+        {
+            constexpr double kEps2 = 1e-6;
+            const double dx = a.center[0] - world[0];
+            const double dy = a.center[1] - world[1];
+            const double dz = a.center[2] - world[2];
+            return (dx * dx + dy * dy + dz * dz) <= kEps2;
+        });
+
 
     if (it == actors_.end())
         return false;

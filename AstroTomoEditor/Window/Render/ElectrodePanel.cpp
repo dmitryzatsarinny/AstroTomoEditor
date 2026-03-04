@@ -329,14 +329,14 @@ void ElectrodePanel::buildUi()
     connect(mBtnSave, &QPushButton::clicked, this, &ElectrodePanel::saveRequested);
 
     buttonsRow->addWidget(mBtnAuto, 1);
-    buttonsRow->addWidget(mBtnSave, 2);
+    buttonsRow->addWidget(mBtnSave, 1);
 
     right->addLayout(buttonsRow);
     right->addStretch(1);
 
     auto* rightWrap = new QWidget(this);
     rightWrap->setLayout(right);
-    rightWrap->setFixedWidth(240); 
+    rightWrap->setFixedWidth(400); 
     root->addLayout(grid, 0);
     root->addStretch(1);
     root->addSpacing(280);
@@ -424,18 +424,35 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
         {
             auto* me = static_cast<QMouseEvent*>(ev);
 
+            std::array<int, 3> ijk;
             std::array<double, 3> w;
             double hoverRadiusMm = 0.0;
-            if (closestAnySphereAtDisplay(me->pos(), w, &hoverRadiusMm))
+            double outColourR = 0.0;
+            double outColourG = 0.0;
+            double outColourB = 0.0;
+            if (closestAnySphereAtDisplay(me->pos(), w, &hoverRadiusMm, &outColourR, &outColourG, &outColourB))
             {
                 ensureHoverActor();
                 const double ww[3] = { w[0], w[1], w[2]};
                 setHoverAtWorld(ww);
                 if (hoverRadiusMm > 0.0 && mHoverSphere)
                 {
+                    mHoverActor->GetProperty()->SetColor(outColourR, outColourG, outColourB);
                     mHoverSphere->SetRadius(hoverRadiusMm * 1.12);
                     mHoverSphere->Modified();
                 }
+                setHoverVisible(true);
+            }
+            else if (pickAt(me->pos(), ijk, w))
+            {
+                if (!mPicking)
+                    mHoverActor->GetProperty()->SetColor(1.0, 0.85, 0.2); // “желтый кружок”
+                else
+                    mHoverActor->GetProperty()->SetColor(0.2, 0.9, 0.35); // “зеленый кружок”
+
+                ensureHoverActor();
+                const double ww[3] = { w[0], w[1], w[2] };
+                setHoverAtWorld(ww);
                 setHoverVisible(true);
             }
             else
@@ -474,7 +491,7 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
                 }
 
 
-                if (!mManualAddEnabled || !(me->modifiers() & Qt::AltModifier))
+                if (!mManualAddEnabled/* || !(me->modifiers() & Qt::AltModifier)*/)
                     return false;
 
                 std::array<int, 3> ijk;
@@ -578,15 +595,18 @@ void ElectrodePanel::clearElectrode(ElectrodeId id)
 
 bool ElectrodePanel::removeElectrodeAtDisplay(const QPoint& pDevice)
 {
-    std::array<int, 3> ijk;
-    std::array<double, 3> w;
-    if (!pickAt(pDevice, ijk, w))
+    if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
         return false;
 
-    const double sp[3] = { DI.mSpX, DI.mSpY, DI.mSpZ };
-    const double maxSp = std::max({ std::abs(sp[0]), std::abs(sp[1]), std::abs(sp[2]) });
-    const double pickTolMm = std::max(1.5 * maxSp, 2.0);
-    const double pickTol2 = pickTolMm * pickTolMm;
+    const double dpr = mPick.vtkWidget->devicePixelRatioF();
+    const double x = double(pDevice.x()) * dpr;
+    const double yQt = double(pDevice.y()) * dpr;
+    const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+    const double winH = double(sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+    const double y = winH - 1.0 - yQt;
+
+    constexpr double kPickTolPx = 24.0;
+    const double pickTol2 = kPickTolPx * kPickTolPx;
 
     ElectrodeId toRemove = ElectrodeId::Count;
     double bestD2 = std::numeric_limits<double>::max();
@@ -598,10 +618,14 @@ bool ElectrodePanel::removeElectrodeAtDisplay(const QPoint& pDevice)
             continue;
 
         const auto& c = it.value();
-        const double dx = c[0] - w[0];
-        const double dy = c[1] - w[1];
-        const double dz = c[2] - w[2];
-        const double d2 = dx * dx + dy * dy + dz * dz;
+        mPick.renderer->SetWorldPoint(c[0], c[1], c[2], 1.0);
+        mPick.renderer->WorldToDisplay();
+        double dp[3]{ 0.0, 0.0, 0.0 };
+        mPick.renderer->GetDisplayPoint(dp);
+
+        const double dx = dp[0] - x;
+        const double dy = dp[1] - y;
+        const double d2 = dx * dx + dy * dy;
         if (d2 <= pickTol2 && d2 < bestD2)
         {
             bestD2 = d2;
@@ -619,15 +643,18 @@ bool ElectrodePanel::removeElectrodeAtDisplay(const QPoint& pDevice)
 
 bool ElectrodePanel::closestElectrodeAtDisplay(const QPoint& pDevice, std::array<double, 3>& outWorld) const
 {
-    std::array<int, 3> ijk;
-    std::array<double, 3> w;
-    if (!pickAt(pDevice, ijk, w))
+    if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
         return false;
 
-    const double sp[3] = { DI.mSpX, DI.mSpY, DI.mSpZ };
-    const double maxSp = std::max({ std::abs(sp[0]), std::abs(sp[1]), std::abs(sp[2]) });
-    const double pickTolMm = std::max(1.5 * maxSp, 2.0);
-    const double pickTol2 = pickTolMm * pickTolMm;
+    const double dpr = mPick.vtkWidget->devicePixelRatioF();
+    const double x = double(pDevice.x()) * dpr;
+    const double yQt = double(pDevice.y()) * dpr;
+    const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+    const double winH = double(sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+    const double y = winH - 1.0 - yQt;
+
+    constexpr double kPickTolPx = 24.0;
+    const double pickTol2 = kPickTolPx * kPickTolPx;
 
     bool found = false;
     double bestD2 = std::numeric_limits<double>::max();
@@ -639,10 +666,14 @@ bool ElectrodePanel::closestElectrodeAtDisplay(const QPoint& pDevice, std::array
             continue;
 
         const auto& c = it.value();
-        const double dx = c[0] - w[0];
-        const double dy = c[1] - w[1];
-        const double dz = c[2] - w[2];
-        const double d2 = dx * dx + dy * dy + dz * dz;
+        mPick.renderer->SetWorldPoint(c[0], c[1], c[2], 1.0);
+        mPick.renderer->WorldToDisplay();
+        double dp[3]{ 0.0, 0.0, 0.0 };
+        mPick.renderer->GetDisplayPoint(dp);
+
+        const double dx = dp[0] - x;
+        const double dy = dp[1] - y;
+        const double d2 = dx * dx + dy * dy;
         if (d2 <= pickTol2 && d2 < bestD2)
         {
             bestD2 = d2;
@@ -656,7 +687,7 @@ bool ElectrodePanel::closestElectrodeAtDisplay(const QPoint& pDevice, std::array
 
 bool ElectrodePanel::closestAnySphereAtDisplay(const QPoint& pDevice,
     std::array<double, 3>& outWorld,
-    double* outRadiusMm) const
+    double* outRadiusMm, double* outColourR, double* outColourG, double* outColourB) const
 {
     if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
         return false;
@@ -685,6 +716,13 @@ bool ElectrodePanel::closestAnySphereAtDisplay(const QPoint& pDevice,
             double sp[3]{ 1.0, 1.0, 1.0 };
             mPick.image->GetSpacing(sp);
             bestRadiusMm = 10.0 * std::min({ sp[0], sp[1], sp[2] });
+
+            if (outColourR && outColourG && outColourB)
+            {
+                *outColourR = 0.2;
+                *outColourG = 0.9;
+                *outColourB = 0.35;
+            }
         }
     }
 
@@ -700,6 +738,13 @@ bool ElectrodePanel::closestAnySphereAtDisplay(const QPoint& pDevice,
             bestDistPx = distPx;
             bestWorld = worldDetected;
             bestRadiusMm = radiusMm;
+
+            if (outColourR && outColourG && outColourB)
+            {
+                *outColourR = 1.0;
+                *outColourG = 0.85;
+                *outColourB = 0.2;
+            }
         }
     }
 
@@ -863,6 +908,7 @@ void ElectrodePanel::ensureHoverActor()
     mHoverActor->GetProperty()->SetRepresentationToWireframe();
     mHoverActor->GetProperty()->SetLineWidth(2.0);
     mHoverActor->GetProperty()->SetColor(1.0, 0.85, 0.2); // “желтый кружок”
+
     mHoverActor->SetVisibility(0);
 
     mPick.renderer->AddActor(mHoverActor);

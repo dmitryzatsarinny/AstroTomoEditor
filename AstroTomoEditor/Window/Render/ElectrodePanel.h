@@ -184,5 +184,5 @@ private:
     bool closestElectrodeAtDisplay(const QPoint& pDevice, std::array<double, 3>& outWorld) const;
     bool closestAnySphereAtDisplay(const QPoint& pDevice,
         std::array<double, 3>& outWorld,
-        double* outRadiusMm = nullptr) const;
+        double* outRadiusMm = nullptr, double* outColourR = nullptr, double* outColourG = nullptr, double* outColourB = nullptr) const;
 };
