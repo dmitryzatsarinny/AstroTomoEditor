@@ -3,6 +3,7 @@
 #include <QVector>
 #include <QHash>
 #include <QEvent>
+#include <QPoint>
 #include <QButtonGroup>
 #include <array>
 #include <QVTKOpenGLNativeWidget.h>
@@ -96,6 +97,8 @@ signals:
     void saveRequested(); // сохранить координаты
     void pickCommitted(ElectrodeId id, std::array<int, 3> ijk, std::array<double, 3> world);
     void autoRequested();
+    void surfaceRightClicked(std::array<int, 3> ijk, std::array<double, 3> world);
+    void sceneRightClicked(const QPoint& devicePos);
 
 public slots:
     void beginPick(ElectrodeId id);   // пользователь нажал кнопку электрода

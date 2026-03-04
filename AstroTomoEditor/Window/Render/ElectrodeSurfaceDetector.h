@@ -8,6 +8,7 @@
 class vtkImageData;
 class vtkRenderer;
 class vtkActor;
+class vtkRenderWindow;
 
 class ElectrodeSurfaceDetector
 {
@@ -44,6 +45,8 @@ public:
 
     std::vector<std::array<double, 3>> detectAndShow(vtkImageData* img, vtkRenderer* ren);
     void clear(vtkRenderer* ren);
+    void addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world);
+    bool removeSphereAtDisplay(vtkRenderer* ren, int x, int y, vtkRenderWindow* rw = nullptr);
 
 private:
     Options opt_{};

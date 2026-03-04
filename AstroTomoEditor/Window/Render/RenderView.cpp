@@ -403,6 +403,48 @@ void RenderView::buildOverlay()
 
     the->addWidget(mElectrodePanel);
 
+    connect(mElectrodePanel, &ElectrodePanel::sceneRightClicked, this,
+        [this](const QPoint& devicePos)
+        {
+            mSkipNextSurfaceRightClick = false;
+
+            if (!mVtk || !mRenderer || !mVtk->renderWindow() || !mElectrodeDetector)
+                return;
+
+            const double dpr = mVtk->devicePixelRatioF();
+            const int x = int(std::lround(devicePos.x() * dpr));
+            const int yQt = int(std::lround(devicePos.y() * dpr));
+            const int* sz = mVtk->renderWindow()->GetSize();
+            const int winH = (sz ? sz[1] : int(std::lround(mVtk->height() * dpr)));
+            const int y = winH - 1 - yQt;
+
+            const bool removed = mElectrodeDetector->removeSphereAtDisplay(mRenderer, x, y, mVtk->renderWindow());
+            if (removed)
+            {
+                mSkipNextSurfaceRightClick = true;
+                mVtk->renderWindow()->Render();
+            }
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::surfaceRightClicked, this,
+        [this](std::array<int, 3>, std::array<double, 3> world)
+        {
+            if (!mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            if (mSkipNextSurfaceRightClick)
+            {
+                mSkipNextSurfaceRightClick = false;
+                return;
+            }
+
+            if (!mElectrodeDetector)
+                mElectrodeDetector = std::make_unique<ElectrodeSurfaceDetector>();
+
+            mElectrodeDetector->addManualSphere(mRenderer, world);
+            mVtk->renderWindow()->Render();
+        });
+
     connect(mElectrodePanel, &ElectrodePanel::autoRequested, this, [this]()
         {
             if (!mImage || !mRenderer) return;
@@ -889,6 +931,9 @@ void RenderView::setElectrodesUiActive(bool on)
         {
             mElectrodePanel->endPick();
             mElectrodeOverlay->clearMask();
+
+            if (mElectrodeDetector && mRenderer)
+                mElectrodeDetector->clear(mRenderer);
         }
     }
 

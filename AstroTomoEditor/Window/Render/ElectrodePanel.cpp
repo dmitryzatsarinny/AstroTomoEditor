@@ -429,7 +429,7 @@ void ElectrodePanel::rebuildMask()
 
 bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
 {
-    if (obj == mPick.vtkWidget && mPicking)
+    if (obj == mPick.vtkWidget)
     {
         if (ev->type() == QEvent::MouseMove)
         {
@@ -454,7 +454,21 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
         if (ev->type() == QEvent::MouseButtonPress)
         {
             auto* me = static_cast<QMouseEvent*>(ev);
-            if (me->button() == Qt::LeftButton)
+            if (me->button() == Qt::RightButton)
+            {
+                emit sceneRightClicked(me->pos());
+
+                std::array<int, 3> ijk;
+                std::array<double, 3> w;
+                if (pickAt(me->pos(), ijk, w))
+                {
+                    emit surfaceRightClicked(ijk, w);
+                    return true;
+                }
+                return false;
+            }
+
+            if (me->button() == Qt::LeftButton && mPicking)
             {
                 std::array<int, 3> ijk;
                 std::array<double, 3> w;

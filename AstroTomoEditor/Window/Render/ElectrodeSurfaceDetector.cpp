@@ -14,6 +14,8 @@
 #include <vtkActor.h>
 #include <vtkProperty.h>
 #include <vtkMath.h>
+#include <vtkRenderWindow.h>
+#include <vtkPropPicker.h>
 
 #include <QDebug>
 
@@ -213,6 +215,35 @@ void ElectrodeSurfaceDetector::addSphere(vtkRenderer* ren, const std::array<doub
 
     ren->AddActor(a);
     actors_.push_back(a);
+}
+
+void ElectrodeSurfaceDetector::addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world)
+{
+    addSphere(ren, world);
+}
+
+bool ElectrodeSurfaceDetector::removeSphereAtDisplay(vtkRenderer* ren, int x, int y, vtkRenderWindow* rw)
+{
+    if (!ren || actors_.empty())
+        return false;
+
+    (void)rw;
+    vtkNew<vtkPropPicker> picker;
+    picker->Pick(x, y, 0.0, ren);
+
+    vtkActor* pickedActor = vtkActor::SafeDownCast(picker->GetActor());
+    if (!pickedActor)
+        return false;
+
+    const auto it = std::find_if(actors_.begin(), actors_.end(),
+        [pickedActor](const vtkSmartPointer<vtkActor>& a) { return a.GetPointer() == pickedActor; });
+
+    if (it == actors_.end())
+        return false;
+
+    ren->RemoveActor(*it);
+    actors_.erase(it);
+    return true;
 }
 
 std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::detectAndShow(vtkImageData* img, vtkRenderer* ren)
