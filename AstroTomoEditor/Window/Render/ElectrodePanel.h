@@ -181,4 +181,8 @@ private:
     bool snapToSurfaceTowardsCamera(const std::array<double, 3>& w0, std::array<int, 3>& inOutIJK, std::array<double, 3>& outW) const;
     void clearElectrode(ElectrodeId id);
     bool removeElectrodeAtDisplay(const QPoint& pDevice);
+    bool closestElectrodeAtDisplay(const QPoint& pDevice, std::array<double, 3>& outWorld) const;
+    bool closestAnySphereAtDisplay(const QPoint& pDevice,
+        std::array<double, 3>& outWorld,
+        double* outRadiusMm = nullptr) const;
 };

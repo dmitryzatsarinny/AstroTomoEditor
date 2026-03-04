@@ -424,13 +424,18 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
         {
             auto* me = static_cast<QMouseEvent*>(ev);
 
-            std::array<int, 3> ijk;
             std::array<double, 3> w;
-            if (pickAt(me->pos(), ijk, w))
+            double hoverRadiusMm = 0.0;
+            if (closestAnySphereAtDisplay(me->pos(), w, &hoverRadiusMm))
             {
                 ensureHoverActor();
                 const double ww[3] = { w[0], w[1], w[2]};
                 setHoverAtWorld(ww);
+                if (hoverRadiusMm > 0.0 && mHoverSphere)
+                {
+                    mHoverSphere->SetRadius(hoverRadiusMm * 1.12);
+                    mHoverSphere->Modified();
+                }
                 setHoverVisible(true);
             }
             else
@@ -449,23 +454,25 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
                 if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
                     return false;
 
-                //const double dpr = mPick.vtkWidget->devicePixelRatioF();
-                //const int x = int(std::lround(me->pos().x() * dpr));
-                //const int yQt = int(std::lround(me->pos().y() * dpr));
-                //const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
-                //const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
-                //const int y = winH - 1 - yQt;
-
-                //auto& detector = ElectrodeSurfaceDetector::instance();
-                //const bool removed = detector.removeSphereAtDisplay(mPick.renderer, x, y, mPick.vtkWidget->renderWindow());
-                //if (removed)
-                //{
-                //    mPick.vtkWidget->renderWindow()->Render();
-                //    return true;
-                //}
-
                 if (removeElectrodeAtDisplay(me->pos()))
                     return true;
+
+                const double dpr = mPick.vtkWidget->devicePixelRatioF();
+                const int x = int(std::lround(me->pos().x() * dpr));
+                const int yQt = int(std::lround(me->pos().y() * dpr));
+                const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+                const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+                const int y = winH - 1 - yQt;
+
+                auto& detector = ElectrodeSurfaceDetector::instance();
+                const bool removed = detector.removeSphereAtDisplay(mPick.renderer, x, y, mPick.vtkWidget->renderWindow());
+                if (removed)
+                {
+                    setHoverVisible(false);
+                    mPick.vtkWidget->renderWindow()->Render();
+                    return true;
+                }
+
 
                 if (!mManualAddEnabled || !(me->modifiers() & Qt::AltModifier))
                     return false;
@@ -607,6 +614,102 @@ bool ElectrodePanel::removeElectrodeAtDisplay(const QPoint& pDevice)
 
     clearElectrode(toRemove);
     requestRender();
+    return true;
+}
+
+bool ElectrodePanel::closestElectrodeAtDisplay(const QPoint& pDevice, std::array<double, 3>& outWorld) const
+{
+    std::array<int, 3> ijk;
+    std::array<double, 3> w;
+    if (!pickAt(pDevice, ijk, w))
+        return false;
+
+    const double sp[3] = { DI.mSpX, DI.mSpY, DI.mSpZ };
+    const double maxSp = std::max({ std::abs(sp[0]), std::abs(sp[1]), std::abs(sp[2]) });
+    const double pickTolMm = std::max(1.5 * maxSp, 2.0);
+    const double pickTol2 = pickTolMm * pickTolMm;
+
+    bool found = false;
+    double bestD2 = std::numeric_limits<double>::max();
+
+    for (auto it = mCutCenterWorld.constBegin(); it != mCutCenterWorld.constEnd(); ++it)
+    {
+        const auto id = it.key();
+        if (!hasCoord(id))
+            continue;
+
+        const auto& c = it.value();
+        const double dx = c[0] - w[0];
+        const double dy = c[1] - w[1];
+        const double dz = c[2] - w[2];
+        const double d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 <= pickTol2 && d2 < bestD2)
+        {
+            bestD2 = d2;
+            outWorld = c;
+            found = true;
+        }
+    }
+
+    return found;
+}
+
+bool ElectrodePanel::closestAnySphereAtDisplay(const QPoint& pDevice,
+    std::array<double, 3>& outWorld,
+    double* outRadiusMm) const
+{
+    if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
+        return false;
+
+    const double dpr = mPick.vtkWidget->devicePixelRatioF();
+    const int x = int(std::lround(pDevice.x() * dpr));
+    const int yQt = int(std::lround(pDevice.y() * dpr));
+    const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+    const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+    const int y = winH - 1 - yQt;
+
+    bool found = false;
+    double bestDistPx = std::numeric_limits<double>::max();
+    std::array<double, 3> bestWorld{};
+    double bestRadiusMm = 0.0;
+
+    std::array<double, 3> worldLocal;
+    if (closestElectrodeAtDisplay(pDevice, worldLocal))
+    {
+        found = true;
+        bestWorld = worldLocal;
+        bestDistPx = 0.0;
+
+        if (mPick.image)
+        {
+            double sp[3]{ 1.0, 1.0, 1.0 };
+            mPick.image->GetSpacing(sp);
+            bestRadiusMm = 10.0 * std::min({ sp[0], sp[1], sp[2] });
+        }
+    }
+
+    auto& detector = ElectrodeSurfaceDetector::instance();
+    std::array<double, 3> worldDetected;
+    double distPx = 0.0;
+    double radiusMm = 0.0;
+    if (detector.closestSphereAtDisplay(mPick.renderer, x, y, 32.0, worldDetected, &distPx, &radiusMm))
+    {
+        if (!found || distPx < bestDistPx)
+        {
+            found = true;
+            bestDistPx = distPx;
+            bestWorld = worldDetected;
+            bestRadiusMm = radiusMm;
+        }
+    }
+
+    if (!found)
+        return false;
+
+    outWorld = bestWorld;
+    if (outRadiusMm)
+        *outRadiusMm = bestRadiusMm;
+
     return true;
 }
 

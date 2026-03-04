@@ -49,10 +49,21 @@ public:
     void clear(vtkRenderer* ren);
     void addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world);
     bool removeSphereAtDisplay(vtkRenderer* ren, int x, int y, vtkRenderWindow* rw = nullptr);
+    bool closestSphereAtDisplay(vtkRenderer* ren, int x, int y,
+        double maxDistPx,
+        std::array<double, 3>& outWorld,
+        double* outDistPx = nullptr,
+        double* outRadiusMm = nullptr) const;
 
 private:
+    struct SphereMarker
+    {
+        vtkSmartPointer<vtkActor> actor;
+        std::array<double, 3> center{};
+    };
+
     Options opt_{};
-    std::vector<vtkSmartPointer<vtkActor>> actors_;
+    std::vector<SphereMarker> actors_;
 
     static inline int idx(int x, int y, int z, int nx, int ny) noexcept
     {
@@ -60,4 +71,5 @@ private:
     }
 
     void addSphere(vtkRenderer* ren, const std::array<double, 3>& world);
+    static bool worldToDisplay(vtkRenderer* ren, const std::array<double, 3>& world, double outDisplay[2]);
 };

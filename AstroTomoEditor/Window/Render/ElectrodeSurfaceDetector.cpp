@@ -196,7 +196,7 @@ ElectrodeSurfaceDetector::~ElectrodeSurfaceDetector() = default;
 void ElectrodeSurfaceDetector::clear(vtkRenderer* ren)
 {
     if (!ren) { actors_.clear(); return; }
-    for (auto& a : actors_) ren->RemoveActor(a);
+    for (auto& a : actors_) ren->RemoveActor(a.actor);
     actors_.clear();
 }
 
@@ -220,7 +220,7 @@ void ElectrodeSurfaceDetector::addSphere(vtkRenderer* ren, const std::array<doub
     a->PickableOff();
 
     ren->AddActor(a);
-    actors_.push_back(a);
+    actors_.push_back({ a, world });
 }
 
 void ElectrodeSurfaceDetector::addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world)
@@ -242,13 +242,70 @@ bool ElectrodeSurfaceDetector::removeSphereAtDisplay(vtkRenderer* ren, int x, in
         return false;
 
     const auto it = std::find_if(actors_.begin(), actors_.end(),
-        [pickedActor](const vtkSmartPointer<vtkActor>& a) { return a.GetPointer() == pickedActor; });
+        [pickedActor](const SphereMarker& a) { return a.actor.GetPointer() == pickedActor; });
 
     if (it == actors_.end())
         return false;
 
-    ren->RemoveActor(*it);
+    ren->RemoveActor(it->actor);
     actors_.erase(it);
+    return true;
+}
+
+bool ElectrodeSurfaceDetector::worldToDisplay(vtkRenderer* ren, const std::array<double, 3>& world, double outDisplay[2])
+{
+    if (!ren)
+        return false;
+
+    ren->SetWorldPoint(world[0], world[1], world[2], 1.0);
+    ren->WorldToDisplay();
+
+    double p[3]{ 0.0, 0.0, 0.0 };
+    ren->GetDisplayPoint(p);
+    outDisplay[0] = p[0];
+    outDisplay[1] = p[1];
+    return std::isfinite(outDisplay[0]) && std::isfinite(outDisplay[1]);
+}
+
+bool ElectrodeSurfaceDetector::closestSphereAtDisplay(vtkRenderer* ren,
+    int x,
+    int y,
+    double maxDistPx,
+    std::array<double, 3>& outWorld,
+    double* outDistPx,
+    double* outRadiusMm) const
+{
+    if (!ren || actors_.empty())
+        return false;
+
+    const double maxDist2 = maxDistPx * maxDistPx;
+    double bestDist2 = std::numeric_limits<double>::max();
+    const SphereMarker* best = nullptr;
+
+    for (const auto& mk : actors_)
+    {
+        double dp[2]{ 0.0, 0.0 };
+        if (!worldToDisplay(ren, mk.center, dp))
+            continue;
+
+        const double dx = dp[0] - double(x);
+        const double dy = dp[1] - double(y);
+        const double d2 = dx * dx + dy * dy;
+        if (d2 <= maxDist2 && d2 < bestDist2)
+        {
+            bestDist2 = d2;
+            best = &mk;
+        }
+    }
+
+    if (!best)
+        return false;
+
+    outWorld = best->center;
+    if (outDistPx)
+        *outDistPx = std::sqrt(bestDist2);
+    if (outRadiusMm)
+        *outRadiusMm = opt_.sphereRadiusMm;
     return true;
 }
 
