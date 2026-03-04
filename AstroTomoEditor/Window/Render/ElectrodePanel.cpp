@@ -506,9 +506,41 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
 
             if (me->button() == Qt::LeftButton && mPicking)
             {
-                std::array<int, 3> ijk;
-                std::array<double, 3> w;
-                if (pickAt(me->pos(), ijk, w))
+                std::array<int, 3> ijk{};
+                std::array<double, 3> w{};
+
+                bool gotPick = false;
+                bool usedDetectedSphere = false;
+
+                if (mPick.renderer && mPick.vtkWidget && mPick.vtkWidget->renderWindow())
+                {
+                    const double dpr = mPick.vtkWidget->devicePixelRatioF();
+                    const int x = int(std::lround(me->pos().x() * dpr));
+                    const int yQt = int(std::lround(me->pos().y() * dpr));
+                    const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+                    const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+                    const int y = winH - 1 - yQt;
+
+                    auto& detector = ElectrodeSurfaceDetector::instance();
+                    std::array<double, 3> detectedWorld{};
+                    if (detector.closestSphereAtDisplay(mPick.renderer, x, y, 32.0, detectedWorld))
+                    {
+                        int ijkDetected[3]{ 0, 0, 0 };
+                        const double wDetected[3] = { detectedWorld[0], detectedWorld[1], detectedWorld[2] };
+                        if (worldToIJK(wDetected, ijkDetected))
+                        {
+                            w = detectedWorld;
+                            ijk = { ijkDetected[0], ijkDetected[1], ijkDetected[2] };
+                            gotPick = true;
+                            usedDetectedSphere = detector.removeSphereAtDisplay(mPick.renderer, x, y, mPick.vtkWidget->renderWindow());
+                        }
+                    }
+                }
+
+                if (!gotPick)
+                    gotPick = pickAt(me->pos(), ijk, w);
+
+                if (gotPick)
                 {
                     qDebug() << "[PICK] IJK:"
                         << ijk[0] << ijk[1] << ijk[2]
@@ -550,6 +582,9 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
 
                         // зелёный режим выключаем
                         clearCurrent();
+
+                        if (usedDetectedSphere)
+                            requestRender();
                     }
 
                     emit pickCommitted(committedId, ijk, w);
