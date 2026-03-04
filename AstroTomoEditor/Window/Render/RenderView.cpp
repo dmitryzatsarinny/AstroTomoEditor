@@ -410,11 +410,7 @@ void RenderView::buildOverlay()
             if (!mElectrodeDetector)
                 mElectrodeDetector = std::make_unique<ElectrodeSurfaceDetector>();
 
-            // тут можно покрутить пороги под твои КТ
             ElectrodeSurfaceDetector::Options opt = mElectrodeDetector->options();
-            // opt.metalHuThreshold = 1800; // если надо
-            // opt.airHuThreshold = -300;   // если надо
-            // opt.sphereRadiusMm = 2.5;
             mElectrodeDetector->setOptions(opt);
 
             const auto centers = mElectrodeDetector->detectAndShow(mImage, mRenderer);
@@ -691,11 +687,11 @@ void RenderView::captureElectrodesTemplateFromCurrentVolume()
         for (size_t i = 0; i < total; ++i)
         {
             const uint8_t v = vol.at(i);
-            if (v < 245 || v > 256)
+            if (v < HistMax - 1)
                 vol.at(i) = 0;
+            else
+                vol.at(i) = HistMax - 1;
         }
-        if (mRemoveConn)
-            mRemoveConn->AddBy6Neighbors(vol, 250);
 
         // Сохраняем в слот Electrodes. Диалог сам обновит UI.
         mTemplateDlg->setCaptured(TemplateId::Electrodes, vol);
@@ -741,16 +737,27 @@ void RenderView::beginElectrodesPreview()
     if (!templ.raw() || !templ.u8().valid)
         return;
 
+    size_t total = templ.u8().size();
+    for (size_t i = 0; i < total; ++i)
+    {
+        const uint8_t v = templ.at(i);
+        if (v < HistMax - 1)
+            templ.at(i) = 0;
+        else
+            templ.at(i) = HistMax - 1;
+    }
     if (mRemoveConn)
-        mRemoveConn->AddBy6Neighbors(templ, 250);
+    {
+        mRemoveConn->AddBy6Neighbors(templ, HistMax - 1);
+    }
 
-    const size_t total = std::min(volPreview.u8().size(), templ.u8().size());
+    total = std::min(volPreview.u8().size(), templ.u8().size());
     for (size_t i = 0; i < total; ++i)
     {
         const uint8_t tv = templ.at(i);
         const uint8_t tvp = volPreview.at(i);
-        if (tv && tvp)
-            volPreview.at(i) = tv; // прямое наложение (250..255)
+        if (tv >= HistMax - 1 && tvp)
+            volPreview.at(i) = tv;
     }
 
     if (volPreview.raw())
@@ -775,8 +782,8 @@ void RenderView::beginElectrodesPreview()
         auto previewCTF = vtkSmartPointer<vtkColorTransferFunction>::New();
         previewCTF->SetColorSpaceToLab();
         previewCTF->AddRGBPoint(DataMin, 0.0, 0.0, 0.0);
-        previewCTF->AddRGBPoint(249.0, 1.0, 1.0, 1.0);
-        previewCTF->AddRGBPoint(250.0, 1.0, 0.0, 0.0);
+        previewCTF->AddRGBPoint(DataMax - 10.0, 1.0, 1.0, 1.0);
+        previewCTF->AddRGBPoint(DataMax - 5.0, 1.0, 0.0, 0.0);
         previewCTF->AddRGBPoint(DataMax, 1.0, 0.0, 0.0);
         prop->SetColor(0, previewCTF);
 

@@ -16,24 +16,24 @@ public:
     {
         bool debug = true;
 
-        int metalMin = 245;
+        int metalMin = 254;
         int metalMax = 255;
 
+        // если хочешь отсечь воздух/стол
+        bool useBodyMask = false;
         int bodyThreshold = 25;
-        int surfaceRadiusVox = 2;
 
-        int minComponentVox = 5;
-        int maxComponentVox = 2000;
-        double maxElongation = 8.0;
+        int minComponentVox = 25;
+        int maxComponentVox = 1000;
 
-        double sphereRadiusMm = 3.0;
+        // “сферичность” по ковариации в voxel-space
+        double maxAxisRatioVox = 5;     // 1.0 идеал, 1.6..2.2 обычно норм
 
-        // NEW: фильтрация
-        double minDistanceMm = 20.0;        // рядом (2 см) не должно быть другого электрода
-        double outwardMaxMm = 15.0;          // за сколько мм обязаны выйти в воздух по нормали
-        double inwardMinMm = 5.0;            // вглубь должны оставаться в теле хотя бы столько
-        double rayStepVox = 0.5;             // шаг трассировки в вокселях
-        double minNormalLen = 0.2;           // минимальная “уверенность” нормали (в вокселях на 1 грань)
+        // доп. критерий “похож на шар” по разбросу радиуса
+        bool useRadiusConsistency = false;
+        double maxRadiusStdRel = 0.99;    // std(r)/mean(r)
+
+        double sphereRadiusMm = 5.0;      // как рисовать маркер
     };
 
     ElectrodeSurfaceDetector();

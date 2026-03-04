@@ -907,12 +907,10 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
 
     if (TypeOfRecord == CT)
     {
-        if (v > max + window)
-            v = max;
-
-        //электроды в видимую область
-        /*else if (v > max - window / 20)
-            v = max - window / 20;*/
+        if (v > max + window / 20)
+            v = max + window / 20;
+        else if (v > max - window / 10)
+            v = max - window / 10;
     }
 
     // проекция значения в шкалу [HistMin..HistMax]
@@ -921,16 +919,16 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
 
     //электроды в видимую область
     //// зажимаем в допустимый диапазон
-    //if (y < static_cast<int>(HistMin))
-    //    y = static_cast<int>(HistMin);
-    //if (y > static_cast<int>(HistMax))
-    //    y = static_cast<int>(HistMax);
+    if (y < static_cast<int>(HistMin))
+        y = static_cast<int>(HistMin);
+    if (y >= static_cast<int>(HistMax))
+        y = static_cast<int>(HistMax-1);
 
     // зажимаем в допустимый диапазон
-    if (y < static_cast<int>(HistMin + 8))
-        y = 0;
-    if (y > static_cast<int>(HistMax))
-        y = 0;
+    //if (y < static_cast<int>(HistMin + 8))
+    //    y = 0;
+    //if (y > static_cast<int>(HistMax))
+    //    y = 0;
 
 
     int bin = y;

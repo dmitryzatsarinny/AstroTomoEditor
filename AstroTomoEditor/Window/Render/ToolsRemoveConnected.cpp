@@ -2587,7 +2587,7 @@ void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift)
     // Вспомогательная функция: есть ли "опора" под точкой (i, j)
     auto hasSupportBelow = [&](int i, int j) -> bool
         {
-            const int kMin = std::max(ext[4], firstObjK - shift);
+            const int kMin = std::max(ext[4], firstObjK + shift);
             for (int k = firstObjK - 1; k >= kMin; --k)
             {
                 const size_t idx = linearIdx(i, j, k, ext, nx, ny);
@@ -2691,7 +2691,7 @@ void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift)
     // Вспомогательная функция: есть ли "опора" под точкой (i, j)
     auto hasSupportBelow = [&](int i, int j) -> bool
         {
-            const int kMax = std::min(ext[5], firstObjK + shift);
+            const int kMax = std::min(ext[5], firstObjK - shift);
             for (int k = firstObjK + 1; k <= kMax; ++k)
             {
                 const size_t idx = linearIdx(i, j, k, ext, nx, ny);
@@ -3820,6 +3820,47 @@ void ToolsRemoveConnected::SurfaceMappingVolume()
     progress(50);
     RemoveConnectedRegions(mark, seed, 2);
     
+    //Volume volNew;
+    //volNew.copy(m_vol.raw());
+
+    //const auto& S = volNew.u8();
+    //if (!S.valid || !volNew.raw())
+    //    return;
+
+    //const int* ext = S.ext;
+    //const int nx = S.nx;
+    //const int ny = S.ny;
+    //const int nz = S.nz;
+    //if (nx <= 0 || ny <= 0 || nz <= 0)
+    //    return;
+
+    //const size_t slice = size_t(nx) * ny;
+
+    //constexpr int baseMargin = 2;
+    //AverageVisibleValue = GetAverageVisibleValue();
+
+    //for (int j = 0; j < ny; ++j)
+    //    for (int i = 0; i < nx; ++i)
+    //        volNew.at(size_t(j) * nx + i) = 0u;  // Z = 0
+    //AddBaseBottomZ(volNew, baseMargin);
+
+    //for (int j = 0; j < ny; ++j)
+    //    for (int i = 0; i < nx; ++i)
+    //        volNew.at(slice * (nz - 1) + size_t(j) * nx + i) = 0u;
+    //AddBaseTopZ(volNew, baseMargin);
+
+    //for (int k = 0; k < nz; ++k)
+    //    for (int j = 0; j < ny; ++j)
+    //        volNew.at(size_t(k) * slice + size_t(j) * nx + 0) = 0u;
+    //AddBaseLeftX(volNew, baseMargin);
+
+    //for (int k = 0; k < nz; ++k)
+    //    for (int j = 0; j < ny; ++j)
+    //        volNew.at(size_t(k) * slice + size_t(j) * nx + nx - 1) = 0u;
+    //AddBaseRightX(volNew, baseMargin);
+
+    //m_vol = volNew;
+
     progress(75);
     status(tr("Linked area deletion completed"));
 }
