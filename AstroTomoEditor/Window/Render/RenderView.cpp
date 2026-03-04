@@ -403,64 +403,31 @@ void RenderView::buildOverlay()
 
     the->addWidget(mElectrodePanel);
 
-    connect(mElectrodePanel, &ElectrodePanel::sceneRightClicked, this,
-        [this](const QPoint& devicePos)
-        {
-            mSkipNextSurfaceRightClick = false;
-
-            if (!mVtk || !mRenderer || !mVtk->renderWindow() || !mElectrodeDetector)
-                return;
-
-            const double dpr = mVtk->devicePixelRatioF();
-            const int x = int(std::lround(devicePos.x() * dpr));
-            const int yQt = int(std::lround(devicePos.y() * dpr));
-            const int* sz = mVtk->renderWindow()->GetSize();
-            const int winH = (sz ? sz[1] : int(std::lround(mVtk->height() * dpr)));
-            const int y = winH - 1 - yQt;
-
-            const bool removed = mElectrodeDetector->removeSphereAtDisplay(mRenderer, x, y, mVtk->renderWindow());
-            if (removed)
-            {
-                mSkipNextSurfaceRightClick = true;
-                mVtk->renderWindow()->Render();
-            }
-        });
-
-    connect(mElectrodePanel, &ElectrodePanel::surfaceRightClicked, this,
-        [this](std::array<int, 3>, std::array<double, 3> world)
-        {
-            if (!mRenderer || !mVtk || !mVtk->renderWindow())
-                return;
-
-            if (mSkipNextSurfaceRightClick)
-            {
-                mSkipNextSurfaceRightClick = false;
-                return;
-            }
-
-            if (!mElectrodeDetector)
-                mElectrodeDetector = std::make_unique<ElectrodeSurfaceDetector>();
-
-            mElectrodeDetector->addManualSphere(mRenderer, world);
-            mVtk->renderWindow()->Render();
-        });
-
     connect(mElectrodePanel, &ElectrodePanel::autoRequested, this, [this]()
         {
             if (!mImage || !mRenderer) return;
 
-            if (!mElectrodeDetector)
-                mElectrodeDetector = std::make_unique<ElectrodeSurfaceDetector>();
+            auto& detector = ElectrodeSurfaceDetector::instance();
+            ElectrodeSurfaceDetector::Options opt = detector.options();
+            detector.setOptions(opt);
 
-            ElectrodeSurfaceDetector::Options opt = mElectrodeDetector->options();
-            mElectrodeDetector->setOptions(opt);
-
-            const auto centers = mElectrodeDetector->detectAndShow(mImage, mRenderer);
+            const auto centers = detector.detectAndShow(mImage, mRenderer);
+            mElectrodePanel->setManualAddEnabled(true);
 
             qDebug() << "[AutoElectrodes] detected:" << int(centers.size());
 
             if (mVtk && mVtk->renderWindow())
                 mVtk->renderWindow()->Render();
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::electrodeAltRightClicked, this,
+        [this](std::array<double, 3> world)
+        {
+            if (!mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            ElectrodeSurfaceDetector::instance().addManualSphere(mRenderer, world);
+            mVtk->renderWindow()->Render();
         });
 
     mBtnTF = makeBigBtn(topPanel, tr("Transfer function"));
@@ -932,8 +899,8 @@ void RenderView::setElectrodesUiActive(bool on)
             mElectrodePanel->endPick();
             mElectrodeOverlay->clearMask();
 
-            if (mElectrodeDetector && mRenderer)
-                mElectrodeDetector->clear(mRenderer);
+            if (mRenderer)
+                ElectrodeSurfaceDetector::instance().clear(mRenderer);
         }
     }
 

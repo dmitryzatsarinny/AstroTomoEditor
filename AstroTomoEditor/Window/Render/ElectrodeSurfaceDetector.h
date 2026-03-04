@@ -13,6 +13,8 @@ class vtkRenderWindow;
 class ElectrodeSurfaceDetector
 {
 public:
+    static ElectrodeSurfaceDetector& instance();
+
     struct Options
     {
         bool debug = true;

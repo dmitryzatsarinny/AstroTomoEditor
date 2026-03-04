@@ -1,4 +1,5 @@
 ﻿#include "ElectrodePanel.h"
+#include "ElectrodeSurfaceDetector.h"
 
 #include <QToolButton>
 #include <QPushButton>
@@ -14,6 +15,7 @@
 #include <vtkTextProperty.h>
 #include <vtkCamera.h>
 #include <vtkProp3D.h>
+#include <cmath>
 
 static const char* kElectrodeBtnQss =
 "QToolButton{ color:#fff; background:rgba(40,40,40,110);"
@@ -326,7 +328,12 @@ void ElectrodePanel::buildUi()
         "QPushButton:hover{ background:rgba(90,90,90,170); }"
         "QPushButton:pressed{ background:rgba(120,120,120,190); }"
     );
-    connect(mBtnAuto, &QPushButton::clicked, this, &ElectrodePanel::autoRequested);
+
+    connect(mBtnAuto, &QPushButton::clicked, this, [this]
+        {
+            mManualAddEnabled = true;
+            emit autoRequested();
+        });
 
     // Save
     mBtnSave = new QPushButton(tr("Save electrodes coords"), this);
@@ -431,6 +438,9 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
 {
     if (obj == mPick.vtkWidget)
     {
+        if (!mEnabled)
+            return false;
+
         if (ev->type() == QEvent::MouseMove)
         {
             auto* me = static_cast<QMouseEvent*>(ev);
@@ -440,7 +450,7 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
             if (pickAt(me->pos(), ijk, w))
             {
                 ensureHoverActor();
-                const double ww[3] = { w[0], w[1], w[2] };
+                const double ww[3] = { w[0], w[1], w[2]};
                 setHoverAtWorld(ww);
                 setHoverVisible(true);
             }
@@ -456,13 +466,32 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
             auto* me = static_cast<QMouseEvent*>(ev);
             if (me->button() == Qt::RightButton)
             {
-                emit sceneRightClicked(me->pos());
+                if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
+                    return false;
+
+                const double dpr = mPick.vtkWidget->devicePixelRatioF();
+                const int x = int(std::lround(me->pos().x() * dpr));
+                const int yQt = int(std::lround(me->pos().y() * dpr));
+                const int* sz = mPick.vtkWidget->renderWindow()->GetSize();
+                const int winH = (sz ? sz[1] : int(std::lround(mPick.vtkWidget->height() * dpr)));
+                const int y = winH - 1 - yQt;
+
+                auto& detector = ElectrodeSurfaceDetector::instance();
+                const bool removed = detector.removeSphereAtDisplay(mPick.renderer, x, y, mPick.vtkWidget->renderWindow());
+                if (removed)
+                {
+                    mPick.vtkWidget->renderWindow()->Render();
+                    return true;
+                }
+
+                if (!mManualAddEnabled || !(me->modifiers() & Qt::AltModifier))
+                    return false;
 
                 std::array<int, 3> ijk;
                 std::array<double, 3> w;
                 if (pickAt(me->pos(), ijk, w))
                 {
-                    emit surfaceRightClicked(ijk, w);
+                    emit electrodeAltRightClicked(w);
                     return true;
                 }
                 return false;
@@ -537,7 +566,10 @@ void ElectrodePanel::setModeEnabled(bool on)
     mEnabled = on;
 
     if (!on)
+    {
+        mManualAddEnabled = false;
         clearAllElectrodesState();
+    }
 
     setVisible(on);
 }
@@ -653,14 +685,19 @@ void ElectrodePanel::endPick()
     clearCurrent(); // чтобы зелёное точно ушло
 }
 
+void ElectrodePanel::setManualAddEnabled(bool on)
+{
+    mManualAddEnabled = on;
+}
+
 void ElectrodePanel::ensureHoverActor()
 {
     if (!mPick.renderer) return;
     if (mHoverActor) return;
 
     mHoverSphere = vtkSmartPointer<vtkSphereSource>::New();
-    mHoverSphere->SetThetaResolution(24);
-    mHoverSphere->SetPhiResolution(24);
+    mHoverSphere->SetThetaResolution(32);
+    mHoverSphere->SetPhiResolution(32);
 
     mHoverMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
     mHoverMapper->SetInputConnection(mHoverSphere->GetOutputPort());
@@ -691,7 +728,7 @@ void ElectrodePanel::setHoverAtWorld(const double w[3])
     double sp[3]; mPick.image->GetSpacing(sp);
     const double smin = std::min({ sp[0], sp[1], sp[2] });
 
-    const double r = 6.0 * std::min({ sp[0], sp[1], sp[2] });
+    const double r = 3.0 * std::min({ sp[0], sp[1], sp[2] });
     mHoverSphere->SetCenter(w);
     mHoverSphere->SetRadius(r);
     mHoverSphere->Modified();

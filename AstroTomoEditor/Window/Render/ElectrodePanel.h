@@ -97,12 +97,12 @@ signals:
     void saveRequested(); // сохранить координаты
     void pickCommitted(ElectrodeId id, std::array<int, 3> ijk, std::array<double, 3> world);
     void autoRequested();
-    void surfaceRightClicked(std::array<int, 3> ijk, std::array<double, 3> world);
-    void sceneRightClicked(const QPoint& devicePos);
+    void electrodeAltRightClicked(std::array<double, 3> world);
 
 public slots:
     void beginPick(ElectrodeId id);   // пользователь нажал кнопку электрода
     void endPick();
+    void setManualAddEnabled(bool on);
 
 private:
     class ElectrodeButton; // ниже в cpp
@@ -135,6 +135,7 @@ private:
 
     bool mPicking = false;
     ElectrodeId mPickId = ElectrodeId::Count;
+    bool mManualAddEnabled = false;
 
     // hover actor (кружок)
     vtkSmartPointer<vtkSphereSource> mHoverSphere;

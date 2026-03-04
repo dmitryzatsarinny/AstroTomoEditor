@@ -218,8 +218,6 @@ private:
     int mShiftValue = 3;
 
     ElectrodePanel* mElectrodePanel{ nullptr };
-    std::unique_ptr<ElectrodeSurfaceDetector> mElectrodeDetector;
-    bool mSkipNextSurfaceRightClick{ false };
     void setElectrodesUiActive(bool on);
     void updateElectrodeOverlayMask();
     void updateElectrodePickContext();

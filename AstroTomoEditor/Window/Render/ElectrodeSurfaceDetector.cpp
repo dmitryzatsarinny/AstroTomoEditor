@@ -184,6 +184,12 @@ namespace
     }
 }
 
+ElectrodeSurfaceDetector& ElectrodeSurfaceDetector::instance()
+{
+    static ElectrodeSurfaceDetector detector;
+    return detector;
+}
+
 ElectrodeSurfaceDetector::ElectrodeSurfaceDetector() = default;
 ElectrodeSurfaceDetector::~ElectrodeSurfaceDetector() = default;
 
