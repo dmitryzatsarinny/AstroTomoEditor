@@ -451,23 +451,7 @@ void RenderView::buildOverlay()
                 return;
 
             setViewPreset(ViewPreset::AP);
-            const auto searchResult = ElectrodeAutoIdentifier::SearchV1V6(mElectrodePanel, mRenderer);
-
-            std::array<double, 3> wV2{};
-            bool hasV2 = false;
-            if (searchResult.placedV2)
-            {
-                wV2 = searchResult.wV2;
-                hasV2 = true;
-            }
-            else
-            {
-                hasV2 = ElectrodeAutoIdentifier::FindPanelCoord(mElectrodePanel, ElectrodePanel::ElectrodeId::V2, wV2);
-            }
-
-            if (hasV2)
-                alignApViewToWorldPoint(wV2);
-
+            ElectrodeAutoIdentifier::SearchV1V6(mElectrodePanel, mRenderer);
             mElectrodePanel->refreshSearchV1V6Button();
             mVtk->renderWindow()->Render();
         });

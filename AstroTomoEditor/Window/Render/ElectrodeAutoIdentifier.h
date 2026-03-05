@@ -21,6 +21,7 @@ public:
         bool valid = false;
         double x = 0.0;
         double y = 0.0;
+        std::array<double, 3> w{};
     };
 
     struct Result
@@ -43,12 +44,14 @@ public:
         bool placedV3 = false;
         bool placedV4 = false;
         bool placedV5 = false;
+        bool placedV6 = false;
 
         std::array<double, 3> wV1{};
         std::array<double, 3> wV2{};
         std::array<double, 3> wV3{};
         std::array<double, 3> wV4{};
         std::array<double, 3> wV5{};
+        std::array<double, 3> wV6{};
     };
 
     static Result SearchRLFN(ElectrodePanel* panel, vtkRenderer* ren);
@@ -59,12 +62,13 @@ public:
     static bool WorldToDisplay(vtkRenderer* ren, const std::array<double, 3>& w, double& outX, double& outY);
     static bool FindPanelCoord(const ElectrodePanel* panel, ElectrodePanel::ElectrodeId id, std::array<double, 3>& outWorld);
     static bool ComputeVolumeDisplayCenter(vtkRenderer* ren, double& cx, double& cy);
+    static bool ComputeVolumeWorldCenter(vtkRenderer* ren, std::array<double, 3>& outC);
     static std::vector<Cand2D> CollectDisplayCandidates(vtkRenderer* ren, const std::vector<std::array<double, 3>>& centers);
-    static int PickClosestInSectorFrom(const std::vector<Cand2D>& cands,
-        const std::vector<bool>& used,
-        double ax,
-        double ay,
-        double h0,
-        double h1);
+    static int PickClosestInSectorFrom(
+        const std::vector<Cand2D>& cands,
+        double ax, double ay,
+        double h0, double h1,
+        const std::array<double, 3>& volumeCenterW,
+        double maxRadiusFromCenter);
     static Anchor AnchorFromPanel(const ElectrodePanel* panel, vtkRenderer* ren, ElectrodePanel::ElectrodeId id);
 };

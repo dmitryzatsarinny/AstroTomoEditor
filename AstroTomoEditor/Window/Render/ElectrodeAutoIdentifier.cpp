@@ -4,6 +4,7 @@
 #include <vtkProp3D.h>
 #include <vtkPropCollection.h>
 #include <vtkRenderer.h>
+#include <vtkCamera.h>
 
 #include <algorithm>
 #include <cmath>
@@ -170,6 +171,44 @@ bool ElectrodeAutoIdentifier::ComputeVolumeDisplayCenter(vtkRenderer* ren, doubl
     return false;
 }
 
+bool ElectrodeAutoIdentifier::ComputeVolumeWorldCenter(vtkRenderer* ren, std::array<double, 3>& outC)
+{
+    if (!ren)
+        return false;
+
+    auto* props = ren->GetViewProps();
+    if (!props)
+        return false;
+
+    props->InitTraversal();
+    vtkProp* prop = nullptr;
+
+    while ((prop = props->GetNextProp()))
+    {
+        auto* prop3d = vtkProp3D::SafeDownCast(prop);
+        if (!prop3d)
+            continue;
+
+        double b[6]{};
+        prop3d->GetBounds(b);
+        if (!std::isfinite(b[0]) || !std::isfinite(b[1]) ||
+            !std::isfinite(b[2]) || !std::isfinite(b[3]) ||
+            !std::isfinite(b[4]) || !std::isfinite(b[5]))
+        {
+            continue;
+        }
+
+        outC = {
+            0.5 * (b[0] + b[1]),
+            0.5 * (b[2] + b[3]),
+            0.5 * (b[4] + b[5])
+        };
+        return true;
+    }
+
+    return false;
+}
+
 std::vector<ElectrodeAutoIdentifier::Cand2D> ElectrodeAutoIdentifier::CollectDisplayCandidates(vtkRenderer* ren, const std::vector<std::array<double, 3>>& centers)
 {
     std::vector<Cand2D> cands;
@@ -184,21 +223,28 @@ std::vector<ElectrodeAutoIdentifier::Cand2D> ElectrodeAutoIdentifier::CollectDis
     return cands;
 }
 
-int ElectrodeAutoIdentifier::PickClosestInSectorFrom(const std::vector<Cand2D>& cands,
-    const std::vector<bool>& used,
-    double ax,
-    double ay,
-    double h0,
-    double h1)
+static double Dist(const std::array<double, 3>& a,
+    const std::array<double, 3>& b)
+{
+    const double dx = a[0] - b[0];
+    const double dy = a[1] - b[1];
+    const double dz = a[2] - b[2];
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
+    const std::vector<Cand2D>& cands,
+    double ax, double ay,
+    double h0, double h1,
+    const std::array<double, 3>& volumeCenterW,
+    double maxRadiusFromCenter)
 {
     int best = -1;
     double bestR2 = std::numeric_limits<double>::max();
 
     for (int i = 0; i < static_cast<int>(cands.size()); ++i)
     {
-        if (used[i])
-            continue;
-
+        // 1) сектор по часам в 2D
         const double dx = cands[i].x - ax;
         const double dy = cands[i].y - ay;
 
@@ -208,10 +254,19 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(const std::vector<Cand2D>& 
         if (!inHourSector(theta, h0, h1))
             continue;
 
-        const double r2 = dx * dx + dy * dy;
-        if (r2 < bestR2)
+        // 2) фильтр по радиусу от центра объёма (world)
+        if (maxRadiusFromCenter < std::numeric_limits<double>::infinity())
         {
-            bestR2 = r2;
+            const double rFromCenter = Dist(volumeCenterW, cands[i].w);
+            if (rFromCenter > maxRadiusFromCenter)
+                continue;
+        }
+
+        // 3) “первый” = ближайший к якорю в 2D
+        const double d2 = dx * dx + dy * dy;
+        if (d2 < bestR2)
+        {
+            bestR2 = d2;
             best = i;
         }
     }
@@ -222,10 +277,9 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(const std::vector<Cand2D>& 
 ElectrodeAutoIdentifier::Anchor ElectrodeAutoIdentifier::AnchorFromPanel(const ElectrodePanel* panel, vtkRenderer* ren, ElectrodePanel::ElectrodeId id)
 {
     Anchor a;
-    std::array<double, 3> w{};
-    if (!FindPanelCoord(panel, id, w))
+    if (!FindPanelCoord(panel, id, a.w))
         return a;
-    if (!WorldToDisplay(ren, w, a.x, a.y))
+    if (!WorldToDisplay(ren, a.w, a.x, a.y))
         return a;
     a.valid = true;
     return a;
@@ -316,73 +370,180 @@ ElectrodeAutoIdentifier::PrecordialResult ElectrodeAutoIdentifier::SearchV1V6(El
         return r;
 
     auto& det = ElectrodeSurfaceDetector::instance();
-    const auto centers = det.currentSphereCenters();
-    if (centers.empty())
+    const auto commitByWorld = [&](ElectrodePanel::ElectrodeId id,
+        const std::array<double, 3>& w,
+        bool& outPlaced,
+        std::array<double, 3>& outWorld) -> Anchor
+        {
+            Anchor a;
+            if (panel->commitElectrodeFromWorld(id, w))
+            {
+                outPlaced = true;
+                outWorld = w;
+                a.w = w;
+                a.valid = true;
+                a.valid = WorldToDisplay(ren, w, a.x, a.y);
+                det.removeSphereNearWorld(ren, w, 25.0);
+            }
+
+            return a;
+        };
+
+    std::array<double, 3> volCenterW{};
+    if (!ComputeVolumeWorldCenter(ren, volCenterW))
         return r;
 
-    const auto cands = CollectDisplayCandidates(ren, centers);
+    const auto commitFromSector = [&](ElectrodePanel::ElectrodeId id,
+        const std::array<double, 3>& anchorW,
+        double ax, double ay,
+        double h0, double h1,
+        bool& outPlaced,
+        std::array<double, 3>& outWorld) -> Anchor
+        {
+            Anchor a;
 
-    if (cands.empty())
-        return r;
+            const auto centersNow = det.currentSphereCenters();
+            if (centersNow.empty())
+                return a;
+
+            const auto cands = CollectDisplayCandidates(ren, centersNow);
+            if (cands.empty())
+                return a;
+
+            const double rAnchor = Dist(volCenterW, anchorW);
+
+            double maxR = std::numeric_limits<double>::infinity();
+
+            if (rAnchor > 1e-3)   // якорь не центр
+            {
+                const double k = 1.08;
+                maxR = rAnchor * k;
+            }
+
+            const int idx = PickClosestInSectorFrom(cands,
+                ax, ay, h0, h1,
+                volCenterW, maxR);
+
+            if (idx < 0 || idx >= static_cast<int>(cands.size()))
+                return a;
+
+            return commitByWorld(id, cands[idx].w, outPlaced, outWorld);
+    };
 
     double cx = 0.0;
     double cy = 0.0;
     if (!ComputeVolumeDisplayCenter(ren, cx, cy))
         return r;
 
-    std::vector<bool> used(cands.size(), false);
-
-    const auto commitByIndex = [&](ElectrodePanel::ElectrodeId id, int idx, bool& outPlaced, std::array<double, 3>& outWorld) -> Anchor
-        {
-            Anchor a;
-            if (idx < 0 || idx >= static_cast<int>(cands.size()))
-                return a;
-
-            if (panel->commitElectrodeFromWorld(id, cands[idx].w))
-            {
-                used[idx] = true;
-                outPlaced = true;
-                outWorld = cands[idx].w;
-                a.valid = true;
-                a.x = cands[idx].x;
-                a.y = cands[idx].y;
-                det.removeSphereNearWorld(ren, cands[idx].w, 25.0);
-            }
-
-            return a;
-        };
-
-
     Anchor aV1 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V1);
     if (!aV1.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V1))
-        aV1 = commitByIndex(ElectrodePanel::ElectrodeId::V1,
-            PickClosestInSectorFrom(cands, used, cx, cy, 10.5, 12.0),
+        aV1 = commitFromSector(ElectrodePanel::ElectrodeId::V1,
+            volCenterW,
+            cx, cy, 10.5, 12.0,
             r.placedV1, r.wV1);
 
     Anchor aV2 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V2);
     if (!aV2.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V2))
-        aV2 = commitByIndex(ElectrodePanel::ElectrodeId::V2,
-            PickClosestInSectorFrom(cands, used, cx, cy, 12.0, 1.5),
+        aV2 = commitFromSector(ElectrodePanel::ElectrodeId::V2,
+            volCenterW,
+            cx, cy, 12.0, 1.5,
             r.placedV2, r.wV2);
+
+    const auto rotateAzimuthToCenterX = [&](ElectrodePanel::ElectrodeId id, int iters = 2)
+        {
+            auto* cam = ren->GetActiveCamera();
+            if (!cam) return;
+
+            auto* rw = ren->GetRenderWindow();
+            if (!rw) return;
+
+            for (int it = 0; it < iters; ++it)
+            {
+                // текущий якорь (после предыдущих поворотов)
+                Anchor a0 = AnchorFromPanel(panel, ren, id);
+                if (!a0.valid) return;
+
+                double cxD = 0.0, cyD = 0.0;
+                if (!ComputeVolumeDisplayCenter(ren, cxD, cyD))
+                    return;
+
+                const double err = (a0.x - cxD);
+                if (std::abs(err) < 1.0)
+                    return; // уже почти по центру
+
+                // пробный поворот
+                const double testDeg = 1.0;
+                cam->Azimuth(+testDeg);
+                cam->OrthogonalizeViewUp();
+                ren->ResetCameraClippingRange();
+                rw->Render();
+
+                Anchor a1 = AnchorFromPanel(panel, ren, id);
+
+                // откат
+                cam->Azimuth(-testDeg);
+                cam->OrthogonalizeViewUp();
+                ren->ResetCameraClippingRange();
+                rw->Render();
+
+                if (!a1.valid) return;
+
+                const double dx_per_deg = (a1.x - a0.x) / testDeg;
+                if (std::abs(dx_per_deg) < 1e-6)
+                    return;
+
+                double deltaAz = -err / dx_per_deg;
+
+                // чтоб не улетать
+                deltaAz = std::clamp(deltaAz, -25.0, +25.0);
+
+                cam->Azimuth(deltaAz);
+                cam->OrthogonalizeViewUp();
+                ren->ResetCameraClippingRange();
+                rw->Render();
+            }
+        };
+
+    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V2);
+    aV2 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V2);
 
     Anchor aV3 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V3);
     if (!aV3.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V3) && aV2.valid)
-        aV3 = commitByIndex(ElectrodePanel::ElectrodeId::V3,
-            PickClosestInSectorFrom(cands, used, aV2.x, aV2.y, 3.0, 6.0),
+        aV3 = commitFromSector(ElectrodePanel::ElectrodeId::V3,
+            aV2.w,
+            aV2.x, aV2.y, 3.0, 6.0,
             r.placedV3, r.wV3);
+
+    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V3);
+    aV3 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V3);
 
     Anchor aV4 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V4);
     if (!aV4.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V4) && aV3.valid)
-        aV4 = commitByIndex(ElectrodePanel::ElectrodeId::V4,
-            PickClosestInSectorFrom(cands, used, aV3.x, aV3.y, 3.0, 6.0),
+        aV4 = commitFromSector(ElectrodePanel::ElectrodeId::V4,
+            aV3.w, aV3.x, aV3.y, 2.0, 6.0,
             r.placedV4, r.wV4);
 
-    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V5) && aV4.valid)
-    {
-        commitByIndex(ElectrodePanel::ElectrodeId::V5,
-            PickClosestInSectorFrom(cands, used, aV4.x, aV4.y, 1.0, 5.0),
+    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V4);
+    aV4 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V4);
+
+    Anchor aV5 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V5);
+    if (!aV5.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V5) && aV4.valid)
+        aV5 = commitFromSector(ElectrodePanel::ElectrodeId::V5,
+            aV4.w, aV4.x, aV4.y, 1.0, 5.0,
             r.placedV5, r.wV5);
-    }
+
+    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V5);
+    aV5 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V5);
+
+    Anchor aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
+    if (!aV6.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V6) && aV5.valid)
+        aV6 = commitFromSector(ElectrodePanel::ElectrodeId::V6,
+            aV5.w, aV5.x, aV5.y, 1.0, 5.0,
+            r.placedV6, r.wV6);
+
+    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V6);
+    aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
+
     return r;
 }
 
