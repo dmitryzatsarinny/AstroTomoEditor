@@ -373,11 +373,32 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchV1V6, &QPushButton::clicked, this, [this]
         {
             emit searchV1V6Requested();
+            updateSearchV7V12ButtonVisibility();
+        });
+
+    // Search V7-V12
+    mBtnSearchV7V12 = new QPushButton(tr("Search V7-V12"), this);
+    mBtnSearchV7V12->setCursor(Qt::PointingHandCursor);
+    mBtnSearchV7V12->setFixedHeight(26);
+    mBtnSearchV7V12->setStyleSheet(
+        "QPushButton{"
+        "   background:rgba(60,60,60,140);"
+        "   border:1px solid rgba(255,255,255,60);"
+        "   border-radius:6px; padding:0 8px; text-align:center; color:#fff;}"
+        "QPushButton:hover{ background:rgba(90,90,90,170); }"
+        "QPushButton:pressed{ background:rgba(120,120,120,190); }"
+    );
+
+    connect(mBtnSearchV7V12, &QPushButton::clicked, this, [this]
+        {
+            emit searchV7V12Requested();
             updateSearchV1V6ButtonVisibility();
+            updateSearchV7V12ButtonVisibility();
         });
 
     retain(mBtnSearchRLFN);
     retain(mBtnSearchV1V6);
+    retain(mBtnSearchV7V12);
 
     buttonsRow->addWidget(mBtnAuto, 1);
     buttonsRow->addWidget(mBtnSave, 1);
@@ -386,6 +407,8 @@ void ElectrodePanel::buildUi()
     grid->setRowMinimumHeight(row + 1, mBtnSearchRLFN->sizeHint().height());
     grid->addWidget(mBtnSearchV1V6, row + 2, 0, 1, vcolumn);
     grid->setRowMinimumHeight(row + 2, mBtnSearchV1V6->sizeHint().height());
+    grid->addWidget(mBtnSearchV7V12, row + 2, 0, 1, vcolumn);
+    grid->setRowMinimumHeight(row + 2, mBtnSearchV7V12->sizeHint().height());
 
     right->addLayout(buttonsRow);
     right->addStretch(1);
@@ -401,6 +424,7 @@ void ElectrodePanel::buildUi()
     QTimer::singleShot(0, this, [this] { rebuildMask(); });
     updateSearchRLFNButtonVisibility();
     updateSearchV1V6ButtonVisibility();
+    updateSearchV7V12ButtonVisibility();
 }
 
 void ElectrodePanel::updateSearchV1V6ButtonVisibility()
@@ -411,6 +435,13 @@ void ElectrodePanel::updateSearchV1V6ButtonVisibility()
     mBtnSearchV1V6->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV1V6(this));
 }
 
+void ElectrodePanel::updateSearchV7V12ButtonVisibility()
+{
+    if (!mBtnSearchV7V12)
+        return;
+
+    mBtnSearchV7V12->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV7V12(this));
+}
 
 void ElectrodePanel::updateSearchRLFNButtonVisibility()
 {
@@ -483,6 +514,7 @@ void ElectrodePanel::rebuildMask()
     addBtnToMask(mBtnSave);
     addBtnToMask(mBtnSearchRLFN);
     addBtnToMask(mBtnSearchV1V6);
+    addBtnToMask(mBtnSearchV7V12);
 
     setMask(reg);
 }
@@ -931,6 +963,7 @@ void ElectrodePanel::setHasCoord(ElectrodeId id, bool has)
     it.value()->setHasCoord(has);
     updateSearchRLFNButtonVisibility();
     updateSearchV1V6ButtonVisibility();
+    updateSearchV7V12ButtonVisibility();
 }
 
 bool ElectrodePanel::hasCoord(ElectrodeId id) const
@@ -963,6 +996,11 @@ void ElectrodePanel::refreshSearchV1V6Button()
     updateSearchV1V6ButtonVisibility();
 }
 
+void ElectrodePanel::refreshSearchV7V12Button()
+{
+    updateSearchV7V12ButtonVisibility();
+}
+
 void ElectrodePanel::retranslateUi()
 {
     if (mBtnAuto)
@@ -973,6 +1011,8 @@ void ElectrodePanel::retranslateUi()
         mBtnSearchRLFN->setText(tr("Search RLFN"));
     if (mBtnSearchV1V6)
         mBtnSearchV1V6->setText(tr("Search V1-V6"));
+    if (mBtnSearchV7V12)
+        mBtnSearchV7V12->setText(tr("Search V7-V12"));
 }
 
 QVector<ElectrodePanel::ElectrodeCoord> ElectrodePanel::coordsWorld() const

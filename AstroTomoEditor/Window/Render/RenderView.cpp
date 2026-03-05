@@ -424,6 +424,7 @@ void RenderView::buildOverlay()
             mElectrodePanel->setManualAddEnabled(true);
             mElectrodePanel->refreshSearchRLFNButton();
             mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
 
             qDebug() << "[AutoElectrodes] detected:" << int(centers.size())
                 << "excluded:" << int(excludedWorld.size())
@@ -442,6 +443,7 @@ void RenderView::buildOverlay()
             ElectrodeAutoIdentifier::SearchRLFN(mElectrodePanel, mRenderer);
             mElectrodePanel->refreshSearchRLFNButton();
             mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -453,6 +455,19 @@ void RenderView::buildOverlay()
             setViewPreset(ViewPreset::AP);
             ElectrodeAutoIdentifier::SearchV1V6(mElectrodePanel, mRenderer);
             mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
+            mVtk->renderWindow()->Render();
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::searchV7V12Requested, this, [this]()
+        {
+            if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            setViewPreset(ViewPreset::R);
+            ElectrodeAutoIdentifier::SearchV7V12(mElectrodePanel, mRenderer);
+            mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -465,6 +480,7 @@ void RenderView::buildOverlay()
             ElectrodeSurfaceDetector::instance().addManualSphere(mRenderer, world);
             mElectrodePanel->refreshSearchRLFNButton();
             mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
             mVtk->renderWindow()->Render();
         });
 

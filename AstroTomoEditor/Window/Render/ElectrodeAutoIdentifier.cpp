@@ -559,6 +559,193 @@ ElectrodeAutoIdentifier::PrecordialResult ElectrodeAutoIdentifier::SearchV1V6(El
     return r;
 }
 
+ElectrodeAutoIdentifier::PrecordialResult ElectrodeAutoIdentifier::SearchV7V12(ElectrodePanel* panel, vtkRenderer* ren)
+{
+    PrecordialResult r;
+    if (!panel || !ren)
+        return r;
+
+    auto& det = ElectrodeSurfaceDetector::instance();
+    const auto commitByWorld = [&](ElectrodePanel::ElectrodeId id,
+        const std::array<double, 3>& w,
+        bool& outPlaced,
+        std::array<double, 3>& outWorld) -> Anchor
+        {
+            Anchor a;
+            if (panel->commitElectrodeFromWorld(id, w))
+            {
+                outPlaced = true;
+                outWorld = w;
+                a.w = w;
+                a.valid = true;
+                a.valid = WorldToDisplay(ren, w, a.x, a.y);
+                det.removeSphereNearWorld(ren, w, 25.0);
+            }
+
+            return a;
+        };
+
+    std::array<double, 3> volCenterW{};
+    if (!ComputeVolumeWorldCenter(ren, volCenterW))
+        return r;
+
+    const auto commitFromSector = [&](ElectrodePanel::ElectrodeId id,
+        const std::array<double, 3>& anchorW,
+        double ax, double ay,
+        double h0, double h1,
+        bool& outPlaced,
+        std::array<double, 3>& outWorld) -> Anchor
+        {
+            Anchor a;
+
+            const auto centersNow = det.currentSphereCenters();
+            if (centersNow.empty())
+                return a;
+
+            const auto cands = CollectDisplayCandidates(ren, centersNow);
+            if (cands.empty())
+                return a;
+
+            const double rAnchor = Dist(volCenterW, anchorW);
+
+            double minR = 0.0;
+            double maxR = std::numeric_limits<double>::infinity();
+            bool useAnchorHemisphere = false;
+
+            if (rAnchor > 1e-3)
+            {
+                const double radialTolerance = std::max(8.0, rAnchor * 0.18);
+                minR = std::max(0.0, rAnchor - radialTolerance);
+                maxR = rAnchor + radialTolerance;
+                useAnchorHemisphere = true;
+            }
+
+            const int idx = PickClosestInSectorFrom(cands,
+                ax, ay, h0, h1,
+                volCenterW, minR, maxR,
+                anchorW, useAnchorHemisphere);
+
+            if (idx < 0 || idx >= static_cast<int>(cands.size()))
+                return a;
+
+            return commitByWorld(id, cands[idx].w, outPlaced, outWorld);
+    };
+
+    const auto rotateAzimuthToCenterX = [&](ElectrodePanel::ElectrodeId id, int iters = 2)
+        {
+            auto* cam = ren->GetActiveCamera();
+            if (!cam) return;
+
+            auto* rw = ren->GetRenderWindow();
+            if (!rw) return;
+
+            for (int it = 0; it < iters; ++it)
+            {
+                // текущий якорь (после предыдущих поворотов)
+                Anchor a0 = AnchorFromPanel(panel, ren, id);
+                if (!a0.valid) return;
+
+                double cxD = 0.0, cyD = 0.0;
+                if (!ComputeVolumeDisplayCenter(ren, cxD, cyD))
+                    return;
+
+                const double err = (a0.x - cxD);
+                if (std::abs(err) < 1.0)
+                    return; // уже почти по центру
+
+                // пробный поворот
+                const double testDeg = 1.0;
+                cam->Azimuth(+testDeg);
+                cam->OrthogonalizeViewUp();
+                ren->ResetCameraClippingRange();
+                rw->Render();
+
+                Anchor a1 = AnchorFromPanel(panel, ren, id);
+
+                // откат
+                cam->Azimuth(-testDeg);
+                cam->OrthogonalizeViewUp();
+                ren->ResetCameraClippingRange();
+                rw->Render();
+
+                if (!a1.valid) return;
+
+                const double dx_per_deg = (a1.x - a0.x) / testDeg;
+                if (std::abs(dx_per_deg) < 1e-6)
+                    return;
+
+                double deltaAz = -err / dx_per_deg;
+
+                // чтоб не улетать
+                deltaAz = std::clamp(deltaAz, -25.0, +25.0);
+
+                cam->Azimuth(deltaAz);
+                cam->OrthogonalizeViewUp();
+                ren->ResetCameraClippingRange();
+                rw->Render();
+            }
+        };
+
+    const auto placeSequential = [&](ElectrodePanel::ElectrodeId id,
+        Anchor prevAnchor,
+        double h0, double h1,
+        bool& outPlaced,
+        std::array<double, 3>& outWorld) -> Anchor
+        {
+            Anchor a = AnchorFromPanel(panel, ren, id);
+            if (!a.valid && !panel->hasCoord(id) && prevAnchor.valid)
+            {
+                a = commitFromSector(id,
+                    prevAnchor.w, prevAnchor.x, prevAnchor.y, h0, h1,
+                    outPlaced, outWorld);
+            }
+
+            rotateAzimuthToCenterX(id);
+            return AnchorFromPanel(panel, ren, id);
+        };
+
+    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V6);
+    Anchor aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
+
+    Anchor aV7 = placeSequential(ElectrodePanel::ElectrodeId::V7, aV6, 1.5, 4.5, r.placedV7, r.wV7);
+    Anchor aV8 = placeSequential(ElectrodePanel::ElectrodeId::V8, aV7, 1.5, 4.5, r.placedV8, r.wV8);
+    Anchor aV9 = placeSequential(ElectrodePanel::ElectrodeId::V9, aV8, 1.5, 4.5, r.placedV9, r.wV9);
+    Anchor aV10 = placeSequential(ElectrodePanel::ElectrodeId::V10, aV9, 1.5, 4.5, r.placedV10, r.wV10);
+    Anchor aV11 = placeSequential(ElectrodePanel::ElectrodeId::V11, aV10, 1.5, 4.5, r.placedV11, r.wV11);
+
+    return r;
+}
+
+bool ElectrodeAutoIdentifier::ShouldShowSearchV7V12(const ElectrodePanel* panel)
+{
+    if (!panel)
+        return false;
+
+    const bool hasV1V6 = panel->hasCoord(ElectrodePanel::ElectrodeId::V1)
+        && panel->hasCoord(ElectrodePanel::ElectrodeId::V2)
+        && panel->hasCoord(ElectrodePanel::ElectrodeId::V3)
+        && panel->hasCoord(ElectrodePanel::ElectrodeId::V4)
+        && panel->hasCoord(ElectrodePanel::ElectrodeId::V5)
+        && panel->hasCoord(ElectrodePanel::ElectrodeId::V6);
+
+    if (!hasV1V6)
+        return false;
+
+    int missing = 0;
+    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V7)) ++missing;
+    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V8)) ++missing;
+    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V9)) ++missing;
+    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V10)) ++missing;
+    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V11)) ++missing;
+    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V12)) ++missing;
+
+    if (missing <= 0)
+        return false;
+
+    const int availableSpheres = ElectrodeSurfaceDetector::instance().sphereCount();
+    return availableSpheres >= missing;
+}
+
 bool ElectrodeAutoIdentifier::ShouldShowSearchV1V6(const ElectrodePanel* panel)
 {
     if (!panel)

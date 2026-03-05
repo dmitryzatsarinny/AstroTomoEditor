@@ -71,6 +71,7 @@ public:
     void retranslateUi();
     void refreshSearchRLFNButton();
     void refreshSearchV1V6Button();
+    void refreshSearchV7V12Button();
 
     struct ElectrodeCoord
     {
@@ -102,6 +103,7 @@ signals:
     void autoRequested();
     void searchRLFNRequested();
     void searchV1V6Requested();
+    void searchV7V12Requested();
     void electrodeAltRightClicked(std::array<double, 3> world);
 
 public slots:
@@ -115,6 +117,7 @@ private:
     void rebuildMask();
     void updateSearchRLFNButtonVisibility();
     void updateSearchV1V6ButtonVisibility();
+    void updateSearchV7V12ButtonVisibility();
 
     bool pickAt(const QPoint& pDevice, std::array<int, 3>& outIJK, std::array<double, 3>& outW) const;
     bool displayRay(const QPoint& pDevice, double outP0[3], double outP1[3]) const;
@@ -135,6 +138,7 @@ private:
     QPushButton* mBtnAuto = nullptr;
     QPushButton* mBtnSearchRLFN = nullptr;
     QPushButton* mBtnSearchV1V6 = nullptr;
+    QPushButton* mBtnSearchV7V12 = nullptr;
 
     ElectrodeId mCurrent{ ElectrodeId::Count }; // none
 
