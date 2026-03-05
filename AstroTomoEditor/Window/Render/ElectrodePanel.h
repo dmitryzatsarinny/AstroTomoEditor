@@ -84,6 +84,7 @@ public:
 
     QVector<ElectrodeCoord> coordsWorld() const;
     QVector<ElectrodeIJKCoord> coordsIJK() const;
+    bool commitElectrodeFromWorld(ElectrodeId id, const std::array<double, 3>& world);
 
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
@@ -126,6 +127,7 @@ private:
 
     QPushButton* mBtnSave = nullptr;
     QPushButton* mBtnAuto = nullptr;
+    QPushButton* mBtnSearchRLFN = nullptr;
 
     ElectrodeId mCurrent{ ElectrodeId::Count }; // none
 

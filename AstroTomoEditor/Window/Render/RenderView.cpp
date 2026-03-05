@@ -405,16 +405,24 @@ void RenderView::buildOverlay()
 
     connect(mElectrodePanel, &ElectrodePanel::autoRequested, this, [this]()
         {
-            if (!mImage || !mRenderer) return;
+            if (!mImage || !mRenderer || !mElectrodePanel) return;
 
             auto& detector = ElectrodeSurfaceDetector::instance();
             ElectrodeSurfaceDetector::Options opt = detector.options();
             detector.setOptions(opt);
 
-            const auto centers = detector.detectAndShow(mImage, mRenderer);
+            std::vector<std::array<double, 3>> excludedWorld = detector.currentSphereCenters();
+            const auto committed = mElectrodePanel->coordsWorld();
+            excludedWorld.reserve(excludedWorld.size() + committed.size());
+            for (const auto& e : committed)
+                excludedWorld.push_back(e.world);
+
+            const auto centers = detector.detectAndShow(mImage, mRenderer, excludedWorld);
             mElectrodePanel->setManualAddEnabled(true);
 
-            qDebug() << "[AutoElectrodes] detected:" << int(centers.size());
+            qDebug() << "[AutoElectrodes] detected:" << int(centers.size())
+                << "excluded:" << int(excludedWorld.size())
+                << "radiusMm:" << opt.exclusionRadiusMm;
 
             if (mVtk && mVtk->renderWindow())
                 mVtk->renderWindow()->Render();
@@ -1046,23 +1054,19 @@ QString RenderView::defaultStlDirectory() const
 
 QString RenderView::defaultStlFileName() const
 {
-    switch (mLastTemplateForStl)
+    switch (resolveTemplateForStl())
     {
     case TemplateId::LA:
     case TemplateId::LA_Endo:
-        qDebug() << "heart0.stl";
         return "heart0.stl";
     case TemplateId::LV:
     case TemplateId::LV_Endo:
-        qDebug() << "heart1.stl";
         return "heart1.stl";
     case TemplateId::RA:
     case TemplateId::RA_Endo:
-        qDebug() << "heart2.stl";
         return "heart2.stl";
     case TemplateId::RV:
     case TemplateId::RV_Endo:
-        qDebug() << "heart3.stl";
         return "heart3.stl";
     default:
         return "tors.stl";
@@ -1074,6 +1078,8 @@ void RenderView::onTemplateSetVisible(TemplateId id, bool on)
     if (!mTemplateDlg) return;
 
     mLastTemplateForStl = id;
+    if (on)
+        mLastEnabledTemplateForStl = id;
 
     const auto* s = mTemplateDlg->slot(id);
     if (!s || !s->hasData()) return;
@@ -1890,6 +1896,9 @@ void RenderView::onSaveBuiltStl()
 
     QSettings s;
     const QString defDir = defaultStlDirectory();
+
+    if (!QDir(defDir).exists())
+        QDir(defDir).mkpath(defDir);
     const QString defPath = QDir(defDir).filePath(defaultStlFileName());
     qDebug() << defPath;
 
@@ -2289,6 +2298,59 @@ void RenderView::centerOnVolume()
     // 4) поправляем клиппинг и перерисовываем
     mRenderer->ResetCameraClippingRange();
     if (auto* rw = mVtk->renderWindow()) rw->Render();
+}
+
+bool RenderView::isHeartChamberTemplate(TemplateId id) const
+{
+    switch (id)
+    {
+    case TemplateId::LA:
+    case TemplateId::LA_Endo:
+    case TemplateId::RA:
+    case TemplateId::RA_Endo:
+    case TemplateId::LV:
+    case TemplateId::LV_Endo:
+    case TemplateId::RV:
+    case TemplateId::RV_Endo:
+        return true;
+    default:
+        return false;
+    }
+}
+
+TemplateId RenderView::resolveTemplateForStl() const
+{
+    if (!mTemplateDlg)
+        return mLastTemplateForStl;
+
+    int visibleHeartTemplates = 0;
+    TemplateId singleVisibleHeartTemplate = TemplateId::Count;
+
+    for (int i = 0; i < static_cast<int>(TemplateId::Count); ++i)
+    {
+        const auto id = static_cast<TemplateId>(i);
+        if (!isHeartChamberTemplate(id))
+            continue;
+
+        const auto* slot = mTemplateDlg->slot(id);
+        if (!slot || !slot->hasData() || !slot->visible)
+            continue;
+
+        ++visibleHeartTemplates;
+        singleVisibleHeartTemplate = id;
+    }
+
+    if (visibleHeartTemplates == 1)
+        return singleVisibleHeartTemplate;
+
+    if (visibleHeartTemplates > 1 && isHeartChamberTemplate(mLastEnabledTemplateForStl))
+    {
+        const auto* lastEnabledSlot = mTemplateDlg->slot(mLastEnabledTemplateForStl);
+        if (lastEnabledSlot && lastEnabledSlot->hasData() && lastEnabledSlot->visible)
+            return mLastEnabledTemplateForStl;
+    }
+
+    return mLastTemplateForStl;
 }
 
 void RenderView::updateGradientOpacity()

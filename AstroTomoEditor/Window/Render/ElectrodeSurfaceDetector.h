@@ -37,6 +37,7 @@ public:
         double maxRadiusStdRel = 0.99;    // std(r)/mean(r)
 
         double sphereRadiusMm = 5.0;      // как рисовать маркер
+        double exclusionRadiusMm = 20.0;
     };
 
     ElectrodeSurfaceDetector();
@@ -45,15 +46,22 @@ public:
     void setOptions(const Options& opt) { opt_ = opt; }
     const Options& options() const { return opt_; }
 
-    std::vector<std::array<double, 3>> detectAndShow(vtkImageData* img, vtkRenderer* ren);
+    std::vector<std::array<double, 3>> detectAndShow(
+        vtkImageData* img,
+        vtkRenderer* ren,
+        const std::vector<std::array<double, 3>>& excludedWorld = {});
     void clear(vtkRenderer* ren);
     void addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world);
     bool removeSphereAtDisplay(vtkRenderer* ren, int x, int y, vtkRenderWindow* rw = nullptr);
+    std::vector<std::array<double, 3>> currentSphereCenters() const;
     bool closestSphereAtDisplay(vtkRenderer* ren, int x, int y,
         double maxDistPx,
         std::array<double, 3>& outWorld,
         double* outDistPx = nullptr,
         double* outRadiusMm = nullptr) const;
+    bool removeSphereNearWorld(vtkRenderer* ren,
+        const std::array<double, 3>& world,
+        double maxDistMm);
 
 private:
     struct SphereMarker

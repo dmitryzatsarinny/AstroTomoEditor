@@ -1,5 +1,6 @@
 ﻿#include "ElectrodePanel.h"
 #include "ElectrodeSurfaceDetector.h"
+#include "ElectrodeAutoIdentifier.h"
 
 #include <QToolButton>
 #include <QPushButton>
@@ -328,8 +329,29 @@ void ElectrodePanel::buildUi()
     );
     connect(mBtnSave, &QPushButton::clicked, this, &ElectrodePanel::saveRequested);
 
+    // Search RLFN
+    mBtnSearchRLFN = new QPushButton(tr("Search RLFN"), this);
+    mBtnSearchRLFN->setCursor(Qt::PointingHandCursor);
+    mBtnSearchRLFN->setFixedHeight(26);
+    mBtnSearchRLFN->setStyleSheet(
+        "QPushButton{"
+        "   background:rgba(60,60,60,140);"
+        "   border:1px solid rgba(255,255,255,60);"
+        "   border-radius:6px; padding:0 8px; text-align:center; color:#fff;}"
+        "QPushButton:hover{ background:rgba(90,90,90,170); }"
+        "QPushButton:pressed{ background:rgba(120,120,120,190); }"
+    );
+
+    connect(mBtnSearchRLFN, &QPushButton::clicked, this, [this]
+        {
+            if (!mPick.renderer) return;
+            ElectrodeAutoIdentifier::SearchRLFN(this, mPick.renderer);
+            requestRender();
+        });
+
     buttonsRow->addWidget(mBtnAuto, 1);
     buttonsRow->addWidget(mBtnSave, 1);
+    buttonsRow->addWidget(mBtnSearchRLFN, 1);
 
     right->addLayout(buttonsRow);
     right->addStretch(1);
@@ -406,12 +428,50 @@ void ElectrodePanel::rebuildMask()
 
     addBtnToMask(mBtnAuto);
     addBtnToMask(mBtnSave);
+    addBtnToMask(mBtnSearchRLFN);
 
     setMask(reg);
 }
 
+bool ElectrodePanel::commitElectrodeFromWorld(ElectrodeId id, const std::array<double, 3>& world)
+{
+    if (id == ElectrodeId::Count)
+        return false;
+    if (!mPick.image || !mPick.renderer)
+        return false;
 
+    int ijkRaw[3]{ 0,0,0 };
+    const double wRaw[3]{ world[0], world[1], world[2] };
 
+    if (!worldToIJK(wRaw, ijkRaw))
+        return false;
+
+    std::array<int, 3> ijk{ ijkRaw[0], ijkRaw[1], ijkRaw[2] };
+    std::array<double, 3> w = world;
+
+    // центр для вырезания
+    mCutCenterIJK[id] = ijk;
+    mCutVisible[id] = true;
+
+    applyCut(id, ijk);
+
+    // запоминаем “центр” как есть, но маркер можно снэпнуть на поверхность
+    mCutCenterWorld[id] = w;
+
+    std::array<double, 3> wMarker = w;
+    std::array<int, 3> ijkMarker = ijk;
+
+    snapToSurfaceTowardsCamera(mCutCenterWorld[id], ijkMarker, wMarker);
+
+    updateMarker(id, wMarker, ijkMarker);
+    setMarkerVisible(id, true);
+
+    setHasCoord(id, true);
+
+    emit pickCommitted(id, ijkMarker, wMarker);
+    requestRender();
+    return true;
+}
 
 bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
 {
@@ -842,6 +902,8 @@ void ElectrodePanel::retranslateUi()
         mBtnAuto->setText(tr("Auto detect"));
     if (mBtnSave)
         mBtnSave->setText(tr("Save electrodes coords"));
+    if (mBtnSearchRLFN)
+        mBtnSearchRLFN->setText(tr("Search RLFN"));
 }
 
 QVector<ElectrodePanel::ElectrodeCoord> ElectrodePanel::coordsWorld() const

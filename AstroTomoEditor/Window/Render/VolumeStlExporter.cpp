@@ -17,6 +17,7 @@
 #include <vtkPiecewiseFunction.h>
 #include <vtkDecimatePro.h>
 #include <vtkFillHolesFilter.h>
+#include <vtkFeatureEdges.h>
 #include <vtkPolyDataMapper.h>
 #include <vtkSTLWriter.h>
 #include <vtkQuadricClustering.h>
@@ -798,7 +799,7 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     int ext01[6];
     to01->GetOutput()->GetExtent(ext01);
 
-    constexpr int PAD = 2;
+    constexpr int PAD = 6;
     pad->SetOutputWholeExtent(
         ext01[0] - PAD, ext01[1] + PAD,
         ext01[2] - PAD, ext01[3] + PAD,
@@ -892,6 +893,16 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         clean->SetInputConnection(tri->GetOutputPort());
         clean->Update();
         if (opt.progress) opt.progress(85, tr("Cleaning"));
+
+        vtkNew<vtkFeatureEdges> feEdges;
+        feEdges->SetInputConnection(clean->GetOutputPort());
+        feEdges->BoundaryEdgesOn();
+        feEdges->FeatureEdgesOff();
+        feEdges->ManifoldEdgesOff();
+        feEdges->NonManifoldEdgesOff();
+        feEdges->Update();
+
+        qDebug() << "Boundary edges:" << feEdges->GetOutput()->GetNumberOfCells();
 
         vtkNew<vtkFillHolesFilter> fill;
         fill->SetInputConnection(clean->GetOutputPort());

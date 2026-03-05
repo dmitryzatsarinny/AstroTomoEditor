@@ -2587,7 +2587,7 @@ void ToolsRemoveConnected::AddBaseTopZ(Volume& vol, uint8_t shift)
     // Вспомогательная функция: есть ли "опора" под точкой (i, j)
     auto hasSupportBelow = [&](int i, int j) -> bool
         {
-            const int kMin = std::max(ext[4], firstObjK + shift);
+            const int kMin = std::max(ext[4], firstObjK - shift);
             for (int k = firstObjK - 1; k >= kMin; --k)
             {
                 const size_t idx = linearIdx(i, j, k, ext, nx, ny);
@@ -2691,7 +2691,7 @@ void ToolsRemoveConnected::AddBaseBottomZ(Volume& vol, uint8_t shift)
     // Вспомогательная функция: есть ли "опора" под точкой (i, j)
     auto hasSupportBelow = [&](int i, int j) -> bool
         {
-            const int kMax = std::min(ext[5], firstObjK - shift);
+            const int kMax = std::min(ext[5], firstObjK + shift);
             for (int k = firstObjK + 1; k <= kMax; ++k)
             {
                 const size_t idx = linearIdx(i, j, k, ext, nx, ny);

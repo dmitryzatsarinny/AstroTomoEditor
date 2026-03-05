@@ -40,6 +40,7 @@
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
     <ClCompile Include="Window\MainWindow\MainWindow.cpp" />
     <ClCompile Include="Window\MainWindow\PlanarView.cpp" />
+    <ClCompile Include="Window\Render\ElectrodeAutoIdentifier.cpp" />
     <ClCompile Include="Window\Render\ElectrodePanel.cpp">
       <DynamicSource Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">input</DynamicSource>
       <QtMocFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(Filename).moc</QtMocFileName>
@@ -96,6 +97,7 @@
     <QtMoc Include="Window\MainWindow\PatientDialog.h" />
     <QtMoc Include="Window\MainWindow\SettingsDialog.h" />
     <QtMoc Include="Window\Render\ElectrodePanel.h" />
+    <ClInclude Include="Window\Render\ElectrodeAutoIdentifier.h" />
     <ClInclude Include="Window\Render\ElectrodeSurfaceDetector.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxRepresentation.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxWidget.h" />

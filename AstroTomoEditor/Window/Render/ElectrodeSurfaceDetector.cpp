@@ -222,6 +222,43 @@ void ElectrodeSurfaceDetector::addSphere(vtkRenderer* ren, const std::array<doub
     actors_.push_back({ a, world });
 }
 
+bool ElectrodeSurfaceDetector::removeSphereNearWorld(vtkRenderer* ren,
+    const std::array<double, 3>& world,
+    double maxDistMm)
+{
+    if (!ren || actors_.empty())
+        return false;
+
+    const double thr2 = maxDistMm * maxDistMm;
+
+    int bestIdx = -1;
+    double bestD2 = thr2;
+
+    for (int i = 0; i < (int)actors_.size(); ++i)
+    {
+        const auto& c = actors_[i].center;
+        const double dx = c[0] - world[0];
+        const double dy = c[1] - world[1];
+        const double dz = c[2] - world[2];
+        const double d2 = dx * dx + dy * dy + dz * dz;
+
+        if (d2 <= bestD2)
+        {
+            bestD2 = d2;
+            bestIdx = i;
+        }
+    }
+
+    if (bestIdx < 0)
+        return false;
+
+    if (actors_[bestIdx].actor)
+        ren->RemoveActor(actors_[bestIdx].actor);
+
+    actors_.erase(actors_.begin() + bestIdx);
+    return true;
+}
+
 void ElectrodeSurfaceDetector::addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world)
 {
     addSphere(ren, world);
@@ -313,12 +350,23 @@ bool ElectrodeSurfaceDetector::closestSphereAtDisplay(vtkRenderer* ren,
     return true;
 }
 
-std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::detectAndShow(vtkImageData* img, vtkRenderer* ren)
+std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::currentSphereCenters() const
+{
+    std::vector<std::array<double, 3>> centers;
+    centers.reserve(actors_.size());
+    for (const auto& a : actors_)
+        centers.push_back(a.center);
+    return centers;
+}
+
+
+std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::detectAndShow(
+    vtkImageData* img,
+    vtkRenderer* ren,
+    const std::vector<std::array<double, 3>>& excludedWorld)
 {
     std::vector<std::array<double, 3>> centers;
     if (!img || !ren) return centers;
-
-    clear(ren);
 
     int dims[3]{ 0,0,0 };
     img->GetDimensions(dims);
@@ -590,6 +638,40 @@ std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::detectAndShow(vtkIm
         picked.push_back(c);
     }
 
+    int rejNearPlaced = 0;
+    if (!excludedWorld.empty() && opt_.exclusionRadiusMm > 0.0)
+    {
+        const double exclusionRadius2 = opt_.exclusionRadiusMm * opt_.exclusionRadiusMm;
+        std::vector<Cand> filtered;
+        filtered.reserve(picked.size());
+
+        for (const auto& c : picked)
+        {
+            bool tooClose = false;
+            for (const auto& ex : excludedWorld)
+            {
+                const double dx = c.world[0] - ex[0];
+                const double dy = c.world[1] - ex[1];
+                const double dz = c.world[2] - ex[2];
+                if ((dx * dx + dy * dy + dz * dz) <= exclusionRadius2)
+                {
+                    tooClose = true;
+                    break;
+                }
+            }
+
+            if (tooClose)
+            {
+                rejNearPlaced++;
+                continue;
+            }
+
+            filtered.push_back(c);
+        }
+
+        picked.swap(filtered);
+    }
+
     // 4) финал: рисуем сферы в центрах
     // Можно ещё сделать NMS по расстоянию между центрами, но ты сейчас просил “центр группы”,
     // так что оставим как есть.
@@ -619,6 +701,7 @@ std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::detectAndShow(vtkIm
 
         qDebug() << "[ElectrodeDetector] ... rejSimilar=" << rejSimilar
             << "rejRay=" << rejRay
+            << "rejNearPlaced=" << rejNearPlaced
             << "final=" << int(centers.size());
     }
 

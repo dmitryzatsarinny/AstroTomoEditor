@@ -170,6 +170,9 @@
     <ClCompile Include="Window\Render\ElectrodeSurfaceDetector.cpp">
       <Filter>Source Files\Window\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Window\Render\ElectrodeAutoIdentifier.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -233,6 +236,9 @@
       <Filter>Header Files\Services</Filter>
     </ClInclude>
     <ClInclude Include="Window\Render\ElectrodeSurfaceDetector.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\ElectrodeAutoIdentifier.h">
       <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
   </ItemGroup>

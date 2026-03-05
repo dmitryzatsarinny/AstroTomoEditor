@@ -259,13 +259,17 @@ private:
     bool mGradientOpacityOn = false;
     void updateGradientOpacity();
     
+    bool isHeartChamberTemplate(TemplateId id) const;
+    TemplateId resolveTemplateForStl() const;
     TemplateId mLastTemplateForStl{ TemplateId::Count };
+    TemplateId mLastEnabledTemplateForStl{ TemplateId::Count };
 
     void retranslateUi();
     void reloadToolsMenu();
     void reloadAppsMenu();
     void updateToolCaptionFromState();
     void updateAppCaptionFromState();
+
 
     void loadRenderSettings();
     void saveRenderSettings();
