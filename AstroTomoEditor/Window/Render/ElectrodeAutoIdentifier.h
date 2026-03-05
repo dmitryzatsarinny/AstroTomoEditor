@@ -69,6 +69,9 @@ public:
         double ax, double ay,
         double h0, double h1,
         const std::array<double, 3>& volumeCenterW,
-        double maxRadiusFromCenter);
+        double minRadiusFromCenter,
+        double maxRadiusFromCenter,
+        const std::array<double, 3>& anchorWorld,
+        bool useAnchorHemisphere);
     static Anchor AnchorFromPanel(const ElectrodePanel* panel, vtkRenderer* ren, ElectrodePanel::ElectrodeId id);
 };

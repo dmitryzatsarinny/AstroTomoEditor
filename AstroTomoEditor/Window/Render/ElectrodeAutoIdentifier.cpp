@@ -237,10 +237,19 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
     double ax, double ay,
     double h0, double h1,
     const std::array<double, 3>& volumeCenterW,
-    double maxRadiusFromCenter)
+    double minRadiusFromCenter,
+    double maxRadiusFromCenter,
+    const std::array<double, 3>& anchorWorld,
+    bool useAnchorHemisphere)
 {
     int best = -1;
     double bestR2 = std::numeric_limits<double>::max();
+
+    const std::array<double, 3> anchorVec{
+       anchorWorld[0] - volumeCenterW[0],
+       anchorWorld[1] - volumeCenterW[1],
+       anchorWorld[2] - volumeCenterW[2]
+    };
 
     for (int i = 0; i < static_cast<int>(cands.size()); ++i)
     {
@@ -255,14 +264,24 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
             continue;
 
         // 2) фильтр по радиусу от центра объёма (world)
-        if (maxRadiusFromCenter < std::numeric_limits<double>::infinity())
+        const double rFromCenter = Dist(volumeCenterW, cands[i].w);
+        if (rFromCenter < minRadiusFromCenter || rFromCenter > maxRadiusFromCenter)
+            continue;
+
+        // 3) отсечь электроды на противоположной стороне относительно центра
+        if (useAnchorHemisphere)
         {
-            const double rFromCenter = Dist(volumeCenterW, cands[i].w);
-            if (rFromCenter > maxRadiusFromCenter)
+            const std::array<double, 3> candVec{
+                 cands[i].w[0] - volumeCenterW[0],
+                 cands[i].w[1] - volumeCenterW[1],
+                 cands[i].w[2] - volumeCenterW[2]
+            };
+            const double dot = anchorVec[0] * candVec[0] + anchorVec[1] * candVec[1] + anchorVec[2] * candVec[2];
+            if (dot <= 0.0)
                 continue;
         }
 
-        // 3) “первый” = ближайший к якорю в 2D
+        // 4) ближайший к якорю в 2D
         const double d2 = dx * dx + dy * dy;
         if (d2 < bestR2)
         {
@@ -412,17 +431,24 @@ ElectrodeAutoIdentifier::PrecordialResult ElectrodeAutoIdentifier::SearchV1V6(El
 
             const double rAnchor = Dist(volCenterW, anchorW);
 
+            double minR = 0.0;
             double maxR = std::numeric_limits<double>::infinity();
+            bool useAnchorHemisphere = false;
 
-            if (rAnchor > 1e-3)   // якорь не центр
+            if (rAnchor > 1e-3)
             {
-                const double k = 1.08;
-                maxR = rAnchor * k;
+                // Следующий электрод должен быть примерно на том же расстоянии от центра,
+                // что и текущий якорь (не уезжать "за спину").
+                const double radialTolerance = std::max(8.0, rAnchor * 0.18);
+                minR = std::max(0.0, rAnchor - radialTolerance);
+                maxR = rAnchor + radialTolerance;
+                useAnchorHemisphere = true;
             }
 
             const int idx = PickClosestInSectorFrom(cands,
                 ax, ay, h0, h1,
-                volCenterW, maxR);
+                volCenterW, minR, maxR,
+                anchorW, useAnchorHemisphere);
 
             if (idx < 0 || idx >= static_cast<int>(cands.size()))
                 return a;
@@ -504,45 +530,31 @@ ElectrodeAutoIdentifier::PrecordialResult ElectrodeAutoIdentifier::SearchV1V6(El
             }
         };
 
+    const auto placeSequential = [&](ElectrodePanel::ElectrodeId id,
+        Anchor prevAnchor,
+        double h0, double h1,
+        bool& outPlaced,
+        std::array<double, 3>& outWorld) -> Anchor
+        {
+            Anchor a = AnchorFromPanel(panel, ren, id);
+            if (!a.valid && !panel->hasCoord(id) && prevAnchor.valid)
+            {
+                a = commitFromSector(id,
+                    prevAnchor.w, prevAnchor.x, prevAnchor.y, h0, h1,
+                    outPlaced, outWorld);
+            }
+
+            rotateAzimuthToCenterX(id);
+            return AnchorFromPanel(panel, ren, id);
+        };
+
     rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V2);
     aV2 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V2);
 
-    Anchor aV3 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V3);
-    if (!aV3.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V3) && aV2.valid)
-        aV3 = commitFromSector(ElectrodePanel::ElectrodeId::V3,
-            aV2.w,
-            aV2.x, aV2.y, 3.0, 6.0,
-            r.placedV3, r.wV3);
-
-    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V3);
-    aV3 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V3);
-
-    Anchor aV4 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V4);
-    if (!aV4.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V4) && aV3.valid)
-        aV4 = commitFromSector(ElectrodePanel::ElectrodeId::V4,
-            aV3.w, aV3.x, aV3.y, 2.0, 6.0,
-            r.placedV4, r.wV4);
-
-    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V4);
-    aV4 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V4);
-
-    Anchor aV5 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V5);
-    if (!aV5.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V5) && aV4.valid)
-        aV5 = commitFromSector(ElectrodePanel::ElectrodeId::V5,
-            aV4.w, aV4.x, aV4.y, 1.0, 5.0,
-            r.placedV5, r.wV5);
-
-    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V5);
-    aV5 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V5);
-
-    Anchor aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
-    if (!aV6.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V6) && aV5.valid)
-        aV6 = commitFromSector(ElectrodePanel::ElectrodeId::V6,
-            aV5.w, aV5.x, aV5.y, 1.0, 5.0,
-            r.placedV6, r.wV6);
-
-    rotateAzimuthToCenterX(ElectrodePanel::ElectrodeId::V6);
-    aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
+    Anchor aV3 = placeSequential(ElectrodePanel::ElectrodeId::V3, aV2, 3.0, 6.0, r.placedV3, r.wV3);
+    Anchor aV4 = placeSequential(ElectrodePanel::ElectrodeId::V4, aV3, 2.0, 6.0, r.placedV4, r.wV4);
+    Anchor aV5 = placeSequential(ElectrodePanel::ElectrodeId::V5, aV4, 1.0, 5.0, r.placedV5, r.wV5);
+    Anchor aV6 = placeSequential(ElectrodePanel::ElectrodeId::V6, aV5, 1.0, 5.0, r.placedV6, r.wV6);
 
     return r;
 }
