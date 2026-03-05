@@ -52,6 +52,8 @@ public:
         const std::vector<std::array<double, 3>>& excludedWorld = {});
     void clear(vtkRenderer* ren);
     void addManualSphere(vtkRenderer* ren, const std::array<double, 3>& world);
+    int sphereCount() const;
+    std::vector<std::array<double, 3>> sphereCenters() const;
     bool removeSphereAtDisplay(vtkRenderer* ren, int x, int y, vtkRenderWindow* rw = nullptr);
     std::vector<std::array<double, 3>> currentSphereCenters() const;
     bool closestSphereAtDisplay(vtkRenderer* ren, int x, int y,

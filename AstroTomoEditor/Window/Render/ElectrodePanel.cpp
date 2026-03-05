@@ -286,6 +286,24 @@ void ElectrodePanel::buildUi()
     column--;
     addBtn(ElectrodeId::R, "R", grid, 0, column);
 
+    mBtnSearchRLFN = new QPushButton(tr("SearchRLFN"), this);
+    mBtnSearchRLFN->setCursor(Qt::PointingHandCursor);
+    mBtnSearchRLFN->setFixedHeight(26);
+    mBtnSearchRLFN->setStyleSheet(
+        "QPushButton{"
+        "   background:rgba(60,60,60,140);"
+        "   border:1px solid rgba(255,255,255,60);"
+        "   border-radius:6px; padding:0 8px; text-align:center; color:#fff;}"
+        "QPushButton:hover{ background:rgba(90,90,90,170); }"
+        "QPushButton:pressed{ background:rgba(120,120,120,190); }"
+    );
+    connect(mBtnSearchRLFN, &QPushButton::clicked, this, [this]
+        {
+            emit searchRLFNRequested();
+            updateSearchRLFNButtonVisibility();
+        });
+    grid->addWidget(mBtnSearchRLFN, row + 1, 0, 1, vcolumn);
+
     // ---------- ПРАВАЯ ЧАСТЬ: Auto + Save ----------
     auto* right = new QVBoxLayout();
     right->setSpacing(8);
@@ -365,6 +383,35 @@ void ElectrodePanel::buildUi()
     root->addWidget(rightWrap, 0, Qt::AlignTop | Qt::AlignRight);
 
     QTimer::singleShot(0, this, [this] { rebuildMask(); });
+    updateSearchRLFNButtonVisibility();
+}
+
+bool ElectrodePanel::isRLFNComplete() const
+{
+    return hasCoord(ElectrodeId::R)
+        && hasCoord(ElectrodeId::L)
+        && hasCoord(ElectrodeId::F)
+        && hasCoord(ElectrodeId::N);
+}
+
+int ElectrodePanel::missingRLFNCount() const
+{
+    int missing = 0;
+    if (!hasCoord(ElectrodeId::R)) ++missing;
+    if (!hasCoord(ElectrodeId::L)) ++missing;
+    if (!hasCoord(ElectrodeId::F)) ++missing;
+    if (!hasCoord(ElectrodeId::N)) ++missing;
+    return missing;
+}
+
+void ElectrodePanel::updateSearchRLFNButtonVisibility()
+{
+    if (!mBtnSearchRLFN)
+        return;
+
+    const int missing = missingRLFNCount();
+    const int availableSpheres = ElectrodeSurfaceDetector::instance().sphereCount();
+    mBtnSearchRLFN->setVisible(missing > 0 && availableSpheres >= missing);
 }
 
 
@@ -546,6 +593,7 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
                 if (removed)
                 {
                     setHoverVisible(false);
+                    updateSearchRLFNButtonVisibility();
                     mPick.vtkWidget->renderWindow()->Render();
                     return true;
                 }
@@ -874,6 +922,7 @@ void ElectrodePanel::setHasCoord(ElectrodeId id, bool has)
     auto it = mById.find(id);
     if (it == mById.end()) return;
     it.value()->setHasCoord(has);
+    updateSearchRLFNButtonVisibility();
 }
 
 bool ElectrodePanel::hasCoord(ElectrodeId id) const
@@ -896,6 +945,11 @@ void ElectrodePanel::clearCurrent()
         b->setChecked(false);
 }
 
+void ElectrodePanel::refreshSearchRLFNButton()
+{
+    updateSearchRLFNButtonVisibility();
+}
+
 void ElectrodePanel::retranslateUi()
 {
     if (mBtnAuto)
@@ -903,7 +957,7 @@ void ElectrodePanel::retranslateUi()
     if (mBtnSave)
         mBtnSave->setText(tr("Save electrodes coords"));
     if (mBtnSearchRLFN)
-        mBtnSearchRLFN->setText(tr("Search RLFN"));
+        mBtnSearchRLFN->setText(tr("SearchRLFN"));
 }
 
 QVector<ElectrodePanel::ElectrodeCoord> ElectrodePanel::coordsWorld() const
@@ -1533,6 +1587,7 @@ void ElectrodePanel::clearAllElectrodesState()
 
     mCurrent = ElectrodeId::Count;
 
+    updateSearchRLFNButtonVisibility();
     requestRender();
 }
 

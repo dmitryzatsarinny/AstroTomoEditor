@@ -293,6 +293,20 @@ bool ElectrodeSurfaceDetector::removeSphereAtDisplay(vtkRenderer* ren, int x, in
     return true;
 }
 
+int ElectrodeSurfaceDetector::sphereCount() const
+{
+    return static_cast<int>(actors_.size());
+}
+
+std::vector<std::array<double, 3>> ElectrodeSurfaceDetector::sphereCenters() const
+{
+    std::vector<std::array<double, 3>> centers;
+    centers.reserve(actors_.size());
+    for (const auto& a : actors_)
+        centers.push_back(a.center);
+    return centers;
+}
+
 bool ElectrodeSurfaceDetector::worldToDisplay(vtkRenderer* ren, const std::array<double, 3>& world, double outDisplay[2])
 {
     if (!ren)

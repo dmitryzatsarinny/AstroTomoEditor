@@ -28,6 +28,7 @@
 #include <algorithm>
 #include "ElectrodeSurfaceDetector.h"
 #include <memory>
+#include <limits>
 
 class QVTKOpenGLNativeWidget;
 class vtkRenderer;
@@ -222,6 +223,8 @@ private:
     void updateElectrodeOverlayMask();
     void updateElectrodePickContext();
     void onSaveElectrodesCoords();
+    void assignRLFNFromDetectedSpheres();
+    bool tryWorldToIJK(const std::array<double, 3>& world, std::array<int, 3>& outIJK) const;
 
     QHash<ElectrodePanel::ElectrodeId, std::array<int, 3>> mElectrodeIJK;
     void captureElectrodesTemplateFromCurrentVolume();

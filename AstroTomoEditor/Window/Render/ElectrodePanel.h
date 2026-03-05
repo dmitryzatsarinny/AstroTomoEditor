@@ -69,6 +69,7 @@ public:
     void clearCurrent();                   // снять выделение
 
     void retranslateUi();
+    void refreshSearchRLFNButton();
 
     struct ElectrodeCoord
     {
@@ -98,6 +99,7 @@ signals:
     void saveRequested(); // сохранить координаты
     void pickCommitted(ElectrodeId id, std::array<int, 3> ijk, std::array<double, 3> world);
     void autoRequested();
+    void searchRLFNRequested();
     void electrodeAltRightClicked(std::array<double, 3> world);
 
 public slots:
@@ -109,6 +111,9 @@ private:
     class ElectrodeButton; // ниже в cpp
     void buildUi();
     void rebuildMask();
+    bool isRLFNComplete() const;
+    int missingRLFNCount() const;
+    void updateSearchRLFNButtonVisibility();
 
     bool pickAt(const QPoint& pDevice, std::array<int, 3>& outIJK, std::array<double, 3>& outW) const;
     bool displayRay(const QPoint& pDevice, double outP0[3], double outP1[3]) const;

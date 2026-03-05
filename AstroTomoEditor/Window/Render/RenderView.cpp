@@ -419,6 +419,7 @@ void RenderView::buildOverlay()
 
             const auto centers = detector.detectAndShow(mImage, mRenderer, excludedWorld);
             mElectrodePanel->setManualAddEnabled(true);
+            mElectrodePanel->refreshSearchRLFNButton();
 
             qDebug() << "[AutoElectrodes] detected:" << int(centers.size())
                 << "excluded:" << int(excludedWorld.size())
@@ -428,6 +429,11 @@ void RenderView::buildOverlay()
                 mVtk->renderWindow()->Render();
         });
 
+    connect(mElectrodePanel, &ElectrodePanel::searchRLFNRequested, this, [this]()
+        {
+            assignRLFNFromDetectedSpheres();
+        });
+
     connect(mElectrodePanel, &ElectrodePanel::electrodeAltRightClicked, this,
         [this](std::array<double, 3> world)
         {
@@ -435,6 +441,7 @@ void RenderView::buildOverlay()
                 return;
 
             ElectrodeSurfaceDetector::instance().addManualSphere(mRenderer, world);
+            mElectrodePanel->refreshSearchRLFNButton();
             mVtk->renderWindow()->Render();
         });
 
@@ -991,6 +998,156 @@ void RenderView::ensureTemplateDialog()
     mTemplateDlg->setOnFinished([this] {
         setAppUiActive(false, mCurrentApp);
         });
+}
+
+bool RenderView::tryWorldToIJK(const std::array<double, 3>& world, std::array<int, 3>& outIJK) const
+{
+    if (!mImage)
+        return false;
+
+    double origin[3]{ 0.0, 0.0, 0.0 };
+    double spacing[3]{ 1.0, 1.0, 1.0 };
+    int dims[3]{ 0, 0, 0 };
+    mImage->GetOrigin(origin);
+    mImage->GetSpacing(spacing);
+    mImage->GetDimensions(dims);
+
+    for (int i = 0; i < 3; ++i)
+    {
+        const double v = (world[i] - origin[i]) / spacing[i];
+        const int idx = int(std::floor(v + 0.5));
+        if (idx < 0 || idx >= dims[i])
+            return false;
+        outIJK[i] = idx;
+    }
+
+    return true;
+}
+
+void RenderView::assignRLFNFromDetectedSpheres()
+{
+    if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
+        return;
+
+    setViewPreset(ViewPreset::AP);
+
+    struct Target
+    {
+        ElectrodePanel::ElectrodeId id;
+        int sx;
+        int sy;
+    };
+
+    const std::array<Target, 4> targets{ {
+        { ElectrodePanel::ElectrodeId::R, -1, +1 },
+        { ElectrodePanel::ElectrodeId::L, +1, +1 },
+        { ElectrodePanel::ElectrodeId::F, +1, -1 },
+        { ElectrodePanel::ElectrodeId::N, -1, -1 }
+    } };
+
+    const auto centers = ElectrodeSurfaceDetector::instance().sphereCenters();
+    if (centers.empty())
+    {
+        mElectrodePanel->refreshSearchRLFNButton();
+        return;
+    }
+
+    struct Candidate
+    {
+        std::array<double, 3> world{};
+        double x = 0.0;
+        double y = 0.0;
+    };
+
+    std::vector<Candidate> candidates;
+    candidates.reserve(centers.size());
+
+    for (const auto& c : centers)
+    {
+        double d[2]{ 0.0, 0.0 };
+        mRenderer->SetWorldPoint(c[0], c[1], c[2], 1.0);
+        mRenderer->WorldToDisplay();
+        double p[3]{ 0.0, 0.0, 0.0 };
+        mRenderer->GetDisplayPoint(p);
+        if (!std::isfinite(p[0]) || !std::isfinite(p[1]))
+            continue;
+        d[0] = p[0];
+        d[1] = p[1];
+        candidates.push_back({ c, d[0], d[1] });
+    }
+
+    if (candidates.empty())
+    {
+        mElectrodePanel->refreshSearchRLFNButton();
+        return;
+    }
+
+    double minX = std::numeric_limits<double>::max();
+    double maxX = std::numeric_limits<double>::lowest();
+    double minY = std::numeric_limits<double>::max();
+    double maxY = std::numeric_limits<double>::lowest();
+
+    for (const auto& c : candidates)
+    {
+        minX = std::min(minX, c.x);
+        maxX = std::max(maxX, c.x);
+        minY = std::min(minY, c.y);
+        maxY = std::max(maxY, c.y);
+    }
+
+    const double midX = 0.5 * (minX + maxX);
+    const double midY = 0.5 * (minY + maxY);
+
+    std::vector<bool> used(candidates.size(), false);
+
+    for (const auto& t : targets)
+    {
+        if (mElectrodePanel->hasCoord(t.id))
+            continue;
+
+        int bestIdx = -1;
+        double bestScore = std::numeric_limits<double>::max();
+
+        for (int i = 0; i < static_cast<int>(candidates.size()); ++i)
+        {
+            if (used[i])
+                continue;
+
+            const auto& c = candidates[i];
+            if (t.sx < 0 && c.x > midX)
+                continue;
+            if (t.sx > 0 && c.x < midX)
+                continue;
+            if (t.sy > 0 && c.y < midY)
+                continue;
+            if (t.sy < 0 && c.y > midY)
+                continue;
+
+            const double dx = (c.x - midX);
+            const double dy = (c.y - midY);
+            const double score = dx * dx + dy * dy;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestIdx = i;
+            }
+        }
+
+        if (bestIdx < 0)
+            continue;
+
+        used[bestIdx] = true;
+
+        std::array<int, 3> ijk{};
+        if (!tryWorldToIJK(candidates[bestIdx].world, ijk))
+            continue;
+
+        mElectrodeIJK[t.id] = ijk;
+        mElectrodePanel->setHasCoord(t.id, true);
+    }
+
+    mElectrodePanel->refreshSearchRLFNButton();
+    mVtk->renderWindow()->Render();
 }
 
 void RenderView::openTemplate()
