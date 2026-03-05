@@ -354,15 +354,38 @@ void ElectrodePanel::buildUi()
         {
             emit searchRLFNRequested();
             updateSearchRLFNButtonVisibility();
+            updateSearchV1V5ButtonVisibility();
+        });
+
+    // Search V1-V5
+    mBtnSearchV1V5 = new QPushButton(tr("Search V1-V5"), this);
+    mBtnSearchV1V5->setCursor(Qt::PointingHandCursor);
+    mBtnSearchV1V5->setFixedHeight(26);
+    mBtnSearchV1V5->setStyleSheet(
+        "QPushButton{"
+        "   background:rgba(60,60,60,140);"
+        "   border:1px solid rgba(255,255,255,60);"
+        "   border-radius:6px; padding:0 8px; text-align:center; color:#fff;}"
+        "QPushButton:hover{ background:rgba(90,90,90,170); }"
+        "QPushButton:pressed{ background:rgba(120,120,120,190); }"
+    );
+
+    connect(mBtnSearchV1V5, &QPushButton::clicked, this, [this]
+        {
+            emit searchV1V5Requested();
+            updateSearchV1V5ButtonVisibility();
         });
 
     retain(mBtnSearchRLFN);
+    retain(mBtnSearchV1V5);
 
     buttonsRow->addWidget(mBtnAuto, 1);
     buttonsRow->addWidget(mBtnSave, 1);
     
     grid->addWidget(mBtnSearchRLFN, row + 1, 0, 1, vcolumn);
     grid->setRowMinimumHeight(row + 1, mBtnSearchRLFN->sizeHint().height());
+    grid->addWidget(mBtnSearchV1V5, row + 2, 0, 1, vcolumn);
+    grid->setRowMinimumHeight(row + 2, mBtnSearchV1V5->sizeHint().height());
 
     right->addLayout(buttonsRow);
     right->addStretch(1);
@@ -377,6 +400,15 @@ void ElectrodePanel::buildUi()
 
     QTimer::singleShot(0, this, [this] { rebuildMask(); });
     updateSearchRLFNButtonVisibility();
+    updateSearchV1V5ButtonVisibility();
+}
+
+void ElectrodePanel::updateSearchV1V5ButtonVisibility()
+{
+    if (!mBtnSearchV1V5)
+        return;
+
+    mBtnSearchV1V5->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV1V5(this));
 }
 
 
@@ -450,6 +482,7 @@ void ElectrodePanel::rebuildMask()
     addBtnToMask(mBtnAuto);
     addBtnToMask(mBtnSave);
     addBtnToMask(mBtnSearchRLFN);
+    addBtnToMask(mBtnSearchV1V5);
 
     setMask(reg);
 }
@@ -897,6 +930,7 @@ void ElectrodePanel::setHasCoord(ElectrodeId id, bool has)
     if (it == mById.end()) return;
     it.value()->setHasCoord(has);
     updateSearchRLFNButtonVisibility();
+    updateSearchV1V5ButtonVisibility();
 }
 
 bool ElectrodePanel::hasCoord(ElectrodeId id) const
@@ -924,6 +958,11 @@ void ElectrodePanel::refreshSearchRLFNButton()
     updateSearchRLFNButtonVisibility();
 }
 
+void ElectrodePanel::refreshSearchV1V5Button()
+{
+    updateSearchV1V5ButtonVisibility();
+}
+
 void ElectrodePanel::retranslateUi()
 {
     if (mBtnAuto)
@@ -931,7 +970,9 @@ void ElectrodePanel::retranslateUi()
     if (mBtnSave)
         mBtnSave->setText(tr("Save electrodes coords"));
     if (mBtnSearchRLFN)
-        mBtnSearchRLFN->setText(tr("SearchRLFN"));
+        mBtnSearchRLFN->setText(tr("Search RLFN"));
+    if (mBtnSearchV1V5)
+        mBtnSearchV1V5->setText(tr("Search V1-V5"));
 }
 
 QVector<ElectrodePanel::ElectrodeCoord> ElectrodePanel::coordsWorld() const

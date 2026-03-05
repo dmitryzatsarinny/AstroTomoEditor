@@ -423,6 +423,7 @@ void RenderView::buildOverlay()
             const auto centers = detector.detectAndShow(mImage, mRenderer, excludedWorld);
             mElectrodePanel->setManualAddEnabled(true);
             mElectrodePanel->refreshSearchRLFNButton();
+            mElectrodePanel->refreshSearchV1V5Button();
 
             qDebug() << "[AutoElectrodes] detected:" << int(centers.size())
                 << "excluded:" << int(excludedWorld.size())
@@ -440,6 +441,18 @@ void RenderView::buildOverlay()
             setViewPreset(ViewPreset::AP);
             ElectrodeAutoIdentifier::SearchRLFN(mElectrodePanel, mRenderer);
             mElectrodePanel->refreshSearchRLFNButton();
+            mElectrodePanel->refreshSearchV1V5Button();
+            mVtk->renderWindow()->Render();
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::searchV1V5Requested, this, [this]()
+        {
+            if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            setViewPreset(ViewPreset::AP);
+            ElectrodeAutoIdentifier::SearchV1V5(mElectrodePanel, mRenderer);
+            mElectrodePanel->refreshSearchV1V5Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -451,6 +464,7 @@ void RenderView::buildOverlay()
 
             ElectrodeSurfaceDetector::instance().addManualSphere(mRenderer, world);
             mElectrodePanel->refreshSearchRLFNButton();
+            mElectrodePanel->refreshSearchV1V5Button();
             mVtk->renderWindow()->Render();
         });
 
