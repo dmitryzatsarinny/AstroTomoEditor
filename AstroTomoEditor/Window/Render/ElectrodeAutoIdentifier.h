@@ -1,15 +1,28 @@
 ﻿#pragma once
+#include "ElectrodePanel.h"
+
 #include <array>
 #include <vector>
 
 class vtkRenderer;
-class vtkCamera;
-
-class ElectrodePanel;
 
 class ElectrodeAutoIdentifier
 {
 public:
+    struct Cand2D
+    {
+        std::array<double, 3> w{};
+        double x = 0.0;
+        double y = 0.0;
+    };
+
+    struct Anchor
+    {
+        bool valid = false;
+        double x = 0.0;
+        double y = 0.0;
+    };
+
     struct Result
     {
         bool placedR = false;
@@ -41,6 +54,17 @@ public:
     static Result SearchRLFN(ElectrodePanel* panel, vtkRenderer* ren);
     static bool ShouldShowSearchRLFN(const ElectrodePanel* panel);
 
-    static PrecordialResult SearchV1V5(ElectrodePanel* panel, vtkRenderer* ren);
-    static bool ShouldShowSearchV1V5(const ElectrodePanel* panel);
+    static PrecordialResult SearchV1V6(ElectrodePanel* panel, vtkRenderer* ren);
+    static bool ShouldShowSearchV1V6(const ElectrodePanel* panel);
+    static bool WorldToDisplay(vtkRenderer* ren, const std::array<double, 3>& w, double& outX, double& outY);
+    static bool FindPanelCoord(const ElectrodePanel* panel, ElectrodePanel::ElectrodeId id, std::array<double, 3>& outWorld);
+    static bool ComputeVolumeDisplayCenter(vtkRenderer* ren, double& cx, double& cy);
+    static std::vector<Cand2D> CollectDisplayCandidates(vtkRenderer* ren, const std::vector<std::array<double, 3>>& centers);
+    static int PickClosestInSectorFrom(const std::vector<Cand2D>& cands,
+        const std::vector<bool>& used,
+        double ax,
+        double ay,
+        double h0,
+        double h1);
+    static Anchor AnchorFromPanel(const ElectrodePanel* panel, vtkRenderer* ren, ElectrodePanel::ElectrodeId id);
 };

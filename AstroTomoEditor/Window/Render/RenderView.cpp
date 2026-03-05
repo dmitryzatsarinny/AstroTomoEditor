@@ -423,7 +423,7 @@ void RenderView::buildOverlay()
             const auto centers = detector.detectAndShow(mImage, mRenderer, excludedWorld);
             mElectrodePanel->setManualAddEnabled(true);
             mElectrodePanel->refreshSearchRLFNButton();
-            mElectrodePanel->refreshSearchV1V5Button();
+            mElectrodePanel->refreshSearchV1V6Button();
 
             qDebug() << "[AutoElectrodes] detected:" << int(centers.size())
                 << "excluded:" << int(excludedWorld.size())
@@ -441,18 +441,34 @@ void RenderView::buildOverlay()
             setViewPreset(ViewPreset::AP);
             ElectrodeAutoIdentifier::SearchRLFN(mElectrodePanel, mRenderer);
             mElectrodePanel->refreshSearchRLFNButton();
-            mElectrodePanel->refreshSearchV1V5Button();
+            mElectrodePanel->refreshSearchV1V6Button();
             mVtk->renderWindow()->Render();
         });
 
-    connect(mElectrodePanel, &ElectrodePanel::searchV1V5Requested, this, [this]()
+    connect(mElectrodePanel, &ElectrodePanel::searchV1V6Requested, this, [this]()
         {
             if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
                 return;
 
             setViewPreset(ViewPreset::AP);
-            ElectrodeAutoIdentifier::SearchV1V5(mElectrodePanel, mRenderer);
-            mElectrodePanel->refreshSearchV1V5Button();
+            const auto searchResult = ElectrodeAutoIdentifier::SearchV1V6(mElectrodePanel, mRenderer);
+
+            std::array<double, 3> wV2{};
+            bool hasV2 = false;
+            if (searchResult.placedV2)
+            {
+                wV2 = searchResult.wV2;
+                hasV2 = true;
+            }
+            else
+            {
+                hasV2 = ElectrodeAutoIdentifier::FindPanelCoord(mElectrodePanel, ElectrodePanel::ElectrodeId::V2, wV2);
+            }
+
+            if (hasV2)
+                alignApViewToWorldPoint(wV2);
+
+            mElectrodePanel->refreshSearchV1V6Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -464,7 +480,7 @@ void RenderView::buildOverlay()
 
             ElectrodeSurfaceDetector::instance().addManualSphere(mRenderer, world);
             mElectrodePanel->refreshSearchRLFNButton();
-            mElectrodePanel->refreshSearchV1V5Button();
+            mElectrodePanel->refreshSearchV1V6Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -645,6 +661,43 @@ void RenderView::buildOverlay()
     repositionOverlay();
 
     mOverlaysBuilt = true;
+}
+
+void RenderView::alignApViewToWorldPoint(const std::array<double, 3>& world)
+{
+    if (!mRenderer || !mVtk || !mVtk->renderWindow())
+        return;
+
+    auto* cam = mRenderer->GetActiveCamera();
+    if (!cam)
+        return;
+
+    double cx = 0.0;
+    double cy = 0.0;
+    if (!ElectrodeAutoIdentifier::ComputeVolumeDisplayCenter(mRenderer, cx, cy))
+        return;
+    (void)cy;
+
+    const int maxIter = 24;
+    for (int iter = 0; iter < maxIter; ++iter)
+    {
+        double x = 0.0;
+        double y = 0.0;
+        if (!ElectrodeAutoIdentifier::WorldToDisplay(mRenderer, world, x, y))
+            break;
+
+        const double dx = x - cx;
+        if (std::abs(dx) < 2.0)
+            break;
+
+        const double step = std::clamp(-dx * 0.05, -6.0, 6.0);
+        cam->Azimuth(step);
+        cam->OrthogonalizeViewUp();
+        mRenderer->ResetCameraClippingRange();
+    }
+
+    if (auto* rw = mVtk->renderWindow())
+        rw->Render();
 }
 
 static vtkSmartPointer<vtkPiecewiseFunction>

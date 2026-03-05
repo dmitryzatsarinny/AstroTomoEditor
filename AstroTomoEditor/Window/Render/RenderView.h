@@ -223,6 +223,7 @@ private:
     void updateElectrodeOverlayMask();
     void updateElectrodePickContext();
     void onSaveElectrodesCoords();
+    void alignApViewToWorldPoint(const std::array<double, 3>& world);
 
     QHash<ElectrodePanel::ElectrodeId, std::array<int, 3>> mElectrodeIJK;
     void captureElectrodesTemplateFromCurrentVolume();
