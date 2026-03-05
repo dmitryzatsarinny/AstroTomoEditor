@@ -320,12 +320,14 @@ void RenderView::buildOverlay()
     mLblStlSize->setVisible(false);
     retain(mLblStlSize);
 
-    mLblStlSize->setText("");
+    mLblStlSize->setText(" ");
     mLblStlSize->setWordWrap(true);
 
     // ширина = ширина кнопки Save (чтобы точно совпало)
     const int w = mBtnSTLSave ? mBtnSTLSave->width() : 86;
     mLblStlSize->setFixedWidth(w);
+    const int h = mLblStlSize->fontMetrics().lineSpacing() * 2;
+    mLblStlSize->setFixedHeight(h);
 
     // центр текста внутри
     mLblStlSize->setAlignment(Qt::AlignHCenter | Qt::AlignTop);

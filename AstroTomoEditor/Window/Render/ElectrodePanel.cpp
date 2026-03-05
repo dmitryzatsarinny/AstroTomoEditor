@@ -202,6 +202,14 @@ ElectrodePanel::ElectrodePanel(QWidget* parent)
 
 void ElectrodePanel::buildUi()
 {
+    auto retain = [](QWidget* w)
+        {
+            if (!w) return;
+            auto pol = w->sizePolicy();
+            pol.setRetainSizeWhenHidden(true);
+            w->setSizePolicy(pol);
+        };
+
     auto* root = new QHBoxLayout(this);
     root->setContentsMargins(12, 8, 0, 0);
     root->setSpacing(10);
@@ -348,10 +356,13 @@ void ElectrodePanel::buildUi()
             updateSearchRLFNButtonVisibility();
         });
 
+    retain(mBtnSearchRLFN);
+
     buttonsRow->addWidget(mBtnAuto, 1);
     buttonsRow->addWidget(mBtnSave, 1);
     
     grid->addWidget(mBtnSearchRLFN, row + 1, 0, 1, vcolumn);
+    grid->setRowMinimumHeight(row + 1, mBtnSearchRLFN->sizeHint().height());
 
     right->addLayout(buttonsRow);
     right->addStretch(1);
@@ -374,7 +385,6 @@ void ElectrodePanel::updateSearchRLFNButtonVisibility()
     if (!mBtnSearchRLFN)
         return;
 
-    //mBtnSearchRLFN->setVisible(missing > 0 && availableSpheres >= missing);
     mBtnSearchRLFN->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchRLFN(this));
 }
 
