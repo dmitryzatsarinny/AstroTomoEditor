@@ -286,24 +286,6 @@ void ElectrodePanel::buildUi()
     column--;
     addBtn(ElectrodeId::R, "R", grid, 0, column);
 
-    mBtnSearchRLFN = new QPushButton(tr("SearchRLFN"), this);
-    mBtnSearchRLFN->setCursor(Qt::PointingHandCursor);
-    mBtnSearchRLFN->setFixedHeight(26);
-    mBtnSearchRLFN->setStyleSheet(
-        "QPushButton{"
-        "   background:rgba(60,60,60,140);"
-        "   border:1px solid rgba(255,255,255,60);"
-        "   border-radius:6px; padding:0 8px; text-align:center; color:#fff;}"
-        "QPushButton:hover{ background:rgba(90,90,90,170); }"
-        "QPushButton:pressed{ background:rgba(120,120,120,190); }"
-    );
-    connect(mBtnSearchRLFN, &QPushButton::clicked, this, [this]
-        {
-            emit searchRLFNRequested();
-            updateSearchRLFNButtonVisibility();
-        });
-    grid->addWidget(mBtnSearchRLFN, row + 1, 0, 1, vcolumn);
-
     // ---------- ПРАВАЯ ЧАСТЬ: Auto + Save ----------
     auto* right = new QVBoxLayout();
     right->setSpacing(8);
@@ -362,14 +344,14 @@ void ElectrodePanel::buildUi()
 
     connect(mBtnSearchRLFN, &QPushButton::clicked, this, [this]
         {
-            if (!mPick.renderer) return;
-            ElectrodeAutoIdentifier::SearchRLFN(this, mPick.renderer);
-            requestRender();
+            emit searchRLFNRequested();
+            updateSearchRLFNButtonVisibility();
         });
 
     buttonsRow->addWidget(mBtnAuto, 1);
     buttonsRow->addWidget(mBtnSave, 1);
-    buttonsRow->addWidget(mBtnSearchRLFN, 1);
+    
+    grid->addWidget(mBtnSearchRLFN, row + 1, 0, 1, vcolumn);
 
     right->addLayout(buttonsRow);
     right->addStretch(1);
@@ -386,32 +368,14 @@ void ElectrodePanel::buildUi()
     updateSearchRLFNButtonVisibility();
 }
 
-bool ElectrodePanel::isRLFNComplete() const
-{
-    return hasCoord(ElectrodeId::R)
-        && hasCoord(ElectrodeId::L)
-        && hasCoord(ElectrodeId::F)
-        && hasCoord(ElectrodeId::N);
-}
-
-int ElectrodePanel::missingRLFNCount() const
-{
-    int missing = 0;
-    if (!hasCoord(ElectrodeId::R)) ++missing;
-    if (!hasCoord(ElectrodeId::L)) ++missing;
-    if (!hasCoord(ElectrodeId::F)) ++missing;
-    if (!hasCoord(ElectrodeId::N)) ++missing;
-    return missing;
-}
 
 void ElectrodePanel::updateSearchRLFNButtonVisibility()
 {
     if (!mBtnSearchRLFN)
         return;
 
-    const int missing = missingRLFNCount();
-    const int availableSpheres = ElectrodeSurfaceDetector::instance().sphereCount();
-    mBtnSearchRLFN->setVisible(missing > 0 && availableSpheres >= missing);
+    //mBtnSearchRLFN->setVisible(missing > 0 && availableSpheres >= missing);
+    mBtnSearchRLFN->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchRLFN(this));
 }
 
 

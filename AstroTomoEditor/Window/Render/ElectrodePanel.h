@@ -111,8 +111,6 @@ private:
     class ElectrodeButton; // ниже в cpp
     void buildUi();
     void rebuildMask();
-    bool isRLFNComplete() const;
-    int missingRLFNCount() const;
     void updateSearchRLFNButtonVisibility();
 
     bool pickAt(const QPoint& pDevice, std::array<int, 3>& outIJK, std::array<double, 3>& outW) const;
