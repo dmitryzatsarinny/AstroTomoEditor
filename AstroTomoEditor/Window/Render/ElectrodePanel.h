@@ -72,6 +72,9 @@ public:
     void refreshSearchRLFNButton();
     void refreshSearchV1V6Button();
     void refreshSearchV7V12Button();
+    void refreshSearchV13V19Button();
+    void refreshSearchV20V25Button();
+    void refreshSearchV26V30Button();
 
     struct ElectrodeCoord
     {
@@ -104,6 +107,9 @@ signals:
     void searchRLFNRequested();
     void searchV1V6Requested();
     void searchV7V12Requested();
+    void searchV13V19Requested();
+    void searchV20V25Requested();
+    void searchV26V30Requested();
     void electrodeAltRightClicked(std::array<double, 3> world);
 
 public slots:
@@ -118,6 +124,9 @@ private:
     void updateSearchRLFNButtonVisibility();
     void updateSearchV1V6ButtonVisibility();
     void updateSearchV7V12ButtonVisibility();
+    void updateSearchV13V19ButtonVisibility();
+    void updateSearchV20V25ButtonVisibility();
+    void updateSearchV26V30ButtonVisibility();
 
     bool pickAt(const QPoint& pDevice, std::array<int, 3>& outIJK, std::array<double, 3>& outW) const;
     bool displayRay(const QPoint& pDevice, double outP0[3], double outP1[3]) const;
@@ -139,6 +148,9 @@ private:
     QPushButton* mBtnSearchRLFN = nullptr;
     QPushButton* mBtnSearchV1V6 = nullptr;
     QPushButton* mBtnSearchV7V12 = nullptr;
+    QPushButton* mBtnSearchV13V19 = nullptr;
+    QPushButton* mBtnSearchV20V25 = nullptr;
+    QPushButton* mBtnSearchV26V30 = nullptr;
 
     ElectrodeId mCurrent{ ElectrodeId::Count }; // none
 

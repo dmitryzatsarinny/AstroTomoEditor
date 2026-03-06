@@ -425,6 +425,9 @@ void RenderView::buildOverlay()
             mElectrodePanel->refreshSearchRLFNButton();
             mElectrodePanel->refreshSearchV1V6Button();
             mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
 
             qDebug() << "[AutoElectrodes] detected:" << int(centers.size())
                 << "excluded:" << int(excludedWorld.size())
@@ -440,10 +443,13 @@ void RenderView::buildOverlay()
                 return;
 
             setViewPreset(ViewPreset::AP);
-            ElectrodeAutoIdentifier::SearchRLFN(mElectrodePanel, mRenderer);
+            ElectrodeAutoIdentifier::SearchRLFN(mElectrodePanel, mRenderer, DI);
             mElectrodePanel->refreshSearchRLFNButton();
             mElectrodePanel->refreshSearchV1V6Button();
             mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -453,9 +459,12 @@ void RenderView::buildOverlay()
                 return;
 
             setViewPreset(ViewPreset::AP);
-            ElectrodeAutoIdentifier::SearchV1V6(mElectrodePanel, mRenderer);
+            ElectrodeAutoIdentifier::SearchV1V6(mElectrodePanel, mRenderer, DI);
             mElectrodePanel->refreshSearchV1V6Button();
             mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -464,10 +473,58 @@ void RenderView::buildOverlay()
             if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
                 return;
 
-            setViewPreset(ViewPreset::R);
-            ElectrodeAutoIdentifier::SearchV7V12(mElectrodePanel, mRenderer);
+            setViewPreset(ViewPreset::AP);
+            ElectrodeAutoIdentifier::SearchV7V12(mElectrodePanel, mRenderer, DI);
             mElectrodePanel->refreshSearchV1V6Button();
             mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
+            mVtk->renderWindow()->Render();
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::searchV13V19Requested, this, [this]()
+        {
+            if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            setViewPreset(ViewPreset::AP);
+            ElectrodeAutoIdentifier::SearchV13V19(mElectrodePanel, mRenderer, DI);
+            mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
+            mVtk->renderWindow()->Render();
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::searchV20V25Requested, this, [this]()
+        {
+            if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            setViewPreset(ViewPreset::AP);
+            ElectrodeAutoIdentifier::SearchV20V25(mElectrodePanel, mRenderer, DI);
+            mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
+            mVtk->renderWindow()->Render();
+        });
+
+    connect(mElectrodePanel, &ElectrodePanel::searchV26V30Requested, this, [this]()
+        {
+            if (!mElectrodePanel || !mRenderer || !mVtk || !mVtk->renderWindow())
+                return;
+
+            setViewPreset(ViewPreset::AP);
+            ElectrodeAutoIdentifier::SearchV26V30(mElectrodePanel, mRenderer, DI);
+            mElectrodePanel->refreshSearchV1V6Button();
+            mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
             mVtk->renderWindow()->Render();
         });
 
@@ -481,6 +538,9 @@ void RenderView::buildOverlay()
             mElectrodePanel->refreshSearchRLFNButton();
             mElectrodePanel->refreshSearchV1V6Button();
             mElectrodePanel->refreshSearchV7V12Button();
+            mElectrodePanel->refreshSearchV26V30Button();
+            mElectrodePanel->refreshSearchV13V19Button();
+            mElectrodePanel->refreshSearchV20V25Button();
             mVtk->renderWindow()->Render();
         });
 
