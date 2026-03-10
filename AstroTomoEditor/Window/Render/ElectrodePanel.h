@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <QWidget>
 #include <QVector>
 #include <QHash>
@@ -90,7 +90,7 @@ public:
 
     QVector<ElectrodeCoord> coordsWorld() const;
     QVector<ElectrodeIJKCoord> coordsIJK() const;
-    bool commitElectrodeFromWorld(ElectrodeId id, const std::array<double, 3>& world);
+    bool commitElectrodeFromWorld(ElectrodeId id, const std::array<double, 3>& world, bool snapMarkerToSurface = true);
     bool pickAtViewportCenter(std::array<int, 3>& outIJK, std::array<double, 3>& outW) const;
 
 protected:
@@ -208,7 +208,11 @@ private:
     void clearElectrode(ElectrodeId id);
     bool removeElectrodeAtDisplay(const QPoint& pDevice);
     bool closestElectrodeAtDisplay(const QPoint& pDevice, std::array<double, 3>& outWorld) const;
+    bool closestDetectedSphereAtDisplay(const QPoint& pDevice, std::array<double, 3>& outWorld, double* outRadiusMm = nullptr) const;
     bool closestAnySphereAtDisplay(const QPoint& pDevice,
         std::array<double, 3>& outWorld,
         double* outRadiusMm = nullptr, double* outColourR = nullptr, double* outColourG = nullptr, double* outColourB = nullptr) const;
+    bool tryGetVolumeCenterWorld(std::array<double, 3>& outCenter) const;
+    bool isWorldWithinClickableAngle(const std::array<double, 3>& world) const;
 };
+

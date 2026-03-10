@@ -1,4 +1,4 @@
-﻿#include "ElectrodeAutoIdentifier.h"
+#include "ElectrodeAutoIdentifier.h"
 #include "ElectrodeSurfaceDetector.h"
 
 #include <vtkProp3D.h>
@@ -241,11 +241,13 @@ namespace
         return std::sqrt(Dot3(v, v));
     }
 
-    inline bool HasAcuteAngleToCamera(
+    constexpr double kAutoDetectConeAngleDeg = 85.0;
+
+    inline bool IsWorldWithinCameraCone(
         const std::array<double, 3>& volCenterW,
         const std::array<double, 3>& sphereW,
         const std::array<double, 3>& camPosW,
-        double minCos = 0.0)
+        double maxAngleDeg)
     {
         const auto vs = Sub3(sphereW, volCenterW);   // от центра объема к сфере
         const auto vc = Sub3(camPosW, volCenterW);   // от центра объема к камере
@@ -256,16 +258,18 @@ namespace
         if (ns < 1e-9 || nc < 1e-9)
             return false;
 
-        const double cosA = Dot3(vs, vc) / (ns * nc);
+        double cosA = Dot3(vs, vc) / (ns * nc);
+        cosA = std::clamp(cosA, -1.0, 1.0);
 
-        // острый угол => cos > 0
-        return cosA > minCos;
+        const double angleDeg = std::acos(cosA) * 180.0 / M_PI;
+        return angleDeg <= maxAngleDeg;
     }
 
-    static std::vector<ElectrodeAutoIdentifier::Cand2D> CollectRLFNCandidatesFiltered(
+    static std::vector<ElectrodeAutoIdentifier::Cand2D> CollectCandidatesWithinCameraCone(
         vtkRenderer* ren,
         const std::vector<std::array<double, 3>>& centers,
-        const std::array<double, 3>& volCenterW)
+        const std::array<double, 3>& volCenterW,
+        double maxAngleDeg = kAutoDetectConeAngleDeg)
     {
         std::vector<ElectrodeAutoIdentifier::Cand2D> out;
         if (!ren)
@@ -284,7 +288,7 @@ namespace
 
         for (const auto& w : centers)
         {
-            if (!HasAcuteAngleToCamera(volCenterW, w, camPosW, 0.0))
+            if (!IsWorldWithinCameraCone(volCenterW, w, camPosW, maxAngleDeg))
                 continue;
 
             ElectrodeAutoIdentifier::Cand2D c;
@@ -294,6 +298,14 @@ namespace
         }
 
         return out;
+    }
+
+    static std::vector<ElectrodeAutoIdentifier::Cand2D> CollectRLFNCandidatesFiltered(
+        vtkRenderer* ren,
+        const std::vector<std::array<double, 3>>& centers,
+        const std::array<double, 3>& volCenterW)
+    {
+        return CollectCandidatesWithinCameraCone(ren, centers, volCenterW);
     }
 
     static int PickTopMostSide(
@@ -521,19 +533,22 @@ std::vector<ElectrodeAutoIdentifier::Cand2D> ElectrodeAutoIdentifier::CollectDis
     vtkRenderer* ren,
     const std::vector<std::array<double, 3>>& centers)
 {
+    if (!ren)
+        return {};
+
+    std::array<double, 3> volCenterW{};
+    if (ComputeVolumeWorldCenter(ren, volCenterW))
+        return CollectCandidatesWithinCameraCone(ren, centers, volCenterW);
+
     std::vector<Cand2D> cands;
     cands.reserve(centers.size());
 
-
-    int idx = 0;
     for (const auto& w : centers)
     {
         Cand2D c;
         c.w = w;
         if (WorldToDisplay(ren, w, c.x, c.y))
             cands.push_back(c);
-
-        ++idx;
     }
 
     return cands;
@@ -647,7 +662,7 @@ static ElectrodeAutoIdentifier::Anchor CommitByWorld(ElectrodePanel* panel,
     const std::array<double, 3>& w)
 {
     ElectrodeAutoIdentifier::Anchor a;
-    if (!panel->commitElectrodeFromWorld(id, w))
+    if (!panel->commitElectrodeFromWorld(id, w, false))
         return a;
 
     a.w = w;
@@ -963,7 +978,7 @@ ElectrodeAutoIdentifier::Result ElectrodeAutoIdentifier::SearchRLFN(ElectrodePan
             if (idx < 0 || idx >= static_cast<int>(cands.size()))
                 return;
 
-            if (panel->commitElectrodeFromWorld(id, cands[idx].w))
+            if (panel->commitElectrodeFromWorld(id, cands[idx].w, false))
             {
                 used[idx] = true;
                 outPlaced = true;
@@ -1168,7 +1183,7 @@ ElectrodeAutoIdentifier::Anchor ElectrodeAutoIdentifier::CommitByIndex(
 
     const auto& w = cands[idx].w;
 
-    if (panel->commitElectrodeFromWorld(id, w))
+    if (panel->commitElectrodeFromWorld(id, w, false))
     {
         outPlaced = true;
         outWorld = w;
