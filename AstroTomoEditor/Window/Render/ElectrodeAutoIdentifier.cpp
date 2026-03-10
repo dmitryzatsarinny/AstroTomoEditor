@@ -225,6 +225,184 @@ namespace
     
         return (theta >= t0 || theta <= t1);
     }
+
+    inline std::array<double, 3> Sub3(const std::array<double, 3>& a, const std::array<double, 3>& b)
+    {
+        return { a[0] - b[0], a[1] - b[1], a[2] - b[2] };
+    }
+
+    inline double Dot3(const std::array<double, 3>& a, const std::array<double, 3>& b)
+    {
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    }
+
+    inline double Norm3(const std::array<double, 3>& v)
+    {
+        return std::sqrt(Dot3(v, v));
+    }
+
+    inline bool HasAcuteAngleToCamera(
+        const std::array<double, 3>& volCenterW,
+        const std::array<double, 3>& sphereW,
+        const std::array<double, 3>& camPosW,
+        double minCos = 0.0)
+    {
+        const auto vs = Sub3(sphereW, volCenterW);   // от центра объема к сфере
+        const auto vc = Sub3(camPosW, volCenterW);   // от центра объема к камере
+
+        const double ns = Norm3(vs);
+        const double nc = Norm3(vc);
+
+        if (ns < 1e-9 || nc < 1e-9)
+            return false;
+
+        const double cosA = Dot3(vs, vc) / (ns * nc);
+
+        // острый угол => cos > 0
+        return cosA > minCos;
+    }
+
+    static std::vector<ElectrodeAutoIdentifier::Cand2D> CollectRLFNCandidatesFiltered(
+        vtkRenderer* ren,
+        const std::vector<std::array<double, 3>>& centers,
+        const std::array<double, 3>& volCenterW)
+    {
+        std::vector<ElectrodeAutoIdentifier::Cand2D> out;
+        if (!ren)
+            return out;
+
+        auto* cam = ren->GetActiveCamera();
+        if (!cam)
+            return out;
+
+        double camPos[3]{ 0.0, 0.0, 0.0 };
+        cam->GetPosition(camPos);
+
+        const std::array<double, 3> camPosW{ camPos[0], camPos[1], camPos[2] };
+
+        out.reserve(centers.size());
+
+        for (const auto& w : centers)
+        {
+            if (!HasAcuteAngleToCamera(volCenterW, w, camPosW, 0.0))
+                continue;
+
+            ElectrodeAutoIdentifier::Cand2D c;
+            c.w = w;
+            if (ElectrodeAutoIdentifier::WorldToDisplay(ren, w, c.x, c.y))
+                out.push_back(c);
+        }
+
+        return out;
+    }
+
+    static int PickTopMostSide(
+        const std::vector<ElectrodeAutoIdentifier::Cand2D>& cands,
+        const std::vector<bool>& used,
+        bool leftSide,
+        double midX)
+    {
+        int best = -1;
+        double bestY = -std::numeric_limits<double>::max();
+        double bestSideTie = leftSide ? std::numeric_limits<double>::max()
+            : -std::numeric_limits<double>::max();
+
+        for (int i = 0; i < static_cast<int>(cands.size()); ++i)
+        {
+            if (used[i])
+                continue;
+
+            const bool isLeft = (cands[i].x <= midX);
+            if (isLeft != leftSide)
+                continue;
+
+            // Ищем самый верхний
+            if (cands[i].y > bestY + 1e-9)
+            {
+                bestY = cands[i].y;
+                best = i;
+                bestSideTie = cands[i].x;
+            }
+            else if (std::abs(cands[i].y - bestY) <= 1e-9)
+            {
+                // tie-break:
+                // слева хотим еще левее
+                // справа хотим еще правее
+                if (leftSide)
+                {
+                    if (cands[i].x < bestSideTie)
+                    {
+                        best = i;
+                        bestSideTie = cands[i].x;
+                    }
+                }
+                else
+                {
+                    if (cands[i].x > bestSideTie)
+                    {
+                        best = i;
+                        bestSideTie = cands[i].x;
+                    }
+                }
+            }
+        }
+
+        return best;
+    }
+
+    static int PickBottomMostSide(
+        const std::vector<ElectrodeAutoIdentifier::Cand2D>& cands,
+        const std::vector<bool>& used,
+        bool leftSide,
+        double midX)
+    {
+        int best = -1;
+        double bestY = std::numeric_limits<double>::max();
+        double bestSideTie = leftSide ? std::numeric_limits<double>::max()
+            : -std::numeric_limits<double>::max();
+
+        for (int i = 0; i < static_cast<int>(cands.size()); ++i)
+        {
+            if (used[i])
+                continue;
+
+            const bool isLeft = (cands[i].x <= midX);
+            if (isLeft != leftSide)
+                continue;
+
+            // Ищем самый нижний
+            if (cands[i].y < bestY - 1e-9)
+            {
+                bestY = cands[i].y;
+                best = i;
+                bestSideTie = cands[i].x;
+            }
+            else if (std::abs(cands[i].y - bestY) <= 1e-9)
+            {
+                // tie-break:
+                // слева хотим еще левее
+                // справа хотим еще правее
+                if (leftSide)
+                {
+                    if (cands[i].x < bestSideTie)
+                    {
+                        best = i;
+                        bestSideTie = cands[i].x;
+                    }
+                }
+                else
+                {
+                    if (cands[i].x > bestSideTie)
+                    {
+                        best = i;
+                        bestSideTie = cands[i].x;
+                    }
+                }
+            }
+        }
+
+        return best;
+    }
 }
 
 bool ElectrodeAutoIdentifier::WorldToDisplay(vtkRenderer* ren, const std::array<double, 3>& w, double& outX, double& outY)
@@ -241,9 +419,6 @@ bool ElectrodeAutoIdentifier::WorldToDisplay(vtkRenderer* ren, const std::array<
     outY = d[1];
 
     const bool ok = std::isfinite(outX) && std::isfinite(outY);
-    qDebug() << "[WorldToDisplay] world =" << WToStr(w)
-        << " display =" << DToStr(outX, outY)
-        << " ok =" << ok;
 
     return ok;
 }
@@ -349,7 +524,6 @@ std::vector<ElectrodeAutoIdentifier::Cand2D> ElectrodeAutoIdentifier::CollectDis
     std::vector<Cand2D> cands;
     cands.reserve(centers.size());
 
-    qDebug() << "[CollectDisplayCandidates] input centers =" << static_cast<int>(centers.size());
 
     int idx = 0;
     for (const auto& w : centers)
@@ -357,22 +531,11 @@ std::vector<ElectrodeAutoIdentifier::Cand2D> ElectrodeAutoIdentifier::CollectDis
         Cand2D c;
         c.w = w;
         if (WorldToDisplay(ren, w, c.x, c.y))
-        {
             cands.push_back(c);
-            qDebug() << "  cand" << idx
-                << " world =" << WToStr(c.w)
-                << " display =" << DToStr(c.x, c.y);
-        }
-        else
-        {
-            qDebug() << "  cand" << idx
-                << " world =" << WToStr(w)
-                << " skipped: WorldToDisplay failed";
-        }
+
         ++idx;
     }
 
-    qDebug() << "[CollectDisplayCandidates] output cands =" << static_cast<int>(cands.size());
     return cands;
 }
 
@@ -506,28 +669,14 @@ static ElectrodeAutoIdentifier::Anchor CommitFromSector(
 {
     ElectrodeAutoIdentifier::Anchor a;
 
-    qDebug() << "[CommitFromSector] electrode =" << ElectrodeIdToString(id);
-    qDebug() << "  anchorW =" << WToStr(anchorW)
-        << " anchorD =" << DToStr(ax, ay);
-    qDebug() << "  centerW =" << WToStr(volumeCenterW);
-    qDebug() << "  sector h =" << params.h0 << "..." << params.h1
-        << " minTol =" << params.minRadialTolerance
-        << " factor =" << params.radialToleranceFactor
-        << " hemisphere =" << params.useAnchorHemisphere;
 
     const auto centersNow = det.currentSphereCenters();
     if (centersNow.empty())
-    {
-        qDebug() << "  no current spheres";
         return a;
-    }
 
     const auto cands = ElectrodeAutoIdentifier::CollectDisplayCandidates(ren, centersNow);
     if (cands.empty())
-    {
-        qDebug() << "  no display candidates";
         return a;
-    }
 
     const double rAnchor = Dist(volumeCenterW, anchorW);
     double minR = 0.0;
@@ -542,10 +691,6 @@ static ElectrodeAutoIdentifier::Anchor CommitFromSector(
         useAnchorHemisphere = params.useAnchorHemisphere;
     }
 
-    qDebug() << "  rAnchor =" << rAnchor
-        << " minR =" << minR
-        << " maxR =" << maxR
-        << " hemisphereUsed =" << useAnchorHemisphere;
 
     DrawSectorDebug2D(ren, ax, ay, params.h0, params.h1);
 
@@ -558,20 +703,12 @@ static ElectrodeAutoIdentifier::Anchor CommitFromSector(
 
     if (idx < 0 && useAnchorHemisphere)
     {
-        qDebug() << "  primary search failed, fallback without strict hemisphere";
         const SectorSearchParams fallback{ params.h0, params.h1, params.minRadialTolerance + 7.0, std::max(0.35, params.radialToleranceFactor), false };
         return CommitFromSector(panel, ren, det, id, volumeCenterW, anchorW, ax, ay, fallback);
     }
 
     if (idx < 0 || idx >= static_cast<int>(cands.size()))
-    {
-        qDebug() << "  failed: invalid idx =" << idx;
         return a;
-    }
-
-    qDebug() << "  selected idx =" << idx
-        << " world =" << WToStr(cands[idx].w)
-        << " display =" << DToStr(cands[idx].x, cands[idx].y);
 
     return CommitByWorld(panel, ren, det, id, cands[idx].w);
 }
@@ -638,42 +775,21 @@ static ElectrodeAutoIdentifier::Anchor PlaceSequential(
     const std::array<double, 3>& volumeCenterW,
     const SectorSearchParams& params)
 {
-    qDebug() << "[PlaceSequential] electrode =" << ElectrodeIdToString(id)
-        << " prev.valid =" << prevAnchor.valid
-        << " prev.w =" << WToStr(prevAnchor.w)
-        << " prev.d =" << DToStr(prevAnchor.x, prevAnchor.y)
-        << " sector =" << params.h0 << "..." << params.h1;
 
     auto a = ElectrodeAutoIdentifier::AnchorFromPanel(panel, ren, id);
 
-    if (a.valid)
-    {
-        qDebug() << "  already exists in panel:"
-            << " world =" << WToStr(a.w)
-            << " display =" << DToStr(a.x, a.y);
-    }
 
     if (!a.valid && !panel->hasCoord(id) && prevAnchor.valid)
     {
-        qDebug() << "  trying CommitFromSector...";
         a = CommitFromSector(panel, ren, det, id,
             volumeCenterW,
             prevAnchor.w, prevAnchor.x, prevAnchor.y,
             params);
-
-        qDebug() << "  CommitFromSector result:"
-            << " valid =" << a.valid
-            << " world =" << WToStr(a.w)
-            << " display =" << DToStr(a.x, a.y);
     }
 
     RotateAzimuthToCenterX(panel, ren, id);
 
     a = ElectrodeAutoIdentifier::AnchorFromPanel(panel, ren, id);
-    qDebug() << "[PlaceSequential] final electrode =" << ElectrodeIdToString(id)
-        << " valid =" << a.valid
-        << " world =" << WToStr(a.w)
-        << " display =" << DToStr(a.x, a.y);
 
     return a;
 }
@@ -706,16 +822,6 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
     double bestCosAngle = -std::numeric_limits<double>::infinity();
     double bestR2 = std::numeric_limits<double>::max();
     double bestWorldDist = std::numeric_limits<double>::max();
-
-    qDebug() << "[PickClosestInSectorFrom] BEGIN";
-    qDebug() << "  anchor display =" << DToStr(ax, ay);
-    qDebug() << "  anchor world   =" << WToStr(anchorWorld);
-    qDebug() << "  volume center  =" << WToStr(volumeCenterW);
-    qDebug() << "  sector hours   =" << h0 << "..." << h1;
-    qDebug() << "  radius range   =" << minRadiusFromCenter << "..." << maxRadiusFromCenter;
-    qDebug() << "  hemisphere     =" << useAnchorHemisphere;
-    qDebug() << "  useAngleMode   =" << useAngleMode;
-    qDebug() << "  candidates     =" << static_cast<int>(cands.size());
 
     for (int i = 0; i < static_cast<int>(cands.size()); ++i)
     {
@@ -762,37 +868,19 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
             angleDeg = std::acos(cosAngle) * 180.0 / M_PI;
         }
 
-        qDebug() << "  cand" << i
-            << " world =" << WToStr(cands[i].w)
-            << " disp =" << DToStr(cands[i].x, cands[i].y)
-            << " dx =" << dx
-            << " dy =" << dy
-            << " thetaDeg =" << thetaDeg
-            << " sectorPass =" << passSector
-            << " rFromCenter =" << rFromCenter
-            << " radiusPass =" << passRadius
-            << " dot =" << dot
-            << " hemiPass =" << passHemisphere
-            << " d2 =" << d2
-            << " worldDist =" << worldDist
-            << " cosAngle =" << cosAngle
-            << " angleDeg =" << angleDeg;
 
         if (!passSector)
         {
-            qDebug() << "    -> reject: sector";
             continue;
         }
 
         if (!passRadius)
         {
-            qDebug() << "    -> reject: radius";
             continue;
         }
 
         if (!passHemisphere)
         {
-            qDebug() << "    -> reject: hemisphere";
             continue;
         }
 
@@ -803,7 +891,6 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
             {
                 bestR2 = d2;
                 best = i;
-                qDebug() << "    -> current BEST by d2";
             }
         }
         else
@@ -815,14 +902,9 @@ int ElectrodeAutoIdentifier::PickClosestInSectorFrom(
                 bestCosAngle = cosAngle;
                 bestWorldDist = worldDist;
                 best = i;
-                qDebug() << "    -> current BEST by angle";
             }
         }
     }
-
-    qDebug() << "[PickClosestInSectorFrom] END best =" << best
-        << " bestCosAngle =" << bestCosAngle
-        << " bestR2 =" << bestR2;
 
     return best;
 }
@@ -849,34 +931,36 @@ ElectrodeAutoIdentifier::Result ElectrodeAutoIdentifier::SearchRLFN(ElectrodePan
     if (centers.empty())
         return r;
 
-    const auto cands = CollectDisplayCandidates(ren, centers);
+    const std::array<double, 3> volCenterW{
+        DI.VolumeOriginX + DI.VolumeCenterX,
+        DI.VolumeOriginY + DI.VolumeCenterY,
+        DI.VolumeOriginZ + DI.VolumeCenterZ
+    };
+
+    // Берем только кандидатов на полусфере, обращенной к камере
+    const auto cands = CollectRLFNCandidatesFiltered(ren, centers, volCenterW);
     if (cands.empty())
         return r;
 
     double minX = std::numeric_limits<double>::max();
     double maxX = std::numeric_limits<double>::lowest();
-    double minY = std::numeric_limits<double>::max();
-    double maxY = std::numeric_limits<double>::lowest();
+
     for (const auto& c : cands)
     {
         minX = std::min(minX, c.x);
         maxX = std::max(maxX, c.x);
-        minY = std::min(minY, c.y);
-        maxY = std::max(maxY, c.y);
     }
 
     const double midX = 0.5 * (minX + maxX);
-    const double midY = 0.5 * (minY + maxY);
-
     std::vector<bool> used(cands.size(), false);
 
-    const auto tryCommit = [&](ElectrodePanel::ElectrodeId id, Quadrant q, bool& outPlaced, std::array<double, 3>& outWorld)
+    const auto tryCommitIndex =
+        [&](ElectrodePanel::ElectrodeId id, int idx, bool& outPlaced, std::array<double, 3>& outWorld)
         {
             if (panel->hasCoord(id))
                 return;
 
-            int idx = pickBestForQuadrant(cands, used, minX, maxX, minY, maxY, midX, midY, q);
-            if (idx < 0)
+            if (idx < 0 || idx >= static_cast<int>(cands.size()))
                 return;
 
             if (panel->commitElectrodeFromWorld(id, cands[idx].w))
@@ -886,16 +970,31 @@ ElectrodeAutoIdentifier::Result ElectrodeAutoIdentifier::SearchRLFN(ElectrodePan
                 outWorld = cands[idx].w;
                 det.removeSphereNearWorld(ren, cands[idx].w, 25.0);
             }
-
         };
 
-    tryCommit(ElectrodePanel::ElectrodeId::R, Quadrant::LeftTop, r.placedR, r.wR);
-    tryCommit(ElectrodePanel::ElectrodeId::L, Quadrant::RightTop, r.placedL, r.wL);
-    tryCommit(ElectrodePanel::ElectrodeId::F, Quadrant::RightBottom, r.placedF, r.wF);
-    tryCommit(ElectrodePanel::ElectrodeId::N, Quadrant::LeftBottom, r.placedN, r.wN);
+    // AP:
+    // R = левый верх
+    // L = правый верх
+    // F = правый низ
+    // N = левый низ
+
+    tryCommitIndex(ElectrodePanel::ElectrodeId::R,
+        PickTopMostSide(cands, used, true, midX),
+        r.placedR, r.wR);
+
+    tryCommitIndex(ElectrodePanel::ElectrodeId::L,
+        PickTopMostSide(cands, used, false, midX),
+        r.placedL, r.wL);
+
+    tryCommitIndex(ElectrodePanel::ElectrodeId::F,
+        PickBottomMostSide(cands, used, false, midX),
+        r.placedF, r.wF);
+
+    tryCommitIndex(ElectrodePanel::ElectrodeId::N,
+        PickBottomMostSide(cands, used, true, midX),
+        r.placedN, r.wN);
 
     return r;
-
 }
 
 ElectrodeAutoIdentifier::CameraState ElectrodeAutoIdentifier::SaveCamera(vtkRenderer* ren)
@@ -1106,26 +1205,36 @@ void ElectrodeAutoIdentifier::SearchV1V6(ElectrodePanel* panel, vtkRenderer* ren
     auto& det = ElectrodeSurfaceDetector::instance();
 
     std::array<double, 3> volCenterW{ DI.VolumeOriginX + DI.VolumeCenterX, DI.VolumeOriginY + DI.VolumeCenterY, DI.VolumeOriginZ + DI.VolumeCenterZ };
-    //if (!ComputeVolumeWorldCenter(ren, volCenterW))
-    //    return;
+    std::array<int, 3> centerIJK{};
+    std::array<double, 3> centerFirstNonZeroW{};
+    bool hasCenterFirstNonZero = panel->pickAtViewportCenter(centerIJK, centerFirstNonZeroW);
 
     double cx = 0.0;
     double cy = 0.0;
-    if (!ComputeVolumeDisplayCenter(ren, cx, cy))
+    if (hasCenterFirstNonZero)
+    {
+        if (!WorldToDisplay(ren, centerFirstNonZeroW, cx, cy))
+            hasCenterFirstNonZero = false;
+    }
+    if (!hasCenterFirstNonZero && !ComputeVolumeDisplayCenter(ren, cx, cy))
+    {
         return;
+    }
+
+    const std::array<double, 3>& seedWorld = hasCenterFirstNonZero ? centerFirstNonZeroW : volCenterW;
 
     Anchor aV1 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V1);
     if (!aV1.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V1))
         aV1 = CommitFromSector(panel, ren, det, ElectrodePanel::ElectrodeId::V1,
             volCenterW,
-            volCenterW, cx, cy,
+            seedWorld, cx, cy,
             SectorSearchParams{ 10.5, 12.0, 8.0, 0.18, true });
 
     Anchor aV2 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V2);
     if (!aV2.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V2))
         aV2 = CommitFromSector(panel, ren, det, ElectrodePanel::ElectrodeId::V2,
             volCenterW,
-            volCenterW, cx, cy,
+            seedWorld, cx, cy,
             SectorSearchParams{ 12.0, 1.5, 8.0, 0.18, true });
 
 
@@ -1172,18 +1281,12 @@ void ElectrodeAutoIdentifier::SearchV7V12(ElectrodePanel* panel, vtkRenderer* re
     if (!panel || !ren)
         return;
 
-    qDebug() << "================ SearchV7V12 BEGIN ================";
 
     auto camSaved = SaveCamera(ren);
     ClearDebugProps(ren);
     auto& det = ElectrodeSurfaceDetector::instance();
 
     std::array<double, 3> volCenterW{ DI.VolumeOriginX + DI.VolumeCenterX, DI.VolumeOriginY + DI.VolumeCenterY, DI.VolumeOriginZ + DI.VolumeCenterZ };
-    //if (!ComputeVolumeWorldCenter(ren, volCenterW))
-    //{
-    //    qDebug() << "[SearchV7V12] failed: no volume center";
-    //    return;
-    //}
 
     TurnR(ren);
     Anchor aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
@@ -1194,15 +1297,6 @@ void ElectrodeAutoIdentifier::SearchV7V12(ElectrodePanel* panel, vtkRenderer* re
     Anchor aV11 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V11, aV10, volCenterW, SectorSearchParams{ 1.0, 5.0, 6.0, 0.18, true });
     Anchor aV12 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V12, aV11, volCenterW, SectorSearchParams{ 2.0, 6.0, 6.0, 0.18, true });
     ClearDebugProps(ren);
-    //qDebug() << "[SearchV7V12] results:"
-    //    << " V7 =" << WToStr(aV7.w)
-    //    << " V8 =" << WToStr(aV8.w)
-    //    << " V9 =" << WToStr(aV9.w)
-    //    << " V10 =" << WToStr(aV10.w)
-    //    << " V11 =" << WToStr(aV11.w)
-    //    << " V12 =" << WToStr(aV12.w);
-
-    qDebug() << "================ SearchV7V12 END =================";
 }
 
 static int pickLeftBottomPA(const std::vector<ElectrodeAutoIdentifier::Cand2D>& cands)
@@ -1253,14 +1347,12 @@ void ElectrodeAutoIdentifier::SearchV13V19(ElectrodePanel* panel, vtkRenderer* r
     if (!panel || !ren)
         return;
 
-    qDebug() << "================ SearchV13V19 BEGIN ================";
 
     auto camSaved = SaveCamera(ren);
     ClearDebugProps(ren);
     auto& det = ElectrodeSurfaceDetector::instance();
 
     std::array<double, 3> volCenterW{ DI.VolumeOriginX + DI.VolumeCenterX, DI.VolumeOriginY + DI.VolumeCenterY, DI.VolumeOriginZ + DI.VolumeCenterZ };
-
 
     RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V1);
     Anchor aV1 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V1);
@@ -1285,7 +1377,6 @@ void ElectrodeAutoIdentifier::SearchV20V25(ElectrodePanel* panel, vtkRenderer* r
     if (!panel || !ren)
         return;
 
-    qDebug() << "================ SearchV13V19 BEGIN ================";
 
     auto camSaved = SaveCamera(ren);
     ClearDebugProps(ren);
@@ -1341,16 +1432,12 @@ void ElectrodeAutoIdentifier::SearchV26V30(ElectrodePanel* panel, vtkRenderer* r
     auto& det = ElectrodeSurfaceDetector::instance();
 
     std::array<double, 3> volCenterW{ DI.VolumeOriginX + DI.VolumeCenterX, DI.VolumeOriginY + DI.VolumeCenterY, DI.VolumeOriginZ + DI.VolumeCenterZ };
-    //if (!ComputeVolumeWorldCenter(ren, volCenterW))
-    //    return;
 
     RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V1);
     Anchor aV1 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V1);
 
     Anchor aV26 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V26, aV1, volCenterW, SectorSearchParams{ 4.5, 6, 8.0, 0.18, true });
-
-    RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V26);
-
+    RestoreCamera(ren, camSaved);
     Anchor aV27 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V27, aV26, volCenterW, SectorSearchParams{3.0, 6.0, 8.0, 0.18, true});
 
     RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V5);

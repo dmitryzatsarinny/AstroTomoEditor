@@ -711,12 +711,12 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
             }
             else if (pickAt(me->pos(), ijk, w))
             {
+                ensureHoverActor();
                 if (!mPicking)
                     mHoverActor->GetProperty()->SetColor(1.0, 0.85, 0.2); // “желтый кружок”
                 else
                     mHoverActor->GetProperty()->SetColor(0.2, 0.9, 0.35); // “зеленый кружок”
 
-                ensureHoverActor();
                 const double ww[3] = { w[0], w[1], w[2] };
                 setHoverAtWorld(ww);
                 setHoverVisible(true);
@@ -737,9 +737,6 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
                 if (!mPick.renderer || !mPick.vtkWidget || !mPick.vtkWidget->renderWindow())
                     return false;
 
-                if (removeElectrodeAtDisplay(me->pos()))
-                    return true;
-
                 const double dpr = mPick.vtkWidget->devicePixelRatioF();
                 const int x = int(std::lround(me->pos().x() * dpr));
                 const int yQt = int(std::lround(me->pos().y() * dpr));
@@ -757,8 +754,10 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
                     return true;
                 }
 
+                if (removeElectrodeAtDisplay(me->pos()))
+                    return true;
 
-                if (!mManualAddEnabled/* || !(me->modifiers() & Qt::AltModifier)*/)
+                if (!mManualAddEnabled)
                     return false;
 
                 std::array<int, 3> ijk;
@@ -866,6 +865,14 @@ bool ElectrodePanel::eventFilter(QObject* obj, QEvent* ev)
     return QWidget::eventFilter(obj, ev);
 }
 
+bool ElectrodePanel::pickAtViewportCenter(std::array<int, 3>& outIJK, std::array<double, 3>& outW) const
+{
+    if (!mPick.vtkWidget)
+        return false;
+
+    const QPoint center(mPick.vtkWidget->width() / 2, mPick.vtkWidget->height() / 2);
+    return pickAt(center, outIJK, outW);
+}
 
 void ElectrodePanel::clearElectrode(ElectrodeId id)
 {

@@ -91,6 +91,7 @@ public:
     QVector<ElectrodeCoord> coordsWorld() const;
     QVector<ElectrodeIJKCoord> coordsIJK() const;
     bool commitElectrodeFromWorld(ElectrodeId id, const std::array<double, 3>& world);
+    bool pickAtViewportCenter(std::array<int, 3>& outIJK, std::array<double, 3>& outW) const;
 
 protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
