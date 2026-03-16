@@ -354,12 +354,7 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchRLFN, &QPushButton::clicked, this, [this]
         {
             emit searchRLFNRequested();
-            updateSearchRLFNButtonVisibility();
-            updateSearchV1V6ButtonVisibility();
-            updateSearchV7V12ButtonVisibility();
-            updateSearchV13V19ButtonVisibility();
-            updateSearchV20V25ButtonVisibility();
-            updateSearchV26V30ButtonVisibility();
+            refreshSearchButtons();
         });
 
     // Search V1-V6
@@ -378,11 +373,7 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchV1V6, &QPushButton::clicked, this, [this]
         {
             emit searchV1V6Requested();
-            updateSearchV1V6ButtonVisibility();
-            updateSearchV7V12ButtonVisibility();
-            updateSearchV13V19ButtonVisibility();
-            updateSearchV20V25ButtonVisibility();
-            updateSearchV26V30ButtonVisibility();
+            refreshSearchButtons();
         });
 
     // Search V7-V12
@@ -401,11 +392,7 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchV7V12, &QPushButton::clicked, this, [this]
         {
             emit searchV7V12Requested();
-            updateSearchV1V6ButtonVisibility();
-            updateSearchV7V12ButtonVisibility();
-            updateSearchV13V19ButtonVisibility();
-            updateSearchV20V25ButtonVisibility();
-            updateSearchV26V30ButtonVisibility();
+            refreshSearchButtons();
         });
 
     // Search V13-V19
@@ -424,11 +411,7 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchV13V19, &QPushButton::clicked, this, [this]
         {
             emit searchV13V19Requested();
-            updateSearchV1V6ButtonVisibility();
-            updateSearchV7V12ButtonVisibility();
-            updateSearchV13V19ButtonVisibility();
-            updateSearchV20V25ButtonVisibility();
-            updateSearchV26V30ButtonVisibility();
+            refreshSearchButtons();
         });
 
     // Search V20-V25
@@ -447,11 +430,7 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchV20V25, &QPushButton::clicked, this, [this]
         {
             emit searchV20V25Requested();
-            updateSearchV1V6ButtonVisibility();
-            updateSearchV7V12ButtonVisibility();
-            updateSearchV13V19ButtonVisibility();
-            updateSearchV20V25ButtonVisibility();
-            updateSearchV26V30ButtonVisibility();
+            refreshSearchButtons();
         });
 
     // Search V26-V30
@@ -470,11 +449,7 @@ void ElectrodePanel::buildUi()
     connect(mBtnSearchV26V30, &QPushButton::clicked, this, [this]
         {
             emit searchV26V30Requested();
-            updateSearchV1V6ButtonVisibility();
-            updateSearchV7V12ButtonVisibility();
-            updateSearchV13V19ButtonVisibility();
-            updateSearchV20V25ButtonVisibility();
-            updateSearchV26V30ButtonVisibility();
+            refreshSearchButtons();
         });
 
     retain(mBtnSearchRLFN);
@@ -512,63 +487,46 @@ void ElectrodePanel::buildUi()
     root->addWidget(rightWrap, 0, Qt::AlignTop | Qt::AlignRight);
 
     QTimer::singleShot(0, this, [this] { rebuildMask(); });
-    updateSearchRLFNButtonVisibility();
-    updateSearchV1V6ButtonVisibility();
-    updateSearchV7V12ButtonVisibility();
-    updateSearchV13V19ButtonVisibility();
-    updateSearchV20V25ButtonVisibility();
-    updateSearchV26V30ButtonVisibility();
+    refreshSearchButtons();
+}
+
+void ElectrodePanel::setSearchButtonVisibility(QPushButton* button, bool visible)
+{
+    if (!button)
+        return;
+
+    button->setVisible(visible);
 }
 
 void ElectrodePanel::updateSearchV1V6ButtonVisibility()
 {
-    if (!mBtnSearchV1V6)
-        return;
-
-    mBtnSearchV1V6->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV1V6(this));
+    setSearchButtonVisibility(mBtnSearchV1V6, ElectrodeAutoIdentifier::ShouldShowSearchV1V6(this));
 }
 
 void ElectrodePanel::updateSearchV7V12ButtonVisibility()
 {
-    if (!mBtnSearchV7V12)
-        return;
-
-    mBtnSearchV7V12->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV7V12(this));
+    setSearchButtonVisibility(mBtnSearchV7V12, ElectrodeAutoIdentifier::ShouldShowSearchV7V12(this));
 }
 
 void ElectrodePanel::updateSearchV13V19ButtonVisibility()
 {
-    if (!mBtnSearchV13V19)
-        return;
-
-    mBtnSearchV13V19->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV13V19(this));
+    setSearchButtonVisibility(mBtnSearchV13V19, ElectrodeAutoIdentifier::ShouldShowSearchV13V19(this));
 }
 
 void ElectrodePanel::updateSearchV20V25ButtonVisibility()
 {
-    if (!mBtnSearchV20V25)
-        return;
-
-    mBtnSearchV20V25->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV20V25(this));
+    setSearchButtonVisibility(mBtnSearchV20V25, ElectrodeAutoIdentifier::ShouldShowSearchV20V25(this));
 }
 
 void ElectrodePanel::updateSearchV26V30ButtonVisibility()
 {
-    if (!mBtnSearchV26V30)
-        return;
-
-    mBtnSearchV26V30->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchV26V30(this));
+    setSearchButtonVisibility(mBtnSearchV26V30, ElectrodeAutoIdentifier::ShouldShowSearchV26V30(this));
 }
-
 
 void ElectrodePanel::updateSearchRLFNButtonVisibility()
 {
-    if (!mBtnSearchRLFN)
-        return;
-
-    mBtnSearchRLFN->setVisible(ElectrodeAutoIdentifier::ShouldShowSearchRLFN(this));
+    setSearchButtonVisibility(mBtnSearchRLFN, ElectrodeAutoIdentifier::ShouldShowSearchRLFN(this));
 }
-
 
 void ElectrodePanel::resizeEvent(QResizeEvent* e)
 {
@@ -1197,6 +1155,16 @@ void ElectrodePanel::refreshSearchV20V25Button()
 void ElectrodePanel::refreshSearchV26V30Button()
 {
     updateSearchV26V30ButtonVisibility();
+}
+
+void ElectrodePanel::refreshSearchButtons()
+{
+    refreshSearchRLFNButton();
+    refreshSearchV1V6Button();
+    refreshSearchV7V12Button();
+    refreshSearchV13V19Button();
+    refreshSearchV20V25Button();
+    refreshSearchV26V30Button();
 }
 
 void ElectrodePanel::retranslateUi()

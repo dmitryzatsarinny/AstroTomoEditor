@@ -75,6 +75,7 @@ public:
     void refreshSearchV13V19Button();
     void refreshSearchV20V25Button();
     void refreshSearchV26V30Button();
+    void refreshSearchButtons();
 
     struct ElectrodeCoord
     {
@@ -122,6 +123,7 @@ private:
     class ElectrodeButton; // ниже в cpp
     void buildUi();
     void rebuildMask();
+    void setSearchButtonVisibility(QPushButton* button, bool visible);
     void updateSearchRLFNButtonVisibility();
     void updateSearchV1V6ButtonVisibility();
     void updateSearchV7V12ButtonVisibility();
@@ -215,4 +217,3 @@ private:
     bool tryGetVolumeCenterWorld(std::array<double, 3>& outCenter) const;
     bool isWorldWithinClickableAngle(const std::array<double, 3>& world) const;
 };
-

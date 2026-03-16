@@ -2635,6 +2635,24 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     }
     pump(25);
 
+    // При загрузке нового исследования всегда сбрасываем STL-предпросмотр,
+    // чтобы в сцене не оставались старый меш и его оценка размера.
+    clearStlPreview();
+    mIsoMesh = nullptr;
+    mSimplifyStarted = false;
+    mSimplifyTargetMB = kFirstAimMB;
+
+    if (mBtnSTL)
+        mBtnSTL->setChecked(false);
+    if (mBtnSTLSave) {
+        mBtnSTLSave->setEnabled(false);
+        mBtnSTLSave->setVisible(false);
+    }
+    if (mBtnSTLSimplify) {
+        mBtnSTLSimplify->setEnabled(false);
+        mBtnSTLSimplify->setVisible(false);
+    }
+
     DI = Dicom;
 
     double sp[3]{ 1,1,1 };

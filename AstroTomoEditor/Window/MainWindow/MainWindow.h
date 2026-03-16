@@ -76,6 +76,7 @@ private:
     void showInfo(const QString& text);
     void positionCornerGrip();
     void retranslateUi(bool loading);
+    bool isWindowExpanded() const;
 
 private:
     // --- данные контекста ---

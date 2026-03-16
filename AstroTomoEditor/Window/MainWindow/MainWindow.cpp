@@ -264,6 +264,7 @@ void MainWindow::retranslateUi(bool loading)
 
 void MainWindow::showEvent(QShowEvent* e) {
     QMainWindow::showEvent(e);
+    applyMaximizedUi(isWindowExpanded());
     positionCornerGrip();      // на случай показа после построения
 }
 
@@ -684,7 +685,6 @@ void MainWindow::StartLoading()
         return;
 
     mLoading = true;
-    mUiToDisable = centralWidget();
 
     QObject* src = sender();
     std::optional<QSignalBlocker> blocker;
@@ -805,14 +805,19 @@ void MainWindow::changeEvent(QEvent* e)
 
     if (e->type() == QEvent::WindowStateChange)
     {
-        applyMaximizedUi(isMaximized());
+        applyMaximizedUi(isWindowExpanded());
         positionCornerGrip();
+        QTimer::singleShot(0, this, [this] {
+            applyMaximizedUi(isWindowExpanded());
+            positionCornerGrip();
+            });
     }
 }
 
 void MainWindow::resizeEvent(QResizeEvent* e)
 {
     QMainWindow::resizeEvent(e);
+    applyMaximizedUi(isWindowExpanded());
     positionCornerGrip();
 }
 
@@ -826,6 +831,12 @@ void MainWindow::positionCornerGrip()
     const int x = mFooter->width() - mCornerGrip->width() - insetX;
     const int y = mFooter->height() - mCornerGrip->height() - insetY;
     mCornerGrip->move(x, y);
+}
+
+bool MainWindow::isWindowExpanded() const
+{
+    const auto st = windowState();
+    return st.testFlag(Qt::WindowMaximized) || st.testFlag(Qt::WindowFullScreen);
 }
 
 void MainWindow::applyMaximizedUi(bool maxed)

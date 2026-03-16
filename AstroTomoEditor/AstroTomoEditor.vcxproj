@@ -209,6 +209,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>D:\Library\vtk\install\Release\include\vtk-9.5;D:\Library\vtk-dicom\install\Release\include\vtk-9.5;D:\Library\GDCM\install\Release\include\gdcm-3.2;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>D:\Library\vtk-dicom\install\Release\lib;D:\Library\vtk\install\Release\lib;D:\Library\GDCM\install\Release\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>

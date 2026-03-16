@@ -1243,23 +1243,23 @@ void ElectrodeAutoIdentifier::SearchV1V6(ElectrodePanel* panel, vtkRenderer* ren
         aV1 = CommitFromSector(panel, ren, det, ElectrodePanel::ElectrodeId::V1,
             volCenterW,
             seedWorld, cx, cy,
-            SectorSearchParams{ 10.5, 12.0, 8.0, 0.18, true });
+            SectorSearchParams{ 10.5, 12.0, 20.0, 0.30, true });
 
     Anchor aV2 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V2);
     if (!aV2.valid && !panel->hasCoord(ElectrodePanel::ElectrodeId::V2))
         aV2 = CommitFromSector(panel, ren, det, ElectrodePanel::ElectrodeId::V2,
             volCenterW,
             seedWorld, cx, cy,
-            SectorSearchParams{ 12.0, 1.5, 8.0, 0.18, true });
+            SectorSearchParams{ 12.0, 1.5, 20.0, 0.30, true });
 
 
     RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V2);
     aV2 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V2);
 
-    Anchor aV3 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V3, aV2, volCenterW, SectorSearchParams{ 3.0, 6.0, 8.0, 0.18, true });
-    Anchor aV4 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V4, aV3, volCenterW, SectorSearchParams{ 2.0, 6.0, 8.0, 0.18, true });
-    Anchor aV5 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V5, aV4, volCenterW, SectorSearchParams{ 1.0, 5.0, 8.0, 0.18, true });
-    (void)PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V6, aV5, volCenterW, SectorSearchParams{ 2.0, 4.0, 8.0, 0.18, true });
+    Anchor aV3 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V3, aV2, volCenterW, SectorSearchParams{ 3.0, 6.0, 20.0, 0.30, true });
+    Anchor aV4 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V4, aV3, volCenterW, SectorSearchParams{ 2.0, 6.0, 20.0, 0.30, true });
+    Anchor aV5 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V5, aV4, volCenterW, SectorSearchParams{ 1.0, 5.0, 20.0, 0.30, true });
+    (void)PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V6, aV5, volCenterW, SectorSearchParams{ 2.0, 4.0, 20.0, 0.30, true });
     ClearDebugProps(ren);
 }
 
@@ -1307,10 +1307,10 @@ void ElectrodeAutoIdentifier::SearchV7V12(ElectrodePanel* panel, vtkRenderer* re
     Anchor aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
     Anchor aV7 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V7, aV6, volCenterW, SectorSearchParams{ 0.5, 5, 20.0, 0.30, true });
     Anchor aV8 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V8, aV7, volCenterW, SectorSearchParams{ 0.0, 4.0, 20.0, 0.30, true });
-    Anchor aV9 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V9, aV8, volCenterW, SectorSearchParams{ 1.5, 4.5, 6.0, 0.18, true });
-    Anchor aV10 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V10, aV9, volCenterW, SectorSearchParams{ 1.0, 5.0, 6.0, 0.18, true });
-    Anchor aV11 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V11, aV10, volCenterW, SectorSearchParams{ 1.0, 5.0, 6.0, 0.18, true });
-    Anchor aV12 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V12, aV11, volCenterW, SectorSearchParams{ 2.0, 6.0, 6.0, 0.18, true });
+    Anchor aV9 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V9, aV8, volCenterW, SectorSearchParams{ 1.5, 4.5, 20.0, 0.30, true });
+    Anchor aV10 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V10, aV9, volCenterW, SectorSearchParams{ 1.0, 5.0, 20.0, 0.30, true });
+    Anchor aV11 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V11, aV10, volCenterW, SectorSearchParams{ 1.0, 5.0, 20.0, 0.30, true });
+    Anchor aV12 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V12, aV11, volCenterW, SectorSearchParams{ 2.0, 6.0, 20.0, 0.30, true });
     ClearDebugProps(ren);
 }
 
@@ -1375,15 +1375,15 @@ void ElectrodeAutoIdentifier::SearchV13V19(ElectrodePanel* panel, vtkRenderer* r
 
     Anchor aV15 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V15, aV1, volCenterW, SectorSearchParams{ 6.0, 9.0, 20.0, 0.30, true });
     Anchor aV14 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V14, aV15, volCenterW, SectorSearchParams{ 6.0, 9.0, 20.0, 0.30, true });
-    Anchor aV13 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V13, aV14, volCenterW, SectorSearchParams{ 7.5, 10.5, 6.0, 0.18, true });
-    Anchor aV19 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V19, aV13, volCenterW, SectorSearchParams{ 4.5, 7.5, 6.0, 0.18, true });
+    Anchor aV13 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V13, aV14, volCenterW, SectorSearchParams{ 7.5, 10.5, 20.0, 0.30, true });
+    Anchor aV19 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V19, aV13, volCenterW, SectorSearchParams{ 4.5, 7.5, 20.0, 0.30, true });
 
     RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V1);
     aV1 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V1);
 
-    Anchor aV16 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V16, aV1, volCenterW, SectorSearchParams{ 0.0, 3.0, 6.0, 0.18, true });
-    Anchor aV17 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V17, aV16, volCenterW, SectorSearchParams{ 1.5, 4.5, 6.0, 0.18, true });
-    Anchor aV18 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V18, aV17, volCenterW, SectorSearchParams{ 1.5, 4.5, 6.0, 0.18, true });
+    Anchor aV16 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V16, aV1, volCenterW, SectorSearchParams{ 0.0, 3.0, 20.0, 0.30, true });
+    Anchor aV17 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V17, aV16, volCenterW, SectorSearchParams{ 1.5, 4.5, 20.0, 0.30, true });
+    Anchor aV18 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V18, aV17, volCenterW, SectorSearchParams{ 1.5, 4.5, 20.0, 0.30, true });
     ClearDebugProps(ren);
 }
 
@@ -1431,9 +1431,9 @@ void ElectrodeAutoIdentifier::SearchV20V25(ElectrodePanel* panel, vtkRenderer* r
         aV20 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V20);
     }
 
-    Anchor aV21 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V21, aV20, volCenterW, SectorSearchParams{ 1.0, 4.5, 6.0, 0.18, true });
-    Anchor aV22 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V22, aV21, volCenterW, SectorSearchParams{ 1.5, 4.5, 6.0, 0.18, true });
-    Anchor aV23 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V23, aV22, volCenterW, SectorSearchParams{ 1.5, 4.5, 6.0, 0.18, true });
+    Anchor aV21 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V21, aV20, volCenterW, SectorSearchParams{ 1.0, 4.5, 20.0, 0.30, true });
+    Anchor aV22 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V22, aV21, volCenterW, SectorSearchParams{ 1.5, 4.5, 20.0, 0.30, true });
+    Anchor aV23 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V23, aV22, volCenterW, SectorSearchParams{ 1.5, 4.5, 20.0, 0.30, true });
     ClearDebugProps(ren);
 }
 
@@ -1451,31 +1451,14 @@ void ElectrodeAutoIdentifier::SearchV26V30(ElectrodePanel* panel, vtkRenderer* r
     RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V1);
     Anchor aV1 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V1);
 
-    Anchor aV26 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V26, aV1, volCenterW, SectorSearchParams{ 4.5, 6, 8.0, 0.18, true });
+    Anchor aV26 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V26, aV1, volCenterW, SectorSearchParams{ 4.5, 6, 20.0, 0.30, true });
     RestoreCamera(ren, camSaved);
-    Anchor aV27 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V27, aV26, volCenterW, SectorSearchParams{3.0, 6.0, 8.0, 0.18, true});
+    Anchor aV27 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V27, aV26, volCenterW, SectorSearchParams{3.0, 6.0, 20.0, 0.30, true});
 
-    RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V5);
-    Anchor aV5 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V5);
+    RotateAzimuthToCenterX(panel, ren, ElectrodePanel::ElectrodeId::V6);
+    Anchor aV6 = AnchorFromPanel(panel, ren, ElectrodePanel::ElectrodeId::V6);
 
-    RestoreCamera(ren, camSaved); // вернулись в AP
-
-    bool placedV28 = false;
-    std::array<double, 3> wV28{};
-    Anchor aV28;
-
-    if (!panel->hasCoord(ElectrodePanel::ElectrodeId::V28))
-    {
-        const auto centers = det.currentSphereCenters();
-        const auto cands = CollectDisplayCandidates(ren, centers);
-
-        const int idx = PickRightBottom(cands);
-
-        aV28 = CommitByIndex(panel, ren, det,
-            ElectrodePanel::ElectrodeId::V28,
-            cands, idx,
-            placedV28, wV28);
-    }
+    Anchor aV28 = PlaceSequential(panel, ren, det, ElectrodePanel::ElectrodeId::V28, aV6, volCenterW, SectorSearchParams{ 4.0, 8.0, 20.0, 0.30, true });
     
     RestoreCamera(ren, camSaved); // вернулись в AP
     TurnPA(ren);                  // повернули на PA
