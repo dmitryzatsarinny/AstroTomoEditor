@@ -635,6 +635,67 @@ namespace
         return true;
     }
 
+    static vtkSmartPointer<vtkPolyData> KeepSignificantRegions(
+        vtkPolyData* in,
+        double minFractionOfLargest,
+        vtkIdType minCells)
+    {
+        if (!in || in->GetNumberOfCells() == 0)
+            return nullptr;
+
+        vtkNew<vtkPolyDataConnectivityFilter> connAll;
+        connAll->SetInputData(in);
+        connAll->SetExtractionModeToAllRegions();
+        connAll->ColorRegionsOn();
+        connAll->Update();
+
+        auto* sizes = connAll->GetRegionSizes();
+        if (!sizes || sizes->GetNumberOfTuples() == 0)
+        {
+            vtkSmartPointer<vtkPolyData> out = vtkSmartPointer<vtkPolyData>::New();
+            out->DeepCopy(in);
+            return out;
+        }
+
+        vtkIdType largest = 0;
+        int largestId = 0;
+        for (int r = 0; r < sizes->GetNumberOfTuples(); ++r)
+        {
+            const vtkIdType sz = sizes->GetValue(r);
+            if (sz > largest)
+            {
+                largest = sz;
+                largestId = r;
+            }
+        }
+
+        const double frac = std::clamp(minFractionOfLargest, 0.0, 1.0);
+        const double minByFrac = double(largest) * frac;
+
+        vtkNew<vtkPolyDataConnectivityFilter> connKeep;
+        connKeep->SetInputData(in);
+        connKeep->SetExtractionModeToSpecifiedRegions();
+
+        int kept = 0;
+        for (int r = 0; r < sizes->GetNumberOfTuples(); ++r)
+        {
+            const vtkIdType sz = sizes->GetValue(r);
+            if (double(sz) >= minByFrac && sz >= minCells)
+            {
+                connKeep->AddSpecifiedRegion(r);
+                ++kept;
+            }
+        }
+
+        if (kept == 0)
+            connKeep->AddSpecifiedRegion(largestId);
+
+        connKeep->Update();
+
+        vtkSmartPointer<vtkPolyData> out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(connKeep->GetOutput());
+        return out;
+    }
 
     static inline void ExpandClampBBox(int bbox[6], const int ext[6], int margin)
     {
@@ -905,17 +966,29 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         qDebug() << "Boundary edges:" << feEdges->GetOutput()->GetNumberOfCells();
 
         vtkNew<vtkFillHolesFilter> fill;
-        fill->SetInputConnection(clean->GetOutputPort());
-        fill->SetHoleSize(500.0);
+        // Закрываем только МЕЛКИЕ дырки от дискретизации.
+         // Большие отверстия (например, у границы среза данных) не трогаем,
+         // иначе получается искусственная "крышка" и эффект "откусанного" верха.
+        const double tinyHoleMm = 3.0 * std::max({ spPad[0], spPad[1], spPad[2] });
+        fill->SetHoleSize(tinyHoleMm * tinyHoleMm);
 
-        vtkNew<vtkPolyDataConnectivityFilter> conn;
-        conn->SetInputConnection(fill->GetOutputPort());
-        conn->SetExtractionModeToLargestRegion();
-        conn->Update();
-        if (opt.progress) opt.progress(92, tr("Largest component"));
+        fill->Update();
+
+        auto keptRegions = KeepSignificantRegions(fill->GetOutput(), 0.03, 500);
+        if (!keptRegions || keptRegions->GetNumberOfCells() == 0)
+            keptRegions = fill->GetOutput();
+
+        if (opt.progress) opt.progress(92, tr("Components"));
+
+
+        //vtkNew<vtkPolyDataConnectivityFilter> conn;
+        //conn->SetInputConnection(fill->GetOutputPort());
+        //conn->SetExtractionModeToLargestRegion();
+        //conn->Update();
+        //if (opt.progress) opt.progress(92, tr("Largest component"));
 
         vtkNew<vtkPolyDataNormals> nrm;
-        nrm->SetInputConnection(conn->GetOutputPort());
+        nrm->SetInputData(keptRegions);
         nrm->ComputePointNormalsOn();
         nrm->ComputeCellNormalsOff();
         nrm->SplittingOff();
@@ -1118,7 +1191,15 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         std::abs(sB[2] - b[2]) <= tY && std::abs(sB[3] - b[3]) <= tY &&
         std::abs(sB[4] - b[4]) <= tZ && std::abs(sB[5] - b[5]) <= tZ;
 
-    if (touchesAllBounds &&
+    // NOTE:
+    // В реальных КТ/МР сердце или сосуд может честно доходить до верхней
+    // границы объёма. В этом случае inner-clip «съедает» верх (ровный срез),
+    // что выглядит как откусанный STL. Поэтому защитный clip рамки паддинга
+    // отключён по умолчанию.
+    constexpr bool kEnableInnerPaddingClip = false;
+
+    if (kEnableInnerPaddingClip &&
+        touchesAllBounds &&
         (b[1] - b[0]) > 2.5 * mX && (b[3] - b[2]) > 2.5 * mY && (b[5] - b[4]) > 2.5 * mZ)
     {
         innerBox->SetBounds(
@@ -1149,16 +1230,21 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
 
     vtkNew<vtkFillHolesFilter> fill;
     fill->SetInputConnection(clean->GetOutputPort());
-    fill->SetHoleSize(500.0);
+    // Аналогично: заполняем только мелкие технологические дырки.
+    // Крупные отверстия у края скана оставляем как есть (без ложной крышки).
+    const double tinyHoleMm = 3.0 * std::max({ sp2[0], sp2[1], sp2[2] });
+    fill->SetHoleSize(tinyHoleMm * tinyHoleMm);
 
-    vtkNew<vtkPolyDataConnectivityFilter> conn;
-    conn->SetInputConnection(fill->GetOutputPort());
-    conn->SetExtractionModeToLargestRegion();
-    conn->Update();
-    if (opt.progress) opt.progress(95, tr("Largest component"));
+    fill->Update();
+
+    auto keptRegions = KeepSignificantRegions(fill->GetOutput(), 0.03, 500);
+    if (!keptRegions || keptRegions->GetNumberOfCells() == 0)
+        keptRegions = fill->GetOutput();
+
+    if (opt.progress) opt.progress(95, tr("Components"));
 
     vtkNew<vtkPolyDataNormals> nrm;
-    nrm->SetInputConnection(conn->GetOutputPort());
+    nrm->SetInputData(keptRegions);
     nrm->ComputePointNormalsOn();
     nrm->ComputeCellNormalsOff();
     nrm->SplittingOff();
