@@ -1102,8 +1102,24 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     vtkNew<vtkBox> innerBox;
     vtkNew<vtkClipPolyData> clip;
 
-    // небольшой inner-clip, чтобы гарантированно отрезать “рамку паддинга”
-    if ((b[1] - b[0]) > 2.5 * mX && (b[3] - b[2]) > 2.5 * mY && (b[5] - b[4]) > 2.5 * mZ)
+    // Небольшой inner-clip нужен только когда на выходе действительно видна
+    // «рамка паддинга» (поверхность прижата к границам объёма со всех сторон).
+    // Если объект упирается только в одну сторону (например, сверху), агрессивный
+    // clip даёт искусственный срез на STL.
+    double sB[6];
+    tri->GetOutput()->GetBounds(sB);
+
+    const double tX = 1.1 * sp2[0];
+    const double tY = 1.1 * sp2[1];
+    const double tZ = 1.1 * sp2[2];
+
+    const bool touchesAllBounds =
+        std::abs(sB[0] - b[0]) <= tX && std::abs(sB[1] - b[1]) <= tX &&
+        std::abs(sB[2] - b[2]) <= tY && std::abs(sB[3] - b[3]) <= tY &&
+        std::abs(sB[4] - b[4]) <= tZ && std::abs(sB[5] - b[5]) <= tZ;
+
+    if (touchesAllBounds &&
+        (b[1] - b[0]) > 2.5 * mX && (b[3] - b[2]) > 2.5 * mY && (b[5] - b[4]) > 2.5 * mZ)
     {
         innerBox->SetBounds(
             b[0] + mX, b[1] - mX,
@@ -1122,7 +1138,7 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     }
     else
     {
-        qDebug() << "[STL] clip disabled (bounds too small)";
+        qDebug() << "[STL] clip disabled (no full-frame padding artifact or bounds too small)";
     }
 
     vtkNew<vtkCleanPolyData> clean;

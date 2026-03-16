@@ -1746,61 +1746,61 @@ void RenderView::rebuildVisibleMaskFromImage(vtkImageData* src)
         outPtr[id] = (v != 0.0 && v >= mHistMaskLo && v <= mHistMaskHi) ? 255u : 0u;
     }
 
-    // 2) стираем первые 2 слоя по всем граням: 0,1 и n-2,n-1
-    constexpr int L = 2; // сколько слоёв стираем
+    //// 2) стираем первые 2 слоя по всем граням: 0,1 и n-2,n-1
+    //constexpr int L = 2; // сколько слоёв стираем
 
-    auto clampi = [](int v, int lo, int hi) { return std::max(lo, std::min(v, hi)); };
+    //auto clampi = [](int v, int lo, int hi) { return std::max(lo, std::min(v, hi)); };
 
-    const int i0 = ext[0], i1 = ext[1];
-    const int j0 = ext[2], j1 = ext[3];
-    const int k0 = ext[4], k1 = ext[5];
+    //const int i0 = ext[0], i1 = ext[1];
+    //const int j0 = ext[2], j1 = ext[3];
+    //const int k0 = ext[4], k1 = ext[5];
 
-    const int iL0 = i0;
-    const int iL1 = i0 + (L - 1);
-    const int iR0 = i1 - (L - 1);
-    const int iR1 = i1;
+    //const int iL0 = i0;
+    //const int iL1 = i0 + (L - 1);
+    //const int iR0 = i1 - (L - 1);
+    //const int iR1 = i1;
 
-    const int jL0 = j0;
-    const int jL1 = j0 + (L - 1);
-    const int jR0 = j1 - (L - 1);
-    const int jR1 = j1;
+    //const int jL0 = j0;
+    //const int jL1 = j0 + (L - 1);
+    //const int jR0 = j1 - (L - 1);
+    //const int jR1 = j1;
 
-    const int kL0 = k0;
-    const int kL1 = k0 + (L - 1);
-    const int kR0 = k1 - (L - 1);
-    const int kR1 = k1;
+    //const int kL0 = k0;
+    //const int kL1 = k0 + (L - 1);
+    //const int kR0 = k1 - (L - 1);
+    //const int kR1 = k1;
 
-    // helper: set voxel (i,j,k) = 0
-    auto zeroAt = [&](int i, int j, int k)
-        {
-            int ijk[3] = { i, j, k };
-            const vtkIdType id = src->ComputePointId(ijk);
-            outPtr[id] = 0u;
-        };
+    //// helper: set voxel (i,j,k) = 0
+    //auto zeroAt = [&](int i, int j, int k)
+    //    {
+    //        int ijk[3] = { i, j, k };
+    //        const vtkIdType id = src->ComputePointId(ijk);
+    //        outPtr[id] = 0u;
+    //    };
 
-    // X-грани (левая и правая)
-    for (int k = k0; k <= k1; ++k)
-        for (int j = j0; j <= j1; ++j)
-        {
-            for (int i = iL0; i <= iL1; ++i) zeroAt(i, j, k);
-            for (int i = iR0; i <= iR1; ++i) zeroAt(i, j, k);
-        }
+    //// X-грани (левая и правая)
+    //for (int k = k0; k <= k1; ++k)
+    //    for (int j = j0; j <= j1; ++j)
+    //    {
+    //        for (int i = iL0; i <= iL1; ++i) zeroAt(i, j, k);
+    //        for (int i = iR0; i <= iR1; ++i) zeroAt(i, j, k);
+    //    }
 
-    // Y-грани (перед/зад)
-    for (int k = k0; k <= k1; ++k)
-        for (int i = i0; i <= i1; ++i)
-        {
-            for (int j = jL0; j <= jL1; ++j) zeroAt(i, j, k);
-            for (int j = jR0; j <= jR1; ++j) zeroAt(i, j, k);
-        }
+    //// Y-грани (перед/зад)
+    //for (int k = k0; k <= k1; ++k)
+    //    for (int i = i0; i <= i1; ++i)
+    //    {
+    //        for (int j = jL0; j <= jL1; ++j) zeroAt(i, j, k);
+    //        for (int j = jR0; j <= jR1; ++j) zeroAt(i, j, k);
+    //    }
 
-    // Z-грани (низ/верх)
-    for (int j = j0; j <= j1; ++j)
-        for (int i = i0; i <= i1; ++i)
-        {
-            for (int k = kL0; k <= kL1; ++k) zeroAt(i, j, k);
-            for (int k = kR0; k <= kR1; ++k) zeroAt(i, j, k);
-        }
+    //// Z-грани (низ/верх)
+    //for (int j = j0; j <= j1; ++j)
+    //    for (int i = i0; i <= i1; ++i)
+    //    {
+    //        for (int k = kL0; k <= kL1; ++k) zeroAt(i, j, k);
+    //        for (int k = kR0; k <= kR1; ++k) zeroAt(i, j, k);
+    //    }
 
     outU8->Modified();
     mVisibleMask->Modified();
