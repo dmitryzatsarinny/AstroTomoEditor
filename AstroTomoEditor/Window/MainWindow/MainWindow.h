@@ -11,6 +11,7 @@
 #include "PatientDialog.h"
 #include "AsyncProgressBar.h"
 #include "SettingsDialog.h"
+#include "DicomSeriesSaveDialog.h"
 
 class QSplitter;
 class QStackedWidget;
@@ -59,7 +60,7 @@ private slots:
     void showPatientDetails();
     void showSettings();
     void onSave3DR();
-
+    void onSaveDicom();
 protected:
     void changeEvent(QEvent* e) override;
     void resizeEvent(QResizeEvent* e) override;
@@ -98,6 +99,7 @@ private:
     RenderView* mRenderView{ nullptr };  // 3D просмотр (лениво создаём)
     PatientDialog* mPatientDlg{ nullptr };
     SettingsDialog* mSettingsDlg{ nullptr };
+    DicomSeriesSaveDialog* mDicomSeriesSaveDlg{ nullptr };
 
     // --- нижняя панель / статус ---
     QWidget* mFooter{ nullptr };

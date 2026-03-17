@@ -48,7 +48,6 @@ TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlen
     r->setSpacing(6);
 
     mBtnSave3DR = new QToolButton(mRight);
-    //mBtnSave3DR->setIcon(QIcon(":/icons/save.svg"));
     mBtnSave3DR->setObjectName("Save3DR");
     mBtnSave3DR->setToolTip(tr("Save 3DR (Ctrl+S)"));
     mBtnSave3DR->setText(tr("Save 3DR"));
@@ -58,6 +57,17 @@ TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlen
     auto pol = mBtnSave3DR->sizePolicy();
     pol.setRetainSizeWhenHidden(true);
     mBtnSave3DR->setSizePolicy(pol);
+
+    mBtnSaveDicom = new QToolButton(mRight);
+    mBtnSaveDicom->setObjectName("SaveDICOM");
+    mBtnSaveDicom->setToolTip(tr("Save DICOM (Ctrl+D)"));
+    mBtnSaveDicom->setText(tr("Save DICOM"));
+    mBtnSaveDicom->setCursor(Qt::PointingHandCursor);
+    mBtnSaveDicom->setFixedHeight(26);
+    mBtnSaveDicom->setVisible(false);
+    pol = mBtnSaveDicom->sizePolicy();
+    pol.setRetainSizeWhenHidden(true);
+    mBtnSaveDicom->setSizePolicy(pol);
 
     // --- добавляем аккуратные кнопки 2D и 3D ---
     mBtn2D = new QToolButton(mRight);
@@ -91,22 +101,25 @@ TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlen
 
     // стиль «выбранной» кнопки
     const char* viewBtnStyle =
-        "QToolButton#Btn2D, QToolButton#Btn3D, QToolButton#Save3DR {"
+        "QToolButton#Btn2D, QToolButton#Btn3D, QToolButton#Save3DR, QToolButton#SaveDICOM {"
         "  color:#e6e6e6; background:transparent; border:none;"
         "  padding:2px 10px; font-size:16px; border-radius:6px;"
         "}"
-        "QToolButton#Btn2D:hover, QToolButton#Btn3D:hover, QToolButton#Save3DR:hover {"
+        "QToolButton#Btn2D:hover, QToolButton#Btn3D:hover, QToolButton#Save3DR:hover, QToolButton#SaveDICOM:hover {"
         "  background:rgba(255,255,255,0.10);"
         "}"
         "QToolButton#Btn2D:checked, QToolButton#Btn3D:checked {"
         "  background:rgba(255,255,255,0.18); color:#ffffff;"
         "}";
 
+    
     mBtnSave3DR->setStyleSheet(viewBtnStyle);
+    mBtnSaveDicom->setStyleSheet(viewBtnStyle);
     mBtn2D->setStyleSheet(viewBtnStyle);
     mBtn3D->setStyleSheet(viewBtnStyle);
     
     r->addWidget(mBtnSave3DR);
+    r->addWidget(mBtnSaveDicom);
     r->addWidget(mBtn2D);
     r->addWidget(mBtn3D);
 
@@ -200,6 +213,7 @@ TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlen
         });
 
     connect(mBtnSave3DR, &QToolButton::clicked, this, &TitleBar::save3DRRequested);
+    connect(mBtnSaveDicom, &QToolButton::clicked, this, &TitleBar::saveDicomRequested);
 
     QTimer::singleShot(0, this, [this] { updateMaximizeIcon(); });
 
@@ -218,7 +232,7 @@ void TitleBar::initDragFilters()
     for (QWidget* w : kids) {
         if (w == mBtnClose || w == mBtnMax || w == mBtnSettings ||
             w == mPatientBtn || w == mBtn2D ||
-            w == mBtn3D || w == mBtnSave3DR)
+            w == mBtn3D || w == mBtnSave3DR || w == mBtnSaveDicom)
         {
             continue; // за них тянуть не надо
         }
@@ -361,7 +375,7 @@ bool TitleBar::eventFilter(QObject* obj, QEvent* ev)
         // если это одна из «запрещённых» кнопок — не трогаем, даём им жить своей жизнью
         if (w == mBtnClose || w == mBtnMax ||
             w == mPatientBtn || w == mBtn2D ||
-            w == mBtn3D || w == mBtnSave3DR)
+            w == mBtn3D || w == mBtnSave3DR || w == mBtnSaveDicom)
         {
             return QWidget::eventFilter(obj, ev);
         }
@@ -416,6 +430,11 @@ void TitleBar::set3DVisible(bool on) {
 
 void TitleBar::setSaveVisible(bool on) {
     mBtnSave3DR->setVisible(on);
+    QTimer::singleShot(0, this, [this] { updateOverlayGeometry(); });
+}
+
+void TitleBar::setSaveDicomVisible(bool on) {
+    mBtnSaveDicom->setVisible(on);
     QTimer::singleShot(0, this, [this] { updateOverlayGeometry(); });
 }
 
@@ -528,9 +547,16 @@ void TitleBar::changeEvent(QEvent* e)
 
 void TitleBar::retranslateUi()
 {
-    if (mBtnSave3DR) {
+    if (mBtnSave3DR) 
+    {
         mBtnSave3DR->setToolTip(tr("Save 3DR (Ctrl+S)"));
         mBtnSave3DR->setText(tr("Save 3DR"));
+    }
+
+    if (mBtnSaveDicom)
+    {
+        mBtnSaveDicom->setToolTip(tr("Save Dicom (Ctrl+D)"));
+        mBtnSaveDicom->setText(tr("Save Dicom"));
     }
 
     if (mBtnSettings) mBtnSettings->setToolTip(tr("Settings"));

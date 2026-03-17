@@ -205,8 +205,15 @@ void MainWindow::buildUi()
         mSettingsDlg = new SettingsDialog(this, true);
     mSettingsDlg->hide();
 
+    if (!mDicomSeriesSaveDlg)
+        mDicomSeriesSaveDlg = new DicomSeriesSaveDialog(this);
+    mDicomSeriesSaveDlg->hide();
+
     if (mTitle)
+    {
+        mTitle->setSaveDicomVisible(false);
         mTitle->setSettingsVisible(false);
+    }
 
     connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
         {
@@ -255,6 +262,9 @@ void MainWindow::retranslateUi(bool loading)
 
     if (mPatientDlg)
         mPatientDlg->retranslateUi();
+
+    if (mDicomSeriesSaveDlg)
+        mDicomSeriesSaveDlg->retranslateUi();
 
     if (mPlanar)
         mPlanar->retranslateUi();
@@ -633,12 +643,19 @@ void MainWindow::wireSignals()
 
     // Подписка на клик из заголовка
     connect(mTitle, &TitleBar::save3DRRequested, this, &MainWindow::onSave3DR);
+    connect(mTitle, &TitleBar::saveDicomRequested, this, &MainWindow::onSaveDicom);
 
-    // Горячая клавиша Ctrl+S (по желанию)
+    // Горячая клавиша Ctrl+S
     auto* actSave = new QAction(tr("Save 3DR"), this);
     actSave->setShortcut(QKeySequence::Save);
     connect(actSave, &QAction::triggered, this, &MainWindow::onSave3DR);
     addAction(actSave);
+
+    // Горячая клавиша Ctrl+D
+    auto* actSave2 = new QAction(tr("Save Dicom"), this);
+    actSave2->setShortcut(QKeySequence::Save);
+    connect(actSave2, &QAction::triggered, this, &MainWindow::onSaveDicom);
+    addAction(actSave2);
 
     auto sc2 = new QShortcut(QKeySequence(Qt::Key_2), this);
     connect(sc2, &QShortcut::activated, this, [this]
@@ -684,6 +701,21 @@ void MainWindow::onSave3DR()
         mRenderView->saveTemplates(filename);
 }
 
+void MainWindow::onSaveDicom()
+{
+    if (!mDicomSeriesSaveDlg)
+        mDicomSeriesSaveDlg = new DicomSeriesSaveDialog(this);
+
+    mDicomSeriesSaveDlg->show();
+    mDicomSeriesSaveDlg->raise();
+    mDicomSeriesSaveDlg->activateWindow();
+
+    // Центрируем относительно главного окна
+    const QRect r = geometry();
+    const QSize s = mDicomSeriesSaveDlg->size();
+    mDicomSeriesSaveDlg->move(r.center() - QPoint(s.width() / 2, s.height() / 2 + 40));
+}
+
 void MainWindow::StartLoading()
 {
     if (mLoading)
@@ -722,7 +754,10 @@ void MainWindow::StopLoading()
         mUiToDisable->setEnabled(true);
 
     if (mTitle)
+    {
         mTitle->setSettingsVisible(true);
+        mTitle->setSaveDicomVisible(true);
+    }
 
     mLoading = false;
 

@@ -278,8 +278,12 @@ SeriesListPanel::~SeriesListPanel()
 void SeriesListPanel::cancelScan()
 {
     mCancelScan = true;
-    if (mScanWorker) {
-        QMetaObject::invokeMethod(mScanWorker, "cancel", Qt::QueuedConnection);
+    // Важный момент: worker занят длительным startScan() и его event loop
+    // в этот момент не обрабатывает queued-вызовы. Поэтому сигнал отмены
+    // должен ставиться напрямую (через atomic-флаг), иначе закрытие окна
+    // ждёт завершения полного сканирования.
+    if (auto* worker = static_cast<SeriesScanWorker*>(mScanWorker)) {
+        worker->cancel();
     }
 }
 

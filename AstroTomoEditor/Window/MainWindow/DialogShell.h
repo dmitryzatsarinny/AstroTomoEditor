@@ -16,7 +16,8 @@ enum WindowType
     Histogram = 4,
     TranferFunction = 5,
     Template = 6,
-    ServiceWindow = 7
+    ServiceWindow = 7,
+    DicomSave = 8
 };
 
 class DialogShell : public QDialog

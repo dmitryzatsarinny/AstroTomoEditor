@@ -19,6 +19,7 @@ public:
     void set3DVisible(bool on);
     void setSettingsVisible(bool on);
     void setSaveVisible(bool on);
+    void setSaveDicomVisible(bool on);
     bool is2DVisible() { return mBtn2D->isVisible(); }
     bool is3DVisible() { return mBtn3D->isVisible(); }
     void retranslateUi();
@@ -29,6 +30,7 @@ signals:
     void volumeClicked();
     void planarClicked();
     void save3DRRequested();
+    void saveDicomRequested();
     void settingsClicked();
 
 protected:

@@ -173,6 +173,9 @@
     <ClCompile Include="Window\Render\ElectrodeAutoIdentifier.cpp">
       <Filter>Source Files\Window\Render</Filter>
     </ClCompile>
+    <ClCompile Include="Window\MainWindow\DicomSeriesSaveDialog.cpp">
+      <Filter>Source Files\Window\MainWindow</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -320,6 +323,9 @@
     </QtMoc>
     <QtMoc Include="Window\ServiceWindow\ShellFileDialog.h">
       <Filter>Header Files\Window\ServiceWindow</Filter>
+    </QtMoc>
+    <QtMoc Include="Window\MainWindow\DicomSeriesSaveDialog.h">
+      <Filter>Header Files\Window\MainWindow</Filter>
     </QtMoc>
   </ItemGroup>
   <ItemGroup>
