@@ -399,6 +399,10 @@ bool TitleBar::eventFilter(QObject* obj, QEvent* ev)
     return QWidget::eventFilter(obj, ev);
 }
 
+void TitleBar::setSettingsVisible(bool on) {
+    mBtnSettings->setVisible(on);
+    QTimer::singleShot(0, this, [this] { updateOverlayGeometry(); });
+}
 
 void TitleBar::set2DVisible(bool on) {
     mBtn2D->setVisible(on);

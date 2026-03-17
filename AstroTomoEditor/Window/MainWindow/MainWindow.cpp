@@ -7,6 +7,7 @@
 #include <Services/Save3DR.h>
 #include <QApplication>
 #include <QEvent>
+#include <QWindow>
 #include <QElapsedTimer>
 #include <Services/LanguageManager.h>
 #include <Window/ServiceWindow/CustomMessageBox.h>
@@ -202,6 +203,9 @@ void MainWindow::buildUi()
     if (!mSettingsDlg)
         mSettingsDlg = new SettingsDialog(this, true);
     mSettingsDlg->hide();
+
+    if (mTitle)
+        mTitle->setSettingsVisible(false);
 
     connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
         {
@@ -691,6 +695,7 @@ void MainWindow::StartLoading()
     if (src) blocker.emplace(src);
 
     if (mUiToDisable) mUiToDisable->setEnabled(false);
+    
     QApplication::setOverrideCursor(Qt::BusyCursor);
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 }
@@ -714,6 +719,9 @@ void MainWindow::StopLoading()
 
     if (mUiToDisable)
         mUiToDisable->setEnabled(true);
+
+    if (mTitle)
+        mTitle->setSettingsVisible(true);
 
     mLoading = false;
 
@@ -836,7 +844,27 @@ void MainWindow::positionCornerGrip()
 bool MainWindow::isWindowExpanded() const
 {
     const auto st = windowState();
-    return st.testFlag(Qt::WindowMaximized) || st.testFlag(Qt::WindowFullScreen);
+    if (st.testFlag(Qt::WindowMaximized) || st.testFlag(Qt::WindowFullScreen))
+        return true;
+
+    const QScreen* screen = nullptr;
+    if (windowHandle())
+        screen = windowHandle()->screen();
+    if (!screen)
+        screen = QApplication::primaryScreen();
+    if (!screen)
+        return false;
+
+    const QRect available = screen->availableGeometry();
+    const QRect current = frameGeometry();
+
+    // Для frameless-окна snap/expand иногда не ставит WindowMaximized,
+    // поэтому считаем «развёрнутым» окно, которое фактически заняло рабочую область экрана.
+    constexpr int kTolerance = 1;
+    return std::abs(current.left() - available.left()) <= kTolerance
+        && std::abs(current.top() - available.top()) <= kTolerance
+        && std::abs(current.right() - available.right()) <= kTolerance
+        && std::abs(current.bottom() - available.bottom()) <= kTolerance;
 }
 
 void MainWindow::applyMaximizedUi(bool maxed)

@@ -922,6 +922,17 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     if (vox >= VOX_FORCE_SHRINK) mode = Mode::ShrinkSdf;
     else if (estGB > SDF_GB_LIMIT) mode = Mode::ShrinkSdf;
 
+    // На длинных стеках (много срезов по Z) shrink-SDF может давать
+    // заметный ровный «срез» у верхней/нижней границы из-за редкой выборки.
+    // Для таких наборов данных безопаснее сразу идти в FastIso по полной
+    // бинарной маске (без дополнительного downsample по Z).
+    constexpr int DEEP_STACK_Z = 512;
+    if (mode == Mode::ShrinkSdf && nz >= DEEP_STACK_Z)
+    {
+        mode = Mode::FastIso;
+        qDebug() << "[STL] deep stack detected, switching ShrinkSdf -> FastIso";
+    }
+
     const char* modeStr =
         (mode == Mode::FullSdf) ? "FullSdf" :
         (mode == Mode::ShrinkSdf) ? "ShrinkSdf" : "FastIso";
@@ -963,29 +974,33 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
         feEdges->NonManifoldEdgesOff();
         feEdges->Update();
 
-        qDebug() << "Boundary edges:" << feEdges->GetOutput()->GetNumberOfCells();
+        const vtkIdType boundaryEdges = feEdges->GetOutput()->GetNumberOfCells();
+        qDebug() << "Boundary edges:" << boundaryEdges;
 
+        vtkPolyData* holesInput = clean->GetOutput();
         vtkNew<vtkFillHolesFilter> fill;
-        // Закрываем только МЕЛКИЕ дырки от дискретизации.
-         // Большие отверстия (например, у границы среза данных) не трогаем,
-         // иначе получается искусственная "крышка" и эффект "откусанного" верха.
-        const double tinyHoleMm = 3.0 * std::max({ spPad[0], spPad[1], spPad[2] });
-        fill->SetHoleSize(tinyHoleMm * tinyHoleMm);
+        fill->SetInputConnection(clean->GetOutputPort());
+        if (boundaryEdges == 0)
+        {
+            fill->SetInputConnection(clean->GetOutputPort());
+            // Закрываем только МЕЛКИЕ дырки от дискретизации.
+            const double tinyHoleMm = 3.0 * std::max({ spPad[0], spPad[1], spPad[2] });
+            fill->SetHoleSize(tinyHoleMm * tinyHoleMm);
+            fill->Update();
+            holesInput = fill->GetOutput();
+        }
+        else
+        {
+            // Если есть граничные рёбра, поверхность открытая (обычно у края скана).
+            // В таком случае fill создаёт ложную «крышку» (эффект откусывания).
+            qDebug() << "[STL] skip FillHoles in FastIso due to open boundary";
+        }
 
-        fill->Update();
-
-        auto keptRegions = KeepSignificantRegions(fill->GetOutput(), 0.03, 500);
+        auto keptRegions = KeepSignificantRegions(holesInput, 0.03, 500);
         if (!keptRegions || keptRegions->GetNumberOfCells() == 0)
-            keptRegions = fill->GetOutput();
+            keptRegions = holesInput;
 
         if (opt.progress) opt.progress(92, tr("Components"));
-
-
-        //vtkNew<vtkPolyDataConnectivityFilter> conn;
-        //conn->SetInputConnection(fill->GetOutputPort());
-        //conn->SetExtractionModeToLargestRegion();
-        //conn->Update();
-        //if (opt.progress) opt.progress(92, tr("Largest component"));
 
         vtkNew<vtkPolyDataNormals> nrm;
         nrm->SetInputData(keptRegions);
@@ -1085,6 +1100,49 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     double rSdf[2];
     sdf->GetOutput()->GetScalarRange(rSdf);
     qDebug() << "[STL] SDF range" << rSdf[0] << rSdf[1];
+
+    const bool badSdfRange = (!std::isfinite(rSdf[0]) || !std::isfinite(rSdf[1]) || rSdf[0] <= -1.0e9);
+    if (badSdfRange)
+    {
+        qDebug() << "[STL] suspicious SDF range, fallback to FastIso";
+
+        vtkNew<vtkFlyingEdges3D> feFallback;
+        feFallback->SetInputConnection(padded0->GetOutputPort());
+        feFallback->SetValue(0, 0.5);
+        feFallback->ComputeNormalsOff();
+        feFallback->ComputeGradientsOff();
+        feFallback->ComputeScalarsOff();
+        feFallback->Update();
+
+        vtkNew<vtkTriangleFilter> triFallback;
+        triFallback->SetInputConnection(feFallback->GetOutputPort());
+        triFallback->PassLinesOff();
+        triFallback->PassVertsOff();
+        triFallback->Update();
+
+        vtkNew<vtkCleanPolyData> cleanFallback;
+        cleanFallback->PointMergingOn();
+        cleanFallback->SetInputConnection(triFallback->GetOutputPort());
+        cleanFallback->Update();
+
+        vtkNew<vtkPolyDataNormals> nrmFallback;
+        nrmFallback->SetInputConnection(cleanFallback->GetOutputPort());
+        nrmFallback->ComputePointNormalsOn();
+        nrmFallback->ComputeCellNormalsOff();
+        nrmFallback->SplittingOff();
+        nrmFallback->ConsistencyOn();
+        nrmFallback->AutoOrientNormalsOn();
+        nrmFallback->Update();
+
+        auto out = deepCopyOut(nrmFallback->GetOutput());
+        if (out && out->GetNumberOfCells() > 0)
+        {
+            if (opt.progress) opt.progress(100, tr("Done"));
+            qDebug() << "[STL] BuildFromBinaryVoxelsNew: done (FastIso fallback)";
+            return out;
+        }
+        qDebug() << "[STL] FastIso fallback failed, continue SDF path";
+    }
 
     // Если знак вдруг перевёрнут
     if (!(rSdf[0] <= 0.0 && rSdf[1] >= 0.0))
@@ -1228,18 +1286,37 @@ vtkSmartPointer<vtkPolyData> VolumeStlExporter::BuildFromBinaryVoxelsNew(
     clean->Update();
     if (opt.progress) opt.progress(88, tr("Cleaning"));
 
+    vtkNew<vtkFeatureEdges> feEdges;
+    feEdges->SetInputConnection(clean->GetOutputPort());
+    feEdges->BoundaryEdgesOn();
+    feEdges->FeatureEdgesOff();
+    feEdges->ManifoldEdgesOff();
+    feEdges->NonManifoldEdgesOff();
+    feEdges->Update();
+
+    const vtkIdType boundaryEdges = feEdges->GetOutput()->GetNumberOfCells();
+    qDebug() << "[STL] SDF boundary edges" << boundaryEdges;
+
+    vtkPolyData* holesInput = clean->GetOutput();
     vtkNew<vtkFillHolesFilter> fill;
-    fill->SetInputConnection(clean->GetOutputPort());
-    // Аналогично: заполняем только мелкие технологические дырки.
-    // Крупные отверстия у края скана оставляем как есть (без ложной крышки).
-    const double tinyHoleMm = 3.0 * std::max({ sp2[0], sp2[1], sp2[2] });
-    fill->SetHoleSize(tinyHoleMm * tinyHoleMm);
+    if (boundaryEdges == 0)
+    {
+        fill->SetInputConnection(clean->GetOutputPort());
+        // Аналогично: заполняем только мелкие технологические дырки.
+        const double tinyHoleMm = 3.0 * std::max({ sp2[0], sp2[1], sp2[2] });
+        fill->SetHoleSize(tinyHoleMm * tinyHoleMm);
+        fill->Update();
+        holesInput = fill->GetOutput();
+    }
+    else
+    {
+        // На открытой поверхности fill может дать искусственную плоскую «крышку».
+        qDebug() << "[STL] skip FillHoles in SDF due to open boundary";
+    }
 
-    fill->Update();
-
-    auto keptRegions = KeepSignificantRegions(fill->GetOutput(), 0.03, 500);
+    auto keptRegions = KeepSignificantRegions(holesInput, 0.03, 500);
     if (!keptRegions || keptRegions->GetNumberOfCells() == 0)
-        keptRegions = fill->GetOutput();
+        keptRegions = holesInput;
 
     if (opt.progress) opt.progress(95, tr("Components"));
 
