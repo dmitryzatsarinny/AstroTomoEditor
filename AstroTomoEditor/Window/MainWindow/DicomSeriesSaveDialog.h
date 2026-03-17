@@ -5,7 +5,6 @@
 #include <QString>
 
 class QCheckBox;
-class QFormLayout;
 class QPushButton;
 class QVBoxLayout;
 
@@ -20,6 +19,7 @@ public:
 
 signals:
     void saveRequested(const QVector<SeriesExportEntry>& selectedSeries);
+    void saveToPatientRequested();
 
 private:
     struct RowWidgets
@@ -35,8 +35,8 @@ private:
     QVector<RowWidgets> mRows;
 
     QVBoxLayout* mContentLayout = nullptr;
-    QFormLayout* mForm = nullptr;
     QPushButton* mSaveBtn = nullptr;
+    QPushButton* mSaveToPatientBtn = nullptr;
 
     const QSize mSize{ 520, 420 };
 };
