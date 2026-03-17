@@ -56,6 +56,7 @@ private:
     QLabel* mIcon = nullptr;
     QLabel* mAppTitle = nullptr;
     QToolButton* mBtnSave3DR = nullptr;
+    QToolButton* mBtnSaveDicom = nullptr;
     QToolButton* mBtn2D = nullptr;
     QToolButton* mBtn3D = nullptr;
     QToolButton* mBtnMax = nullptr;

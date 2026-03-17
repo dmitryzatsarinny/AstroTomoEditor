@@ -9,6 +9,7 @@
 #include <QEvent>
 #include <QWindow>
 #include <QElapsedTimer>
+#include <QCloseEvent>
 #include <Services/LanguageManager.h>
 #include <Window/ServiceWindow/CustomMessageBox.h>
 
@@ -827,6 +828,16 @@ void MainWindow::resizeEvent(QResizeEvent* e)
     QMainWindow::resizeEvent(e);
     applyMaximizedUi(isWindowExpanded());
     positionCornerGrip();
+}
+
+void MainWindow::closeEvent(QCloseEvent* e)
+{
+    if (mSeries)
+        mSeries->stopBackgroundWork();
+
+    QMainWindow::closeEvent(e);
+
+    QCoreApplication::quit();
 }
 
 void MainWindow::positionCornerGrip()

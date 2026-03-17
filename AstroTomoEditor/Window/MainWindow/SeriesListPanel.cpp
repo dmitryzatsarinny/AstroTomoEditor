@@ -272,14 +272,7 @@ SeriesListPanel::SeriesListPanel(QWidget* parent) : QWidget(parent)
 
 SeriesListPanel::~SeriesListPanel()
 {
-    cancelScan();
-    abortThumbLoading();
-
-    if (mScanThread) {
-        mScanThread->quit();
-        mScanThread->wait();
-        mScanThread = nullptr;
-    }
+    stopBackgroundWork();
 }
 
 void SeriesListPanel::cancelScan()
@@ -287,6 +280,19 @@ void SeriesListPanel::cancelScan()
     mCancelScan = true;
     if (mScanWorker) {
         QMetaObject::invokeMethod(mScanWorker, "cancel", Qt::QueuedConnection);
+    }
+}
+
+void SeriesListPanel::stopBackgroundWork()
+{
+    cancelScan();
+    abortThumbLoading();
+
+    if (mScanThread) {
+        mScanThread->quit();
+        mScanThread->wait();
+        mScanThread = nullptr;
+        mScanWorker = nullptr;
     }
 }
 

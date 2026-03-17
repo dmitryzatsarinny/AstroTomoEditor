@@ -85,6 +85,7 @@ public slots:
     void scanDicomDir(const QString& rootPath);
     void scanStudy(const QString& rootPath);
     void cancelScan();
+    void stopBackgroundWork();
 
 signals:
     void patientInfoChanged(const PatientInfo& info);
