@@ -12,6 +12,14 @@
 #include <QCloseEvent>
 #include <Services/LanguageManager.h>
 #include <Window/ServiceWindow/CustomMessageBox.h>
+#include <Window/ServiceWindow/ShellFileDialog.h>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QFileInfo>
+#include <QFileDialog>
+#include <QFile>
+#include <QDir>
+#include <QSet>
 
 namespace 
 {
@@ -208,6 +216,47 @@ void MainWindow::buildUi()
     if (!mDicomSeriesSaveDlg)
         mDicomSeriesSaveDlg = new DicomSeriesSaveDialog(this);
     mDicomSeriesSaveDlg->hide();
+
+    connect(mDicomSeriesSaveDlg, &DicomSeriesSaveDialog::saveRequested, this,
+        [this](const QVector<SeriesExportEntry>& selected)
+        {
+            if (selected.isEmpty())
+                return;
+
+            QSettings settings;
+            const QString defDir = settings.value(
+                "Paths/LastDicomExportDir",
+                QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+            ).toString();
+
+            ShellFileDialog shell(this,
+                tr("Select folder to save DICOM"),
+                ServiceWindow,
+                defDir,
+                tr("Folder"));
+
+            auto* dlg = shell.fileDialog();
+            dlg->setAcceptMode(QFileDialog::AcceptOpen);
+            dlg->setFileMode(QFileDialog::Directory);
+            dlg->setOption(QFileDialog::ShowDirsOnly, true);
+            dlg->setFilter(QDir::AllDirs | QDir::Drives | QDir::NoDotAndDotDot);
+
+            if (shell.exec() != QDialog::Accepted)
+                return;
+
+            const QString selectedDir = dlg->selectedFiles().isEmpty() ? QString() : dlg->selectedFiles().first();
+            if (selectedDir.isEmpty())
+                return;
+
+            settings.setValue("Paths/LastDicomExportDir", selectedDir);
+
+            if (copySelectedDicomSeries(selectedDir, selected))
+            {
+                CustomMessageBox::information(this, tr("Dicom Save"),
+                    tr("Selected series were saved successfully."), ServiceWindow);
+                mDicomSeriesSaveDlg->hide();
+            }
+        });
 
     if (mTitle)
     {
@@ -703,8 +752,20 @@ void MainWindow::onSave3DR()
 
 void MainWindow::onSaveDicom()
 {
+    if (!mSeries)
+        return;
+
     if (!mDicomSeriesSaveDlg)
         mDicomSeriesSaveDlg = new DicomSeriesSaveDialog(this);
+
+    const auto series = mSeries->seriesForExport();
+    if (series.isEmpty())
+    {
+        CustomMessageBox::warning(this, tr("Dicom Save"), tr("No series available for saving"), ServiceWindow);
+        return;
+    }
+
+    mDicomSeriesSaveDlg->setSeries(series);
 
     mDicomSeriesSaveDlg->show();
     mDicomSeriesSaveDlg->raise();
@@ -714,6 +775,111 @@ void MainWindow::onSaveDicom()
     const QRect r = geometry();
     const QSize s = mDicomSeriesSaveDlg->size();
     mDicomSeriesSaveDlg->move(r.center() - QPoint(s.width() / 2, s.height() / 2 + 40));
+}
+
+bool MainWindow::copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected)
+{
+    if (targetRoot.isEmpty() || selected.isEmpty())
+        return false;
+
+    QDir root(targetRoot);
+    if (!root.exists() && !root.mkpath("."))
+    {
+        CustomMessageBox::critical(this, tr("Dicom Save"),
+            tr("Failed to create destination folder."), ServiceWindow);
+        return false;
+    }
+
+    const QString ctPath = root.filePath("CT");
+    QDir ctDir(ctPath);
+    if (!ctDir.exists() && !root.mkpath("CT"))
+    {
+        CustomMessageBox::critical(this, tr("Dicom Save"),
+            tr("Failed to create CT folder."), ServiceWindow);
+        return false;
+    }
+
+    const QString sourceDicomDir = findSourceDicomDirPath();
+    if (!sourceDicomDir.isEmpty())
+    {
+        const QString dstDicomDir = ctDir.filePath("DICOMDIR");
+        QFile::remove(dstDicomDir);
+        QFile::copy(sourceDicomDir, dstDicomDir);
+    }
+
+    for (const auto& entry : selected)
+    {
+        const QString safeName = entry.description.simplified().isEmpty()
+            ? entry.seriesKey
+            : entry.description.simplified();
+
+        QString folderName = safeName;
+        folderName.replace('\\', '_');
+        folderName.replace('/', '_');
+        folderName.replace(':', '_');
+        folderName.replace('*', '_');
+        folderName.replace('?', '_');
+        folderName.replace('"', '_');
+        folderName.replace('<', '_');
+        folderName.replace('>', '_');
+        folderName.replace('|', '_');
+
+        const QString seriesFolder = ctDir.filePath(folderName);
+        if (!ctDir.mkpath(folderName))
+        {
+            CustomMessageBox::critical(this, tr("Dicom Save"),
+                tr("Failed to create series folder: %1").arg(folderName), ServiceWindow);
+            return false;
+        }
+
+        QSet<QString> usedNames;
+        for (const auto& fp : entry.files)
+        {
+            QFileInfo fi(fp);
+            QString fileName = fi.fileName();
+            if (fileName.isEmpty())
+                continue;
+
+            if (usedNames.contains(fileName))
+            {
+                fileName = fi.completeBaseName() + "_" + QString::number(qHash(fp)) + "." + fi.suffix();
+            }
+            usedNames.insert(fileName);
+
+            const QString dst = QDir(seriesFolder).filePath(fileName);
+            QFile::remove(dst);
+            if (!QFile::copy(fp, dst))
+            {
+                CustomMessageBox::critical(this, tr("Dicom Save"),
+                    tr("Failed to copy file:\n%1").arg(fp), ServiceWindow);
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+QString MainWindow::findSourceDicomDirPath() const
+{
+    if (mDicomPath.isEmpty())
+        return {};
+
+    QFileInfo fi(mDicomPath);
+    QString baseDir = fi.isDir() ? fi.absoluteFilePath() : fi.absolutePath();
+
+    static const char* names[] = { "DICOMDIR", "dicomdir", "DICOMDIR;1", "DIRFILE", "dirfile" };
+    for (auto n : names)
+    {
+        const QString candidate = QDir(baseDir).filePath(QString::fromLatin1(n));
+        if (QFileInfo::exists(candidate))
+            return candidate;
+    }
+
+    if (fi.isFile() && fi.fileName().compare("DICOMDIR", Qt::CaseInsensitive) == 0)
+        return fi.absoluteFilePath();
+
+    return {};
 }
 
 void MainWindow::StartLoading()

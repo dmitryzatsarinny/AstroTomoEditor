@@ -31,6 +31,12 @@ struct SeriesItem {
     QImage  thumb;
 };
 
+struct SeriesExportEntry {
+    QString seriesKey;
+    QString description;
+    QVector<QString> files;
+};
+
 enum Roles { RoleSeriesKey = Qt::UserRole, RoleNumImages, RoleDescription };
 
 struct SeriesScanResult
@@ -74,6 +80,7 @@ public:
     ~SeriesListPanel() override;
 
     static QImage makeThumbImageFromDicom(const QString& file);
+    QVector<SeriesExportEntry> seriesForExport() const;
     void retranslateUi();
 
 protected:

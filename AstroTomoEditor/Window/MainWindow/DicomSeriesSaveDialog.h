@@ -1,10 +1,13 @@
 #pragma once
 #include "DialogShell.h"
-#include <Services/Pool.h> 
-#include <Window/MainWindow/TitleBar.h>
+#include "SeriesListPanel.h"
+#include <QVector>
+#include <QString>
 
-class QLabel;
+class QCheckBox;
 class QFormLayout;
+class QPushButton;
+class QVBoxLayout;
 
 class DicomSeriesSaveDialog : public DialogShell
 {
@@ -13,11 +16,27 @@ public:
     explicit DicomSeriesSaveDialog(QWidget* parent = nullptr);
 
     void retranslateUi();
+    void setSeries(const QVector<SeriesExportEntry>& series);
+
+signals:
+    void saveRequested(const QVector<SeriesExportEntry>& selectedSeries);
 
 private:
+    struct RowWidgets
+    {
+        QCheckBox* check = nullptr;
+        SeriesExportEntry* entry = nullptr;
+    };
 
+    void rebuildSeriesList();
+    void updateSaveButtonState();
+
+    QVector<SeriesExportEntry> mSeries;
+    QVector<RowWidgets> mRows;
+
+    QVBoxLayout* mContentLayout = nullptr;
     QFormLayout* mForm = nullptr;
+    QPushButton* mSaveBtn = nullptr;
 
-    const QSize mSize{ 420, 170 };
-
+    const QSize mSize{ 520, 420 };
 };

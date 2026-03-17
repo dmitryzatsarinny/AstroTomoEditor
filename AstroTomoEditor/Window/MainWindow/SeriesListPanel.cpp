@@ -1500,6 +1500,36 @@ void SeriesListPanel::changeEvent(QEvent* e)
         retranslateUi();
 }
 
+QVector<SeriesExportEntry> SeriesListPanel::seriesForExport() const
+{
+    QVector<SeriesExportEntry> out;
+    out.reserve(mFilesBySeries.size());
+
+    if (!mList)
+        return out;
+
+    for (int i = 0; i < mList->count(); ++i)
+    {
+        auto* it = mList->item(i);
+        if (!it)
+            continue;
+
+        const QString key = it->data(RoleSeriesKey).toString();
+        if (key.isEmpty())
+            continue;
+
+        SeriesExportEntry entry;
+        entry.seriesKey = key;
+        entry.description = it->data(RoleDescription).toString();
+        entry.files = mFilesBySeries.value(key);
+
+        if (!entry.files.isEmpty())
+            out.push_back(std::move(entry));
+    }
+
+    return out;
+}
+
 void SeriesListPanel::retranslateUi()
 {
     setAccessibleName(tr("SeriesListPanel"));
