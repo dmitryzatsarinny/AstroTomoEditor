@@ -5,6 +5,7 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPixmap>
+#include <QPainter>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
@@ -84,6 +85,11 @@ DicomSeriesSaveDialog::DicomSeriesSaveDialog(QWidget* parent)
         "#DicomSeriesHint { color:#d7dbe1; }"
         "#DicomSeriesScrollHost { background: transparent; }"
         "QScrollArea#DicomSeriesScroll { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; }"
+        "QScrollBar:vertical { background: transparent; width: 8px; margin: 4px 0 4px 0; }"
+        "QScrollBar::handle:vertical { background: rgba(255,255,255,0.18); min-height: 24px; border-radius: 4px; }"
+        "QScrollBar::handle:vertical:hover { background: rgba(255,255,255,0.32); }"
+        "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }"
+        "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: transparent; }"
         "QWidget#DicomSeriesRow { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; }"
         "QWidget#DicomSeriesRow:hover { background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); }"
         "QLabel#DicomSeriesThumb { background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.16); border-radius: 6px; }"
@@ -123,23 +129,6 @@ void DicomSeriesSaveDialog::rebuildSeriesList()
 
     mRows.clear();
 
-    QPixmap pixelIcon(32, 32);
-    pixelIcon.fill(QColor(0, 0, 0, 0));
-    {
-        QPainter painter(&pixelIcon);
-        painter.setPen(Qt::NoPen);
-        const int px = 4;
-        for (int y = 0; y < 8; ++y)
-        {
-            for (int x = 0; x < 8; ++x)
-            {
-                QColor c(65 + x * 12, 80 + y * 8, 175 + ((x + y) % 3) * 18, 230);
-                painter.setBrush(c);
-                painter.drawRect(x * px, y * px, px - 1, px - 1);
-            }
-        }
-    }
-
     for (auto& entry : mSeries)
     {
         auto* row = new QWidget(this);
@@ -152,7 +141,11 @@ void DicomSeriesSaveDialog::rebuildSeriesList()
         auto* thumb = new QLabel(row);
         thumb->setObjectName("DicomSeriesThumb");
         thumb->setFixedSize(32, 32);
-        thumb->setPixmap(pixelIcon);
+
+        QPixmap preview = entry.previewIcon.pixmap(64, 64);
+        if (!preview.isNull())
+            thumb->setPixmap(preview.scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+
         rowLayout->addWidget(thumb, 0, Qt::AlignTop);
 
         auto* check = new QCheckBox(entry.description, row);

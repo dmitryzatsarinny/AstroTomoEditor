@@ -1522,6 +1522,7 @@ QVector<SeriesExportEntry> SeriesListPanel::seriesForExport() const
         entry.seriesKey = key;
         entry.description = it->data(RoleDescription).toString();
         entry.files = mFilesBySeries.value(key);
+        entry.previewIcon = it->icon();
 
         if (!entry.files.isEmpty())
             out.push_back(std::move(entry));

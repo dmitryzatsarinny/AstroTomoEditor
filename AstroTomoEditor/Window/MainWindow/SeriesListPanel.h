@@ -8,6 +8,7 @@
 #include <QFutureWatcher>
 #include <QHash>
 #include <QImage>
+#include <QIcon>
 #include <QPair>
 #include <QQueue>
 #include <QString>
@@ -35,6 +36,7 @@ struct SeriesExportEntry {
     QString seriesKey;
     QString description;
     QVector<QString> files;
+    QIcon previewIcon;
 };
 
 enum Roles { RoleSeriesKey = Qt::UserRole, RoleNumImages, RoleDescription };
