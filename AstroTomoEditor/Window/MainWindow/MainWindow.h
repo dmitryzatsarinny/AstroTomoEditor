@@ -81,6 +81,7 @@ private:
     bool isWindowExpanded() const;
     bool copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected);
     QString findSourceDicomDirPath() const;
+    QString hdBasePath() const;
 
 private:
     // --- данные контекста ---

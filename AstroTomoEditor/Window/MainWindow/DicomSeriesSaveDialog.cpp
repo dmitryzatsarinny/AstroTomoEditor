@@ -5,14 +5,35 @@
 #include <QLabel>
 #include <QPainter>
 #include <QPixmap>
-#include <QPainter>
+#include <QMouseEvent>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QVBoxLayout>
+#include <functional>
 #include "TitleBar.h"
 
+namespace
+{
+    class ClickableSeriesRow : public QWidget
+    {
+    public:
+        using QWidget::QWidget;
+
+        std::function<void()> onClick;
+
+    protected:
+        void mousePressEvent(QMouseEvent* event) override
+        {
+            if (event->button() == Qt::LeftButton && onClick)
+                onClick();
+
+            QWidget::mousePressEvent(event);
+        }
+    };
+}
+
 DicomSeriesSaveDialog::DicomSeriesSaveDialog(QWidget* parent)
-    : DialogShell(parent, QObject::tr("Dicom Save"), WindowType::DicomSave)
+    : DialogShell(parent, QObject::tr("Save Dicom series"), WindowType::DicomSave)
 {
     setWindowFlag(Qt::Tool);
     setFixedSize(mSize);
@@ -113,6 +134,31 @@ void DicomSeriesSaveDialog::setSeries(const QVector<SeriesExportEntry>& series)
     rebuildSeriesList();
 }
 
+void DicomSeriesSaveDialog::setSaveToPatientEnabled(bool enabled)
+{
+    if (!mSaveToPatientBtn)
+        return;
+
+    mSaveToPatientBtn->setVisible(enabled);
+    mSaveToPatientBtn->setEnabled(enabled);
+}
+
+QVector<SeriesExportEntry> DicomSeriesSaveDialog::selectedSeries() const
+{
+    QVector<SeriesExportEntry> selected;
+    selected.reserve(mRows.size());
+
+    for (const auto& row : mRows)
+    {
+        if (!row.check || !row.entry || !row.check->isChecked())
+            continue;
+
+        selected.push_back(*row.entry);
+    }
+
+    return selected;
+}
+
 void DicomSeriesSaveDialog::rebuildSeriesList()
 {
     while (mContentLayout->count() > 1)
@@ -131,27 +177,41 @@ void DicomSeriesSaveDialog::rebuildSeriesList()
 
     for (auto& entry : mSeries)
     {
-        auto* row = new QWidget(this);
+        auto* row = new ClickableSeriesRow(this);
         row->setObjectName("DicomSeriesRow");
+        row->setCursor(Qt::PointingHandCursor);;
 
         auto* rowLayout = new QHBoxLayout(row);
         rowLayout->setContentsMargins(10, 8, 10, 8);
         rowLayout->setSpacing(10);
 
+        auto* check = new QCheckBox(row);
+        check->setObjectName("DicomSeriesCheck");
+        check->setChecked(false);
+        check->setCursor(Qt::PointingHandCursor);
+        rowLayout->addWidget(check, 0, Qt::AlignVCenter);
+
         auto* thumb = new QLabel(row);
         thumb->setObjectName("DicomSeriesThumb");
         thumb->setFixedSize(32, 32);
+        thumb->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
         QPixmap preview = entry.previewIcon.pixmap(64, 64);
         if (!preview.isNull())
             thumb->setPixmap(preview.scaled(32, 32, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 
-        rowLayout->addWidget(thumb, 0, Qt::AlignTop);
+        rowLayout->addWidget(thumb, 0, Qt::AlignVCenter);
 
-        auto* check = new QCheckBox(entry.description, row);
-        check->setObjectName("DicomSeriesCheck");
-        check->setChecked(true);
-        rowLayout->addWidget(check, 1);
+        auto* title = new QLabel(entry.description, row);
+        title->setWordWrap(true);
+        title->setStyleSheet("color:#f2f5f8;");
+        title->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        rowLayout->addWidget(title, 1, Qt::AlignVCenter);
+
+        row->onClick = [check]()
+            {
+                check->toggle();
+            };
 
         mContentLayout->insertWidget(mContentLayout->count() - 1, row);
         mRows.push_back({ check, &entry });
@@ -176,23 +236,25 @@ void DicomSeriesSaveDialog::updateSaveButtonState()
 
     if (mSaveBtn)
         mSaveBtn->setEnabled(anyChecked);
+    if (mSaveToPatientBtn)
+        mSaveToPatientBtn->setEnabled(anyChecked);
 }
 
 void DicomSeriesSaveDialog::retranslateUi()
 {
     DialogShell::retranslateUi();
 
-    const QString title = tr("Dicom Save");
+    const QString title = tr("Save Dicom series");
     setWindowTitle(title);
     if (titleBar())
         titleBar()->setTitle(title);
 
     if (auto* hint = contentWidget()->findChild<QLabel*>("DicomSeriesHint"))
-        hint->setText(tr("Select the series to save."));
+        hint->setText(tr("Select the series to save"));
 
     if (mSaveBtn)
         mSaveBtn->setText(tr("Save selected"));
 
     if (mSaveToPatientBtn)
-        mSaveToPatientBtn->setText(tr("SaveToPatient"));
+        mSaveToPatientBtn->setText(tr("Save to patient"));
 }

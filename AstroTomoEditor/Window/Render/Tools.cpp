@@ -58,13 +58,14 @@ namespace Tools
         return QObject::tr("Edit");
     }
 
-    QMenu* CreateAppMenu(QWidget* parent, std::function<void(App)> onAction)
+    QMenu* CreateAppMenu(QWidget* parent, std::function<void(App)> onAction, bool electrodesEnabled)
     {
         auto* menu = new QMenu(parent);
 
         QObject::connect(menu->addAction(QObject::tr("Histogram")), &QAction::triggered, [onAction] { onAction(App::Histogram); });
         QObject::connect(menu->addAction(QObject::tr("Templates")), &QAction::triggered, [onAction] { onAction(App::Templates); });
-        QObject::connect(menu->addAction(QObject::tr("Electrodes")), &QAction::triggered, [onAction] { onAction(App::Electrodes); });
+        if (electrodesEnabled)
+            QObject::connect(menu->addAction(QObject::tr("Electrodes")), &QAction::triggered, [onAction] { onAction(App::Electrodes); });
 
         return menu;
     }

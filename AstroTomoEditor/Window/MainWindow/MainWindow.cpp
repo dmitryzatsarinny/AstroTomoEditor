@@ -5,6 +5,7 @@
 #include "PlanarView.h"
 #include <QScopedValueRollback>
 #include <Services/Save3DR.h>
+#include <Services/AppConfig.h>
 #include <QApplication>
 #include <QEvent>
 #include <QWindow>
@@ -226,7 +227,9 @@ void MainWindow::buildUi()
             QSettings settings;
             const QString defDir = settings.value(
                 "Paths/LastDicomExportDir",
-                QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                hdBasePath().isEmpty()
+                ? QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                : hdBasePath()
             ).toString();
 
             ShellFileDialog shell(this,
@@ -263,6 +266,64 @@ void MainWindow::buildUi()
         mTitle->setSaveDicomVisible(false);
         mTitle->setSettingsVisible(false);
     }
+
+    connect(mDicomSeriesSaveDlg, &DicomSeriesSaveDialog::saveToPatientRequested, this,
+        [this]()
+        {
+            if (!mDicomSeriesSaveDlg)
+                return;
+
+            const auto selected = mDicomSeriesSaveDlg->selectedSeries();
+            if (selected.isEmpty())
+                return;
+
+            const QString basePath = hdBasePath();
+            if (basePath.isEmpty())
+            {
+                CustomMessageBox::warning(this, tr("Dicom Save"),
+                    tr("HDBASE path is not configured in settings.xml."), ServiceWindow);
+                return;
+            }
+
+            QDir hdBase(basePath);
+            if (!hdBase.exists())
+            {
+                CustomMessageBox::warning(this, tr("Dicom Save"),
+                    tr("Configured HDBASE path does not exist: %1").arg(QDir::toNativeSeparators(basePath)), ServiceWindow);
+                return;
+            }
+
+            QSettings settings;
+            const QString defDir = settings.value("Paths/LastDicomExportDir", basePath).toString();
+
+            ShellFileDialog shell(this,
+                tr("Select patient folder"),
+                ServiceWindow,
+                defDir.isEmpty() ? basePath : defDir,
+                tr("Folder"));
+
+            auto* dlg = shell.fileDialog();
+            dlg->setAcceptMode(QFileDialog::AcceptOpen);
+            dlg->setFileMode(QFileDialog::Directory);
+            dlg->setOption(QFileDialog::ShowDirsOnly, true);
+            dlg->setFilter(QDir::AllDirs | QDir::Drives | QDir::NoDotAndDotDot);
+
+            if (shell.exec() != QDialog::Accepted)
+                return;
+
+            const QString selectedDir = dlg->selectedFiles().isEmpty() ? QString() : dlg->selectedFiles().first();
+            if (selectedDir.isEmpty())
+                return;
+
+            settings.setValue("Paths/LastDicomExportDir", selectedDir);
+
+            if (copySelectedDicomSeries(selectedDir, selected))
+            {
+                CustomMessageBox::information(this, tr("Dicom Save"),
+                    tr("Selected series were saved successfully."), ServiceWindow);
+                mDicomSeriesSaveDlg->hide();
+            }
+        });
 
     connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
         {
@@ -766,6 +827,7 @@ void MainWindow::onSaveDicom()
     }
 
     mDicomSeriesSaveDlg->setSeries(series);
+    mDicomSeriesSaveDlg->setSaveToPatientEnabled(!hdBasePath().isEmpty());
 
     mDicomSeriesSaveDlg->show();
     mDicomSeriesSaveDlg->raise();
@@ -775,6 +837,11 @@ void MainWindow::onSaveDicom()
     const QRect r = geometry();
     const QSize s = mDicomSeriesSaveDlg->size();
     mDicomSeriesSaveDlg->move(r.center() - QPoint(s.width() / 2, s.height() / 2 + 40));
+}
+
+QString MainWindow::hdBasePath() const
+{
+    return AppConfig::loadCurrent().hdBasePath.trimmed();
 }
 
 bool MainWindow::copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected)

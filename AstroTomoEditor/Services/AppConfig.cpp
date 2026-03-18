@@ -5,6 +5,7 @@
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 #include <QDir>
+#include <QCoreApplication>
 
 static bool parseBoolLoose(const QString& s, bool def)
 {
@@ -12,6 +13,16 @@ static bool parseBoolLoose(const QString& s, bool def)
     if (t == "1" || t == "true" || t == "yes" || t == "on")  return true;
     if (t == "0" || t == "false" || t == "no" || t == "off") return false;
     return def;
+}
+
+QString AppConfig::defaultFilePath()
+{
+    return QCoreApplication::applicationDirPath() + "/settings.xml";
+}
+
+AppConfig AppConfig::loadCurrent()
+{
+    return loadOrCreateDefault(defaultFilePath());
 }
 
 AppConfig AppConfig::loadOrCreateDefault(const QString& filePath)
@@ -53,6 +64,15 @@ AppConfig AppConfig::loadOrCreateDefault(const QString& filePath)
             {
                 cfg.showTooltips = parseBoolLoose(xr.readElementText(), /*def=*/true);
             }
+            else if (name == u"Electrodes")
+            {
+                cfg.electrodesEnabled = parseBoolLoose(xr.readElementText(), /*def=*/true);
+            }
+            else if (name == u"HDBASE")
+            {
+                cfg.hdBasePath = xr.attributes().value(u"path").toString().trimmed();
+                xr.skipCurrentElement();
+            }
         }
         else if (xr.isEndElement())
         {
@@ -83,6 +103,12 @@ bool AppConfig::save(const QString& filePath) const
     xw.writeTextElement("language", language);
     xw.writeTextElement("showTooltips", showTooltips ? "true" : "false");
     xw.writeEndElement(); // ui
+
+    xw.writeTextElement("Electrodes", electrodesEnabled ? "true" : "false");
+
+    xw.writeStartElement("HDBASE");
+    xw.writeAttribute("path", hdBasePath);
+    xw.writeEndElement(); // HDBASE
 
     xw.writeEndElement(); // AstroTomoEditor
     xw.writeEndDocument();

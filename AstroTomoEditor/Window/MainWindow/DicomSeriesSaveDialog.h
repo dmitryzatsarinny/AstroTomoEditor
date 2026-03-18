@@ -16,6 +16,8 @@ public:
 
     void retranslateUi();
     void setSeries(const QVector<SeriesExportEntry>& series);
+    void setSaveToPatientEnabled(bool enabled);
+    QVector<SeriesExportEntry> selectedSeries() const;
 
 signals:
     void saveRequested(const QVector<SeriesExportEntry>& selectedSeries);

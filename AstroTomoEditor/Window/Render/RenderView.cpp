@@ -38,6 +38,7 @@
 #include <vtkFlyingEdges3D.h>
 #include "..\..\Services\LanguageManager.h"
 #include <QSettings>
+#include <Services/AppConfig.h>
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
@@ -1683,6 +1684,9 @@ bool RenderView::AppModeChanged(App a)
 
     if (a == App::Electrodes)
     {
+        if (!AppConfig::loadCurrent().electrodesEnabled)
+            return false;
+
         beginElectrodesPreview();
         setAppUiActive(true, a);
         setElectrodesUiActive(true);
@@ -3021,7 +3025,8 @@ void RenderView::reloadAppsMenu()
 
     if (mAppsMenu) { delete mAppsMenu; mAppsMenu = nullptr; }
 
-    mAppsMenu = Tools::CreateAppMenu(mTopOverlay, [this](App a) { AppModeChanged(a); });
+    const AppConfig cfg = AppConfig::loadCurrent();
+    mAppsMenu = Tools::CreateAppMenu(mTopOverlay, [this](App a) { AppModeChanged(a); }, cfg.electrodesEnabled);
     applyMenuStyle(mAppsMenu, mBtnApps->width());
 
     connect(mAppsMenu, &QMenu::aboutToShow, this, [this] {

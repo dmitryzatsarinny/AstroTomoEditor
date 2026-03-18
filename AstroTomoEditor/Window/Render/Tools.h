@@ -40,7 +40,8 @@ namespace Tools {
     QString ToDisplayName(Action a);
 
     QMenu* CreateAppMenu(QWidget* parent,
-        std::function<void(App)> onAction);
+        std::function<void(App)> onAction,
+        bool electrodesEnabled = true);
 
     QString ToDisplayAppName(App a);
 }
