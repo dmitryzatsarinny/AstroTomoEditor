@@ -21,10 +21,127 @@
 #include <QFile>
 #include <QDir>
 #include <QSet>
+#include <QRegularExpression>
+#include <string>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 namespace 
 {
-    constexpr int kHeaderHeight = 34;
+    QString decodeCp866(const QByteArray& bytes)
+    {
+#ifdef Q_OS_WIN
+        if (bytes.isEmpty())
+            return {};
+
+        const int wideSize = MultiByteToWideChar(866, 0, bytes.constData(), static_cast<int>(bytes.size()), nullptr, 0);
+        if (wideSize <= 0)
+            return QString::fromLocal8Bit(bytes);
+
+        std::wstring wide(static_cast<size_t>(wideSize), L'\0');
+        MultiByteToWideChar(866, 0, bytes.constData(), static_cast<int>(bytes.size()), wide.data(), wideSize);
+        return QString::fromWCharArray(wide.c_str(), wideSize);
+#else
+        return QString::fromLocal8Bit(bytes);
+#endif
+    }
+
+    int patientNameScore(const QString& candidate)
+    {
+        static const QRegularExpression initialsRe(QString::fromUtf8(R"((?:^|\s)([А-ЯЁ][а-яё]{2,}(?:-[А-ЯЁ][а-яё]{2,})?\s+[А-ЯЁ]\.[А-ЯЁ]\.)(?=\s|$))"));
+        static const QRegularExpression fullNameRe(QString::fromUtf8(R"((?:^|\s)([А-ЯЁ][а-яё]{2,}(?:-[А-ЯЁ][а-яё]{2,})?(?:\s+[А-ЯЁ][а-яё]{2,}){1,2})(?=\s|$))"));
+
+        const QString simplified = candidate.simplified();
+        if (simplified.size() < 6)
+            return -1;
+
+        const auto initialsMatch = initialsRe.match(simplified);
+        if (initialsMatch.hasMatch())
+            return 200 + initialsMatch.captured(1).size();
+
+        const auto fullMatch = fullNameRe.match(simplified);
+        if (fullMatch.hasMatch())
+        {
+            const QString captured = fullMatch.captured(1);
+            const int wordCount = captured.split(' ', Qt::SkipEmptyParts).size();
+            if (wordCount >= 2)
+                return 100 + wordCount * 10 + captured.size();
+        }
+
+        return -1;
+    }
+
+    QString extractPatientNameFromStatusInf(const QString& statusPath)
+    {
+        QFile file(statusPath);
+        if (!file.open(QIODevice::ReadOnly))
+            return {};
+
+        const QString decoded = decodeCp866(file.readAll());
+        if (decoded.isEmpty())
+            return {};
+
+        QString currentChunk;
+        QString bestCandidate;
+        int bestScore = -1;
+
+        const auto flushChunk = [&]()
+            {
+                const QString simplified = currentChunk.simplified();
+                const int score = patientNameScore(simplified);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestCandidate = simplified;
+                }
+                currentChunk.clear();
+            };
+
+        for (const QChar ch : decoded)
+        {
+            const bool isAllowed = ch.isLetter() || ch == u' ' || ch == u'.' || ch == u'-';
+            if (isAllowed)
+            {
+                currentChunk += ch;
+            }
+            else if (!currentChunk.isEmpty())
+            {
+                flushChunk();
+            }
+        }
+
+        if (!currentChunk.isEmpty())
+            flushChunk();
+
+        return bestCandidate;
+    }
+
+    QVector<PatientFolderEntry> loadHdBasePatients(const QString& basePath)
+    {
+        QVector<PatientFolderEntry> patients;
+        QDir hdBase(basePath);
+        if (!hdBase.exists())
+            return patients;
+
+        static const QRegularExpression folderRe(QStringLiteral(R"(^H\d{7}\.\d{3}$)"), QRegularExpression::CaseInsensitiveOption);
+        const QFileInfoList entries = hdBase.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
+
+        for (const QFileInfo& entry : entries)
+        {
+            if (!folderRe.match(entry.fileName()).hasMatch())
+                continue;
+
+            PatientFolderEntry patient;
+            patient.folderName = entry.fileName();
+            patient.folderPath = entry.absoluteFilePath();
+            patient.patientName = extractPatientNameFromStatusInf(entry.absoluteFilePath() + "/status.inf");
+            patients.push_back(patient);
+        }
+
+        return patients;
+    }
 }
 
 MainWindow::MainWindow(QWidget* parent,
@@ -268,56 +385,12 @@ void MainWindow::buildUi()
     }
 
     connect(mDicomSeriesSaveDlg, &DicomSeriesSaveDialog::saveToPatientRequested, this,
-        [this]()
+        [this](const QString& patientFolder, const QVector<SeriesExportEntry>& selected)
         {
-            if (!mDicomSeriesSaveDlg)
+            if (patientFolder.isEmpty() || selected.isEmpty())
                 return;
 
-            const auto selected = mDicomSeriesSaveDlg->selectedSeries();
-            if (selected.isEmpty())
-                return;
-
-            const QString basePath = hdBasePath();
-            if (basePath.isEmpty())
-            {
-                CustomMessageBox::warning(this, tr("Dicom Save"),
-                    tr("HDBASE path is not configured in settings.xml."), ServiceWindow);
-                return;
-            }
-
-            QDir hdBase(basePath);
-            if (!hdBase.exists())
-            {
-                CustomMessageBox::warning(this, tr("Dicom Save"),
-                    tr("Configured HDBASE path does not exist: %1").arg(QDir::toNativeSeparators(basePath)), ServiceWindow);
-                return;
-            }
-
-            QSettings settings;
-            const QString defDir = settings.value("Paths/LastDicomExportDir", basePath).toString();
-
-            ShellFileDialog shell(this,
-                tr("Select patient folder"),
-                ServiceWindow,
-                defDir.isEmpty() ? basePath : defDir,
-                tr("Folder"));
-
-            auto* dlg = shell.fileDialog();
-            dlg->setAcceptMode(QFileDialog::AcceptOpen);
-            dlg->setFileMode(QFileDialog::Directory);
-            dlg->setOption(QFileDialog::ShowDirsOnly, true);
-            dlg->setFilter(QDir::AllDirs | QDir::Drives | QDir::NoDotAndDotDot);
-
-            if (shell.exec() != QDialog::Accepted)
-                return;
-
-            const QString selectedDir = dlg->selectedFiles().isEmpty() ? QString() : dlg->selectedFiles().first();
-            if (selectedDir.isEmpty())
-                return;
-
-            settings.setValue("Paths/LastDicomExportDir", selectedDir);
-
-            if (copySelectedDicomSeries(selectedDir, selected))
+            if (copySelectedDicomSeries(patientFolder, selected))
             {
                 CustomMessageBox::information(this, tr("Dicom Save"),
                     tr("Selected series were saved successfully."), ServiceWindow);
@@ -826,8 +899,12 @@ void MainWindow::onSaveDicom()
         return;
     }
 
+    const QString basePath = hdBasePath();
+    const QVector<PatientFolderEntry> patients = basePath.isEmpty() ? QVector<PatientFolderEntry>{} : loadHdBasePatients(basePath);
+
     mDicomSeriesSaveDlg->setSeries(series);
-    mDicomSeriesSaveDlg->setSaveToPatientEnabled(!hdBasePath().isEmpty());
+    mDicomSeriesSaveDlg->setPatients(patients);
+    mDicomSeriesSaveDlg->setSaveToPatientEnabled(!basePath.isEmpty() && !patients.isEmpty());
 
     mDicomSeriesSaveDlg->show();
     mDicomSeriesSaveDlg->raise();

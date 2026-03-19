@@ -845,7 +845,7 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
         else if (modalityStr == "MR" || modalityStr == "MRI")
         {
             Dicom.TypeOfRecord = MRI;
-            Dicom.physicalMin = 0; Dicom.physicalMax = 255;
+            Dicom.physicalMin = -500; Dicom.physicalMax = 1500;
             Dicom.RealMin = 0; Dicom.RealMax = 255;
             Dicom.XTitle = tr("MRI intensity");
             Dicom.YTitle = tr("Voxel count");
@@ -904,6 +904,8 @@ void PlanarView::loadSeriesFiles(const QVector<QString>& files)
 static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, bool invMono1)
 {
     double window = std::max(1.0, max - min);
+
+
 
     if (TypeOfRecord == CT)
     {
@@ -1073,6 +1075,12 @@ void PlanarView::buildCache(vtkImageData* volume,
     flipZ = false;
     flipY = true;
     flipX = false;
+
+    qDebug() << "Dicom.TypeOfRecord = " << Dicom.TypeOfRecord;
+    qDebug() << "Dicom.physicalMin = " << Dicom.physicalMin;
+    qDebug() << "Dicom.physicalMax = " << Dicom.physicalMax;
+    qDebug() << "Dicom.slope = " << Dicom.slope;
+    qDebug() << "Dicom.intercept = " << Dicom.intercept;
 
     // --- 3) Основной кеш: QImage без mirrored(), флипы через индексы ---
     // --- 3) Основной кеш: максимально быстро, флипы только через индексы dst/z ---
