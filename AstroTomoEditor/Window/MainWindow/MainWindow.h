@@ -79,7 +79,7 @@ private:
     void positionCornerGrip();
     void retranslateUi(bool loading);
     bool isWindowExpanded() const;
-    bool copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected);
+    bool copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected, bool replaceExistingCt = false);
     QString findSourceDicomDirPath() const;
     QString hdBasePath() const;
 

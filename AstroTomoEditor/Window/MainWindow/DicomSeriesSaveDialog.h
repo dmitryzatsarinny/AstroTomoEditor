@@ -10,6 +10,7 @@ struct PatientFolderEntry
     QString folderName;
     QString folderPath;
     QString patientName;
+    bool hasCt = false;
 };
 
 class QCheckBox;
@@ -33,6 +34,7 @@ public:
 signals:
     void saveRequested(const QVector<SeriesExportEntry>& selectedSeries);
     void saveToPatientRequested(const QString& patientFolder, const QVector<SeriesExportEntry>& selectedSeries);
+    void refreshPatientsRequested();
 
 private:
     struct RowWidgets
@@ -73,6 +75,7 @@ private:
     QPushButton* mBackBtn = nullptr;
     QPushButton* mSaveBtn = nullptr;
     QPushButton* mSaveToPatientBtn = nullptr;
+    QPushButton* mRefreshPatientsBtn = nullptr;
 
     const QSize mSize{ 520, 420 };
 };

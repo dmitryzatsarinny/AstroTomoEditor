@@ -19,9 +19,14 @@
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QFile>
+#include <QSaveFile>
 #include <QDir>
+#include <QHash>
 #include <QSet>
 #include <QRegularExpression>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <string>
 
 #ifdef Q_OS_WIN
@@ -30,6 +35,62 @@
 
 namespace 
 {
+    QString normalizedDirPath(const QString& path)
+    {
+        if (path.trimmed().isEmpty())
+            return {};
+
+        return QDir(path).absolutePath();
+    }
+
+    QString patientCacheFilePath()
+    {
+        return QCoreApplication::applicationDirPath() + "/hdbase_patients_cache.json";
+    }
+
+    QJsonObject loadPatientCacheRoot()
+    {
+        QFile file(patientCacheFilePath());
+        if (!file.exists() || !file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return {};
+
+        const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+        return doc.isObject() ? doc.object() : QJsonObject{};
+    }
+
+    bool savePatientCacheRoot(const QJsonObject& root)
+    {
+        QSaveFile file(patientCacheFilePath());
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+            return false;
+
+        const QJsonDocument doc(root);
+        file.write(doc.toJson(QJsonDocument::Indented));
+        return file.commit();
+    }
+
+    QJsonArray loadCachedPatientsArray(const QString& basePath)
+    {
+        const QJsonObject root = loadPatientCacheRoot();
+        const QJsonObject bases = root.value("bases").toObject();
+        return bases.value(normalizedDirPath(basePath)).toArray();
+    }
+
+    void saveCachedPatientsArray(const QString& basePath, const QJsonArray& patients)
+    {
+        const QString normalizedBasePath = normalizedDirPath(basePath);
+        if (normalizedBasePath.isEmpty())
+            return;
+
+        QJsonObject root = loadPatientCacheRoot();
+        root["version"] = 1;
+
+        QJsonObject bases = root.value("bases").toObject();
+        bases[normalizedBasePath] = patients;
+        root["bases"] = bases;
+
+        savePatientCacheRoot(root);
+    }
     QString decodeCp866(const QByteArray& bytes)
     {
 #ifdef Q_OS_WIN
@@ -118,7 +179,7 @@ namespace
         return bestCandidate;
     }
 
-    QVector<PatientFolderEntry> loadHdBasePatients(const QString& basePath)
+    QVector<PatientFolderEntry> loadHdBasePatients(const QString& basePath, bool forceRefresh = false)
     {
         QVector<PatientFolderEntry> patients;
         QDir hdBase(basePath);
@@ -127,20 +188,83 @@ namespace
 
         static const QRegularExpression folderRe(QStringLiteral(R"(^H\d{7}\.\d{3}$)"), QRegularExpression::CaseInsensitiveOption);
         const QFileInfoList entries = hdBase.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name | QDir::IgnoreCase);
+        const QJsonArray cachedEntries = forceRefresh ? QJsonArray{} : loadCachedPatientsArray(basePath);
+
+        QHash<QString, PatientFolderEntry> cachedByFolderName;
+        for (const QJsonValue& value : cachedEntries)
+        {
+            const QJsonObject obj = value.toObject();
+            const QString folderName = obj.value("folderName").toString().trimmed();
+            if (folderName.isEmpty())
+                continue;
+
+            PatientFolderEntry patient;
+            patient.folderName = folderName;
+            patient.folderPath = hdBase.filePath(folderName);
+            patient.patientName = obj.value("patientName").toString().trimmed();
+            patient.hasCt = obj.value("hasCt").toBool(false);
+            cachedByFolderName.insert(folderName, patient);
+        }
+
+        QJsonArray serializedPatients;
 
         for (const QFileInfo& entry : entries)
         {
             if (!folderRe.match(entry.fileName()).hasMatch())
                 continue;
 
-            PatientFolderEntry patient;
+            PatientFolderEntry patient = cachedByFolderName.value(entry.fileName());
             patient.folderName = entry.fileName();
             patient.folderPath = entry.absoluteFilePath();
-            patient.patientName = extractPatientNameFromStatusInf(entry.absoluteFilePath() + "/status.inf");
+            patient.hasCt = QDir(entry.absoluteFilePath()).exists("CT");
+
+            if (forceRefresh || !cachedByFolderName.contains(entry.fileName()))
+            {
+                patient.patientName = extractPatientNameFromStatusInf(entry.absoluteFilePath() + "/status.inf");
+            }
+
+            patients.push_back(patient);
+
+            QJsonObject serializedPatient;
+            serializedPatient["folderName"] = patient.folderName;
+            serializedPatient["patientName"] = patient.patientName;
+            serializedPatient["hasCt"] = patient.hasCt;
+            serializedPatients.push_back(serializedPatient);
             patients.push_back(patient);
         }
-
+        saveCachedPatientsArray(basePath, serializedPatients);
         return patients;
+    }
+    void updateCachedPatientCtState(const QString& basePath, const QString& patientFolderPath, bool hasCt)
+    {
+        const QString normalizedBasePath = normalizedDirPath(basePath);
+        const QString normalizedPatientFolderPath = normalizedDirPath(patientFolderPath);
+        if (normalizedBasePath.isEmpty() || normalizedPatientFolderPath.isEmpty())
+            return;
+
+        QJsonArray patients = loadCachedPatientsArray(normalizedBasePath);
+        bool found = false;
+
+        for (int index = 0; index < patients.size(); ++index)
+        {
+            QJsonObject patient = patients.at(index).toObject();
+            const QString folderName = patient.value("folderName").toString().trimmed();
+            if (folderName.isEmpty())
+                continue;
+
+            if (normalizedDirPath(QDir(normalizedBasePath).filePath(folderName)) != normalizedPatientFolderPath)
+                continue;
+
+            patient["hasCt"] = hasCt;
+            patients[index] = patient;
+            found = true;
+            break;
+        }
+
+        if (!found)
+            return;
+
+        saveCachedPatientsArray(normalizedBasePath, patients);
     }
 }
 
@@ -390,12 +514,32 @@ void MainWindow::buildUi()
             if (patientFolder.isEmpty() || selected.isEmpty())
                 return;
 
-            if (copySelectedDicomSeries(patientFolder, selected))
+            if (copySelectedDicomSeries(patientFolder, selected, true))
             {
+                updateCachedPatientCtState(hdBasePath(), patientFolder, true);
                 CustomMessageBox::information(this, tr("Dicom Save"),
                     tr("Selected series were saved successfully."), ServiceWindow);
                 mDicomSeriesSaveDlg->hide();
             }
+        });
+
+    connect(mDicomSeriesSaveDlg, &DicomSeriesSaveDialog::refreshPatientsRequested, this,
+        [this]()
+        {
+            const QString basePath = hdBasePath();
+            if (basePath.isEmpty())
+            {
+                CustomMessageBox::warning(this, tr("Dicom Save"),
+                    tr("HDBASE path is not configured."), ServiceWindow);
+                return;
+            }
+
+            const QVector<PatientFolderEntry> patients = loadHdBasePatients(basePath, true);
+            mDicomSeriesSaveDlg->setPatients(patients);
+            mDicomSeriesSaveDlg->setSaveToPatientEnabled(true);
+
+            CustomMessageBox::information(this, tr("Dicom Save"),
+                tr("Patient list was rebuilt. Found %1 patient folders.").arg(patients.size()), ServiceWindow);
         });
 
     connect(mSettingsDlg, &SettingsDialog::languageChanged, this, [](const QString& code)
@@ -904,7 +1048,7 @@ void MainWindow::onSaveDicom()
 
     mDicomSeriesSaveDlg->setSeries(series);
     mDicomSeriesSaveDlg->setPatients(patients);
-    mDicomSeriesSaveDlg->setSaveToPatientEnabled(!basePath.isEmpty() && !patients.isEmpty());
+    mDicomSeriesSaveDlg->setSaveToPatientEnabled(!basePath.isEmpty());
 
     mDicomSeriesSaveDlg->show();
     mDicomSeriesSaveDlg->raise();
@@ -921,7 +1065,7 @@ QString MainWindow::hdBasePath() const
     return AppConfig::loadCurrent().hdBasePath.trimmed();
 }
 
-bool MainWindow::copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected)
+bool MainWindow::copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected, bool replaceExistingCt)
 {
     if (targetRoot.isEmpty() || selected.isEmpty())
         return false;
@@ -936,7 +1080,14 @@ bool MainWindow::copySelectedDicomSeries(const QString& targetRoot, const QVecto
 
     const QString ctPath = root.filePath("CT");
     QDir ctDir(ctPath);
-    if (!ctDir.exists() && !root.mkpath("CT"))
+    if(replaceExistingCt && ctDir.exists() && !ctDir.removeRecursively())
+    {
+        CustomMessageBox::critical(this, tr("Dicom Save"),
+            tr("Failed to replace existing CT folder."), ServiceWindow);
+        return false;
+    }
+
+    if (!root.mkpath("CT"))
     {
         CustomMessageBox::critical(this, tr("Dicom Save"),
             tr("Failed to create CT folder."), ServiceWindow);

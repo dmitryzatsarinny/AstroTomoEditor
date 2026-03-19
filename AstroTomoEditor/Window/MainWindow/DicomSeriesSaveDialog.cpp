@@ -73,6 +73,11 @@ DicomSeriesSaveDialog::DicomSeriesSaveDialog(QWidget* parent)
     mBackBtn->setCursor(Qt::PointingHandCursor);
     buttonsRow->addWidget(mBackBtn);
     
+    mRefreshPatientsBtn = new QPushButton(content);
+    mRefreshPatientsBtn->setObjectName("DicomSeriesSecondaryButton");
+    mRefreshPatientsBtn->setCursor(Qt::PointingHandCursor);
+    buttonsRow->addWidget(mRefreshPatientsBtn);
+
     buttonsRow->addStretch(1);
 
     mSaveToPatientBtn = new QPushButton(content);
@@ -99,6 +104,11 @@ DicomSeriesSaveDialog::DicomSeriesSaveDialog(QWidget* parent)
     connect(mBackBtn, &QPushButton::clicked, this, [this]()
         {
             showSeriesPage();
+        });
+
+    connect(mRefreshPatientsBtn, &QPushButton::clicked, this, [this]()
+        {
+            emit refreshPatientsRequested();
         });
 
     connect(mSaveToPatientBtn, &QPushButton::clicked, this, [this]()
@@ -135,6 +145,8 @@ DicomSeriesSaveDialog::DicomSeriesSaveDialog(QWidget* parent)
         "QCheckBox#DicomSeriesCheck, QCheckBox#DicomPatientCheck { spacing: 10px; color:#f2f5f8; }"
         "QCheckBox#DicomSeriesCheck::indicator, QCheckBox#DicomPatientCheck::indicator { width: 16px; height: 16px; border-radius: 3px; border: 1px solid rgba(255,255,255,0.32); background: rgba(0,0,0,0.28); }"
         "QCheckBox#DicomSeriesCheck::indicator:checked, QCheckBox#DicomPatientCheck::indicator:checked { background: #54a4ff; border: 1px solid #54a4ff; }"
+        "QLabel#DicomPatientCtStatus[hasCt=\"true\"] { color:#7cd992; }"
+        "QLabel#DicomPatientCtStatus[hasCt=\"false\"] { color:rgba(242,245,248,0.58); }"
         "QLabel#DicomPatientName { color:#f2f5f8; font-weight:600; }"
         "QLabel#DicomPatientFolder { color:rgba(242,245,248,0.72); }""QPushButton#DicomSeriesSaveButton, QPushButton#DicomSeriesSecondaryButton { min-height: 30px; border-radius: 6px; padding: 0 12px; font-weight: 600; }"
         "QPushButton#DicomSeriesSaveButton { background:#2f7de1; color:white; border:1px solid #4f95ec; }"
@@ -335,6 +347,15 @@ void DicomSeriesSaveDialog::rebuildPatientList()
         folderLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
         textLayout->addWidget(folderLabel);
 
+        auto* ctLabel = new QLabel(patient.hasCt
+            ? tr("CT folder already exists")
+            : tr("CT folder not found"), textHost);
+        ctLabel->setObjectName("DicomPatientCtStatus");
+        ctLabel->setProperty("hasCt", patient.hasCt);
+        ctLabel->setWordWrap(true);
+        ctLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        textLayout->addWidget(ctLabel);
+
         rowLayout->addWidget(textHost, 1);
 
         row->onClick = [check]()
@@ -407,6 +428,12 @@ void DicomSeriesSaveDialog::updateSaveButtonState()
     if (mBackBtn)
         mBackBtn->setVisible(mPageMode == PageMode::PatientSelection);
 
+    if (mRefreshPatientsBtn)
+    {
+        mRefreshPatientsBtn->setVisible(mSaveToPatientEnabled);
+        mRefreshPatientsBtn->setEnabled(mSaveToPatientEnabled);
+    }
+
     if (mSaveBtn)
     {
         mSaveBtn->setVisible(mPageMode == PageMode::SeriesSelection);
@@ -441,5 +468,11 @@ void DicomSeriesSaveDialog::retranslateUi()
     if (mSaveToPatientBtn)
         mSaveToPatientBtn->setText(tr("Save to patient"));
     
+    if (mRefreshPatientsBtn)
+        mRefreshPatientsBtn->setText(tr("Refresh patient list"));
+
+    if (mPageMode == PageMode::PatientSelection)
+        rebuildPatientList();
+
     updateSaveButtonState();
 }
