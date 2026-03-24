@@ -191,7 +191,7 @@ private:
 
     QVector<vtkSmartPointer<vtkImageData>> mUndoStack;
     QVector<vtkSmartPointer<vtkImageData>> mRedoStack;
-    int  mHistoryLimit = 20;
+    int  mHistoryLimit = 128;
     vtkSmartPointer<vtkImageData> cloneImage(vtkImageData* src);
     void commitNewImage(vtkImageData* im);
     void setMapperInput(vtkImageData* im);

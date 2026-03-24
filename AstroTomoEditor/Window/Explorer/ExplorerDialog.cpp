@@ -452,6 +452,27 @@ bool ExplorerDialog::is3drFile(const QString& filePath) const {
     return QFileInfo(filePath).suffix().compare("3dr", Qt::CaseInsensitive) == 0;
 }
 
+bool ExplorerDialog::dirHasSdir(const QString& dirPath, int maxProbe) const {
+    QDir d(dirPath);
+    if (!d.exists()) return false;
+
+    // Быстрый проход: смотрим не более maxProbe файлов
+    QDirIterator it(dirPath, QDir::Dirs | QDir::NoDotAndDotDot);
+    int checked = 0;
+
+    while (it.hasNext() && checked < std::max(1, maxProbe)) {
+        const QString p = it.next();
+        const QString name = QFileInfo(p).fileName();
+
+        // Дешёвая эвристика по расширению
+        if (!name.startsWith("S", Qt::CaseInsensitive))
+            return false;
+
+        ++checked;
+    }
+    return true;
+}
+
 bool ExplorerDialog::dirHasDicom(const QString& dirPath, int maxProbe) const {
     QDir d(dirPath);
     if (!d.exists()) return false;
@@ -469,6 +490,7 @@ bool ExplorerDialog::dirHasDicom(const QString& dirPath, int maxProbe) const {
             name.endsWith(".dicom", Qt::CaseInsensitive) ||
             name.endsWith(".ima", Qt::CaseInsensitive))
             return true;
+
 
         // Точная проверка по сигнатуре (дороже, но мы её ограничили maxProbe)
         if (DicomSniffer::looksLikeDicomFile(p))
@@ -650,7 +672,7 @@ ExplorerDialog::SelectionKind ExplorerDialog::selectedKind() const {
 
     if (fi.isDir()) 
     {
-        if (mode == ContentFilterProxy::DicomFiles && dirHasDicom(path))
+        if (mode == ContentFilterProxy::DicomFiles && (dirHasDicom(path) || dirHasSdir(path)))
             return SelectionKind::DicomFolder;
     }
 

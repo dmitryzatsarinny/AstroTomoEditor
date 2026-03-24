@@ -81,6 +81,7 @@ private:
     // помощник: путь по индексу из вида (нужно мэппить через прокси)
     QString filePathFromViewIndex(const QModelIndex& viewIdx) const;
 
+    bool dirHasSdir(const QString& dirPath, int maxProbe = 10) const;
     bool dirHasDicom(const QString& dirPath, int maxProbe = 10) const;      // есть хотя бы 1 DICOM-файл
     bool dirHasDicomdir(const QString& dirPath) const;                      // есть файл DICOMDIR
     bool isDicomFile(const QString& filePath) const;                        // файл — DICOM (сигнатура/расширение)

@@ -77,5 +77,5 @@ private:
     QPushButton* mSaveToPatientBtn = nullptr;
     QPushButton* mRefreshPatientsBtn = nullptr;
 
-    const QSize mSize{ 520, 420 };
+    const QSize mSize{ 620, 420 };
 };

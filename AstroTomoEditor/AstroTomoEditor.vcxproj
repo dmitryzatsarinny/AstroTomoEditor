@@ -36,6 +36,7 @@
     <ClCompile Include="Window\MainWindow\AsyncProgressBar.cpp" />
     <ClCompile Include="Window\MainWindow\DialogShell.cpp" />
     <ClCompile Include="Window\MainWindow\DicomSeriesSaveDialog.cpp" />
+    <ClCompile Include="Window\MainWindow\MainWindowStorageUtils.cpp" />
     <ClCompile Include="Window\MainWindow\PatientDialog.cpp" />
     <ClCompile Include="Window\MainWindow\SettingsDialog.cpp" />
     <ClCompile Include="Window\MainWindow\TitleBar.cpp" />
@@ -99,6 +100,7 @@
     <QtMoc Include="Window\MainWindow\SettingsDialog.h" />
     <QtMoc Include="Window\Render\ElectrodePanel.h" />
     <QtMoc Include="Window\MainWindow\DicomSeriesSaveDialog.h" />
+    <ClInclude Include="Window\MainWindow\MainWindowStorageUtils.h" />
     <ClInclude Include="Window\Render\ElectrodeAutoIdentifier.h" />
     <ClInclude Include="Window\Render\ElectrodeSurfaceDetector.h" />
     <ClInclude Include="Window\Render\FaceOnlyBoxRepresentation.h" />

@@ -32,51 +32,104 @@
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="25"/>
         <source>Information</source>
-        <translation type="unfinished"></translation>
+        <translation>Информация</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="26"/>
         <source>Warning</source>
-        <translation type="unfinished">Ошибка</translation>
+        <translation>Предупреждение</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="27"/>
         <source>Error</source>
-        <translation type="unfinished"></translation>
+        <translation>Ошибка</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="28"/>
         <source>Question</source>
-        <translation type="unfinished"></translation>
+        <translation>Вопрос</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="30"/>
         <source>Message</source>
-        <translation type="unfinished"></translation>
+        <translation>Сообщение</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="146"/>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="151"/>
         <source>OK</source>
-        <translation type="unfinished">OK</translation>
+        <translation>OK</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="150"/>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="160"/>
         <source>Cancel</source>
-        <translation type="unfinished">Отмена</translation>
+        <translation>Отмена</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="155"/>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="161"/>
         <source>No</source>
-        <translation type="unfinished"></translation>
+        <translation>Нет</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="156"/>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/CustomMessageBox.cpp" line="162"/>
         <source>Yes</source>
-        <translation type="unfinished"></translation>
+        <translation>Да</translation>
+    </message>
+</context>
+<context>
+    <name>DicomSeriesSaveDialog</name>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="351"/>
+        <source>CT folder already exists</source>
+        <translation>Папка с КТ уже существует</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="352"/>
+        <source>CT folder not found</source>
+        <translation>Папка с КТ не обнаружена</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="421"/>
+        <source>Select the CT series to save</source>
+        <translation>Выберете КТ серии для сохранения</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="423"/>
+        <source>Select the patient to receive the selected CT series</source>
+        <translation>Выберете пациента для отправки выбранных КТ снимков</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="425"/>
+        <source>No patients were found in the configured HDBASE folder</source>
+        <translation>В указаной папке HDBASE пациенты не найдены</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="457"/>
+        <source>Save Dicom series</source>
+        <translation>Сохранить Dicom снимки</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="463"/>
+        <source>Back</source>
+        <translation>Назад</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="466"/>
+        <source>Save selected</source>
+        <translation>Сохранить выбранные</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="469"/>
+        <source>Save to patient</source>
+        <translation>Сохранить к пациенту</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="472"/>
+        <source>Refresh patient list</source>
+        <translation>Обновить список пациентов</translation>
     </message>
 </context>
 <context>
@@ -85,7 +138,7 @@
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="309"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1173"/>
         <source>Auto detect</source>
-        <translation type="unfinished"></translation>
+        <translation>Авто детекция</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="328"/>
@@ -97,37 +150,37 @@
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="342"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1177"/>
         <source>Search RLFN</source>
-        <translation type="unfinished"></translation>
+        <translation>Поиск RLFN</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="361"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1179"/>
         <source>Search V1-V6</source>
-        <translation type="unfinished"></translation>
+        <translation>Поиск V1-V6</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="380"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1181"/>
         <source>Search V7-V12</source>
-        <translation type="unfinished"></translation>
+        <translation>Поиск V7-V12</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="399"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1183"/>
         <source>Search V13-V19</source>
-        <translation type="unfinished"></translation>
+        <translation>Поиск V13-V19</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="418"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1185"/>
         <source>Search V20-V25</source>
-        <translation type="unfinished"></translation>
+        <translation>Поиск V20-V25</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="437"/>
         <location filename="../AstroTomoEditor/Window/Render/ElectrodePanel.cpp" line="1187"/>
         <source>Search V26-V30</source>
-        <translation type="unfinished"></translation>
+        <translation>Поиск V26-V30</translation>
     </message>
 </context>
 <context>
@@ -238,98 +291,189 @@
 <context>
     <name>MainWindow</name>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="26"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="236"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="36"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="333"/>
         <source>Astrocard DICOM Editor</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="168"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="239"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="516"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="576"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="178"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="336"/>
         <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="616"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="676"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="716"/>
         <source>Ready</source>
         <translation>Готово</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="450"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="235"/>
+        <source>Select folder to save DICOM</source>
+        <translation>Выберете папку для сохранения DICOM</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="238"/>
+        <source>Folder</source>
+        <translation>Папка</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="257"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="278"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="290"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="299"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="800"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="834"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="843"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="850"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="864"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="887"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="895"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="908"/>
+        <source>Dicom Save</source>
+        <translation>Dicom сохранен</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="258"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="279"/>
+        <source>Selected series were saved successfully.</source>
+        <translation>Выбранные серии были успешно сохранены.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="291"/>
+        <source>HDBASE path is not configured.</source>
+        <translation>HDBASE путь не существует.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="300"/>
+        <source>Patient list was rebuilt. Found %1 patient folders.</source>
+        <translation>Список пациентов обновленю Найдено  %1 новых пациентов.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="550"/>
         <source>Render 0%</source>
         <translation>Рендеринг 0%</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="463"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="563"/>
         <source>Render progress: %1</source>
         <translation>Процесс рендеринга: %1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="507"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="607"/>
         <source>Render success</source>
         <translation>Рендеринг завершен</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="525"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="625"/>
         <source>DICOM files detection 0%</source>
         <translation>Обнаружение файлов DICOM: 0%</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="548"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="648"/>
         <source>Searching… %1 files checked: %2</source>
         <translation>Поиск… %1 проверенных файлов: %2</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="556"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="656"/>
         <source>Header reading: %1 (%2%)</source>
         <translation>Заголовок: %1 (%2%)</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="567"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="667"/>
         <source>Ready. Series: %1</source>
         <translation>Готово. Серий: %1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="584"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="684"/>
         <source>Series loading… 0/%1</source>
         <translation>Загрузка серии… 0/%1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="596"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="696"/>
         <source>Series loading… %1/%2</source>
         <translation>Загрузка серии… %1/%2</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="605"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="705"/>
         <source>Loaded: %1 slices</source>
         <translation>Загружено: %1 срезов</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="633"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="672"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="734"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="779"/>
         <source>Save 3DR</source>
         <translation>Сохранить 3DR</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="672"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="740"/>
+        <source>Save Dicom</source>
+        <translation>Сохранить Dicom</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="779"/>
         <source>No volume to save</source>
         <translation>Нет объема для сохранения</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="903"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="800"/>
+        <source>No series available for saving</source>
+        <translation>Нет доступных для сохранения серий</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="835"/>
+        <source>Failed to create destination folder.</source>
+        <translation>Ошибка создания папки.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="844"/>
+        <source>Failed to replace existing CT folder.</source>
+        <translation>Не удается переместить существующую CT папку.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="851"/>
+        <source>Failed to create CT folder.</source>
+        <translation>Ошибка создания CT папки.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="865"/>
+        <source>Failed to create series folder: %1</source>
+        <translation>Ошибка создания папки серии: %1</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="888"/>
+        <source>Failed to copy file:
+%1</source>
+        <translation>Ошибка копирования файла:
+%1</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="896"/>
+        <source>Failed to read DICOM metadata for file:
+%1</source>
+        <translation>Ошибка чтения DICOM данных из файла:
+%1</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="909"/>
+        <source>Failed to create DICOMDIR for exported series.</source>
+        <translation>Ошибка создания DICOMDIR для экспорта серий.</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="1174"/>
         <source>Ready volume</source>
         <translation>Том подготовлен</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="735"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="976"/>
         <source>Searching DICOM files…</source>
         <translation>Поиск в файлах DICOM…</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="885"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="1156"/>
         <source>Series loading…</source>
         <translation>Загрузка серии…</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="894"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/MainWindow.cpp" line="1165"/>
         <source>Warning</source>
         <translation>Ошибка</translation>
     </message>
@@ -515,41 +659,41 @@
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="840"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1220"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1228"/>
         <source>Hounsfield Units</source>
         <translation>Единицы Хаунсфилда</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="841"/>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="851"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1221"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1228"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1229"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1236"/>
         <source>Voxel count</source>
         <translation>Количство вокселей</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="842"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1222"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1230"/>
         <source>HU</source>
         <translation>HU</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="843"/>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="853"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1223"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1230"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1231"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1238"/>
         <source>N</source>
         <translation>N</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="850"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1227"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1235"/>
         <source>MRI intensity</source>
         <translation>Интенсивность</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="852"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1229"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1237"/>
         <source>AU</source>
         <translation>AU</translation>
     </message>
@@ -566,42 +710,42 @@ PgUp/PgDn: +/- 10 фрагментов.
 Перетаскивание левой кнопкой мыши: панорамирование.</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1207"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1215"/>
         <source>DICOM slice viewer.</source>
         <translation>Программа просмотра срезов DICOM.</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1208"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1216"/>
         <source>Slice viewer</source>
         <translation>Программа просмотра срезов</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1213"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1221"/>
         <source>Slice</source>
         <translation>Срез</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1214"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1222"/>
         <source>Vertical slice scrollbar.</source>
         <translation>Полоса прокрутки вертикального среза.</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1215"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1223"/>
         <source>Slice slider</source>
         <translation>Ползунок среза</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1233"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1241"/>
         <source>PlanarView</source>
         <translation>PlanarView</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1254"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1262"/>
         <source>No metadata</source>
         <translation>Метаданные отсутствуют</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1269"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1277"/>
         <source>Invalid pixel geometry</source>
         <translation>Неверная геометрия пикселя</translation>
     </message>
@@ -636,12 +780,12 @@ PgUp/PgDn: +/- 10 фрагментов.
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/PresetNameDialog.cpp" line="44"/>
         <source>OK</source>
-        <translation type="unfinished">OK</translation>
+        <translation>OK</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/ServiceWindow/PresetNameDialog.cpp" line="47"/>
         <source>Cancel</source>
-        <translation type="unfinished">Отмена</translation>
+        <translation>Отмена</translation>
     </message>
 </context>
 <context>
@@ -702,7 +846,7 @@ PgUp/PgDn: +/- 10 фрагментов.
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/SettingsDialog.cpp" line="107"/>
         <source>Quality/Speed:</source>
-        <translation type="unfinished"></translation>
+        <translation>Качество/Скорость:</translation>
     </message>
     <message>
         <source>Language</source>
@@ -802,24 +946,24 @@ PgUp/PgDn: +/- 10 фрагментов.
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="65"/>
-        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="76"/>
+        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="77"/>
         <source>Histogram</source>
         <translation>Гистограмма</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="66"/>
-        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="77"/>
+        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="78"/>
         <source>Templates</source>
         <translation>Шаблоны</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="67"/>
-        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="78"/>
+        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="68"/>
+        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="79"/>
         <source>Electrodes</source>
         <translation>Электроды</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="80"/>
+        <location filename="../AstroTomoEditor/Window/Render/Tools.cpp" line="81"/>
         <source>Applications</source>
         <translation>Приложения</translation>
     </message>
@@ -829,19 +973,19 @@ PgUp/PgDn: +/- 10 фрагментов.
         <translation>Данные пациента</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1143"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1153"/>
         <source>No name</source>
         <translation>Нет имени</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1313"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1368"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1321"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1376"/>
         <source>No consistent pixel geometry in series</source>
         <translation>Отсутствие согласованной геометрии пикселей в серии</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1325"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1380"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1333"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/PlanarView.cpp" line="1388"/>
         <source>Filtered %1 inconsistent file(s) by pixel geometry</source>
         <translation>Отфильтровано %1 несогласованных файлов по геометрии пикселей</translation>
     </message>
@@ -937,46 +1081,51 @@ PgUp/PgDn: +/- 10 фрагментов.
         <translation>выключен</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2049"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2053"/>
         <source>Save STL</source>
-        <translation type="unfinished">Сохранить STL</translation>
+        <translation>Сохранить STL</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2052"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2056"/>
         <source>STL binary (*.stl)</source>
-        <translation type="unfinished">STL-файл (*.stl)</translation>
+        <translation>STL-файл (*.stl)</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/DicomSeriesSaveDialog.cpp" line="37"/>
+        <source>Save Dicom series</source>
+        <translation>Сохранить Dicom снимки</translation>
     </message>
 </context>
 <context>
     <name>RenderView</name>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2924"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2928"/>
         <source>Custom…</source>
         <translation>Свой...</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="553"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1570"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="3060"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="554"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1571"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="3065"/>
         <source>Edit</source>
         <translation>Инструменты</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="603"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1587"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="3077"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="604"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1588"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="3082"/>
         <source>Applications</source>
         <translation>Приложения</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="649"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2989"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="650"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2993"/>
         <source>Undo (Ctrl+Z)</source>
         <translation>Назад (Ctrl+Z)</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="658"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2990"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="659"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2994"/>
         <source>Redo (Ctrl+Y)</source>
         <translation>Вперед (Ctrl+Y)</translation>
     </message>
@@ -985,49 +1134,49 @@ PgUp/PgDn: +/- 10 фрагментов.
         <translation type="vanished">%1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="3072"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="3077"/>
         <source>App: %1</source>
         <translation>Прил: %1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1918"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1922"/>
         <source>No volume to build STL</source>
         <translation>Нет объема для создания STL-файла</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1961"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1965"/>
         <source>Building surface…</source>
         <translation>Построение поверхности...</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1954"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1988"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1958"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1992"/>
         <source>Ready volume</source>
         <translation>Том подготовлен</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2002"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2006"/>
         <source>Ready surface</source>
         <translation>Поверхность подготовлена</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1956"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2004"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2035"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2065"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2105"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2769"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2778"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1960"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2008"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2039"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2069"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2109"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2773"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2782"/>
         <source>Ready</source>
         <translation>Готово</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1967"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1971"/>
         <source>%1 (%2%)</source>
         <translation>%1 (%2%)</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1967"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1971"/>
         <source>Working…</source>
         <translation>Обработка…</translation>
     </message>
@@ -1036,7 +1185,7 @@ PgUp/PgDn: +/- 10 фрагментов.
         <translation type="vanished">Упростить поверхность</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2033"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2037"/>
         <source>Nothing to save - build STL first</source>
         <translation>Сохранить нечего - сначала создайте STL-файл</translation>
     </message>
@@ -1049,56 +1198,56 @@ PgUp/PgDn: +/- 10 фрагментов.
         <translation type="vanished">STL-файл (*.stl)</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2100"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2104"/>
         <source>Saved STL: %1</source>
         <translation>Сохранен STL: %1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2081"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2102"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2085"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2106"/>
         <source>Save failed</source>
         <translation>Сохранение не удалось</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2612"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2616"/>
         <source>Invalid image: empty extent or no scalars</source>
         <translation>Недопустимое изображение: пустой объем или отсутствие скалярных значений</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="307"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2984"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="308"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2988"/>
         <source>Simplify</source>
         <translation>Упростить</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="313"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2985"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="314"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2989"/>
         <source>Save</source>
         <translation>Сохранить</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="547"/>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2987"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="548"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2991"/>
         <source>Transfer function</source>
         <translation>Передаточная функция</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1872"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1876"/>
         <source>No surface to simplify</source>
-        <translation type="unfinished"></translation>
+        <translation>Нет поверхности для упрощения</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1903"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="1907"/>
         <source>Simplify failed</source>
-        <translation type="unfinished"></translation>
+        <translation>Ошибка при упрощении</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2604"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2608"/>
         <source>No image</source>
         <translation>Нет изображения</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2619"/>
+        <location filename="../AstroTomoEditor/Window/Render/RenderView.cpp" line="2623"/>
         <source>No render window</source>
         <translation>Нет окна рендеринга</translation>
     </message>
@@ -1106,14 +1255,14 @@ PgUp/PgDn: +/- 10 фрагментов.
 <context>
     <name>SeriesListPanel</name>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="417"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="466"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="427"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="476"/>
         <source>(single image)</source>
         <translation>(одно изображение)</translation>
     </message>
     <message numerus="yes">
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1200"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1505"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1210"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1546"/>
         <source>%n slice</source>
         <translation>
             <numerusform>%n срез</numerusform>
@@ -1130,7 +1279,7 @@ PgUp/PgDn: +/- 10 фрагментов.
         </translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1495"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1536"/>
         <source>SeriesListPanel</source>
         <translation>SeriesListPanel</translation>
     </message>
@@ -1143,7 +1292,7 @@ PgUp/PgDn: +/- 10 фрагментов.
         <translation type="vanished">срезов</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1354"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/SeriesListPanel.cpp" line="1364"/>
         <source>(unnamed series)</source>
         <translation>(безымянный серия)</translation>
     </message>
@@ -1198,7 +1347,7 @@ PgUp/PgDn: +/- 10 фрагментов.
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/SettingsDialog.cpp" line="308"/>
         <source>Quality/Speed:</source>
-        <translation type="unfinished"></translation>
+        <translation>Качество/Производительность:</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/MainWindow/SettingsDialog.cpp" line="329"/>
@@ -1405,54 +1554,74 @@ Some templates were not saved:
 <context>
     <name>TitleBar</name>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="53"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="528"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="52"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="552"/>
         <source>Save 3DR (Ctrl+S)</source>
         <translation>Сохранить 3DR (Ctrl+S)</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="54"/>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="529"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="53"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="553"/>
         <source>Save 3DR</source>
         <translation>Сохранить 3DR</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="65"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="63"/>
+        <source>Save DICOM (Ctrl+D)</source>
+        <translation>Сохранить DICOM (Ctrl+D)</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="64"/>
+        <source>Save DICOM</source>
+        <translation>Сохранить DICOM</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="75"/>
         <source>2D</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="76"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="86"/>
         <source>3D</source>
         <translation></translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="449"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="472"/>
         <source>No patient</source>
         <translation>Нет пациента</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="450"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="473"/>
         <source>Patient: %1</source>
         <translation>Пациент: %1</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="532"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="558"/>
+        <source>Save Dicom (Ctrl+D)</source>
+        <translation>Сохранить Dicom (Ctrl+D)</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="559"/>
+        <source>Save Dicom</source>
+        <translation>Сохранить Dicom</translation>
+    </message>
+    <message>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="562"/>
         <source>Settings</source>
         <translation>Настройки</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="533"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="563"/>
         <source>Close</source>
         <translation>Закрыть</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="534"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="564"/>
         <source>Restore</source>
         <translation>Восстановть</translation>
     </message>
     <message>
-        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="534"/>
+        <location filename="../AstroTomoEditor/Window/MainWindow/TitleBar.cpp" line="564"/>
         <source>Maximize</source>
         <translation>Максимизировать</translation>
     </message>
@@ -1722,12 +1891,12 @@ Some templates were not saved:
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="825"/>
         <source>ROI crop</source>
-        <translation type="unfinished"></translation>
+        <translation>ROI подрезка</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="852"/>
         <source>Binarize 0/1</source>
-        <translation type="unfinished"></translation>
+        <translation>Бинаризация 0/1</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="870"/>
@@ -1737,7 +1906,7 @@ Some templates were not saved:
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="946"/>
         <source>Fast surface</source>
-        <translation type="unfinished"></translation>
+        <translation>Быстрая поверхность</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="955"/>
@@ -1755,27 +1924,27 @@ Some templates were not saved:
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="1003"/>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="1321"/>
         <source>Components</source>
-        <translation type="unfinished"></translation>
+        <translation>Компоненты</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="1083"/>
         <source>Distance (outside)</source>
-        <translation type="unfinished"></translation>
+        <translation>Растояние (внешнее)</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="1090"/>
         <source>Distance (inside)</source>
-        <translation type="unfinished"></translation>
+        <translation>Растояние (внутреннее)</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="1171"/>
         <source>Signed distance</source>
-        <translation type="unfinished"></translation>
+        <translation>Расстояние со знаком</translation>
     </message>
     <message>
         <location filename="../AstroTomoEditor/Window/Render/VolumeStlExporter.cpp" line="1193"/>
         <source>Smooth SDF</source>
-        <translation type="unfinished"></translation>
+        <translation>Сглаживание SDF</translation>
     </message>
     <message>
         <source>Filling small holes</source>
