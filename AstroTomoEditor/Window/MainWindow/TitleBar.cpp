@@ -2,7 +2,40 @@
 #include <QHBoxLayout>
 #include <QStyle>
 #include <QMouseEvent>
+#include <QApplication>
+#include <QScreen>
+#include <QWindow>
+#include <cmath>
 
+namespace
+{
+    bool isWindowExpandedState(const QWidget* w)
+    {
+        if (!w)
+            return false;
+
+        const auto st = w->windowState();
+        if (st.testFlag(Qt::WindowMaximized) || st.testFlag(Qt::WindowFullScreen))
+            return true;
+
+        const QScreen* screen = nullptr;
+        if (w->windowHandle())
+            screen = w->windowHandle()->screen();
+        if (!screen)
+            screen = QApplication::primaryScreen();
+        if (!screen)
+            return false;
+
+        const QRect available = screen->availableGeometry();
+        const QRect current = w->frameGeometry();
+
+        constexpr int kTolerance = 2;
+        return std::abs(current.left() - available.left()) <= kTolerance
+            && std::abs(current.top() - available.top()) <= kTolerance
+            && std::abs(current.right() - available.right()) <= kTolerance
+            && std::abs(current.bottom() - available.bottom()) <= kTolerance;
+    }
+}
 
 TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlename) : QWidget(parent)
 {
@@ -205,7 +238,7 @@ TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlen
     connect(mBtnSettings, &QToolButton::clicked, this, &TitleBar::settingsClicked);
     connect(mBtnMax, &QToolButton::clicked, this, [this] {
         if (!window()) return;
-        window()->isMaximized() ? window()->showNormal() : window()->showMaximized();
+        isWindowExpandedState(window()) ? window()->showNormal() : window()->showMaximized();
         updateMaximizeIcon();
         });
     connect(mBtnClose, &QToolButton::clicked, this, [this] {
@@ -516,7 +549,7 @@ void TitleBar::mouseDoubleClickEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton && !isOverNonDraggableChild(e->pos()) && mBtnMax) {
         // двойной клик по заголовку — как в системе: переключить max/normal
-        window()->isMaximized() ? window()->showNormal() : window()->showMaximized();
+        isWindowExpandedState(window()) ? window()->showNormal() : window()->showMaximized();
         updateMaximizeIcon();
     }
     QWidget::mouseDoubleClickEvent(e);
@@ -533,8 +566,9 @@ void TitleBar::updateMaximizeIcon() {
     if (!mBtnMax) return;
     auto* w = window();
     if (!w || !style()) return;
-    const bool maxed = w->isMaximized();
+    const bool maxed = isWindowExpandedState(w);
     mBtnMax->setIcon(maxed ? QIcon(":/icons/Resources/fullscreen-exit.svg") : QIcon(":/icons/Resources/fullscreen.svg"));
+    mBtnMax->setToolTip(maxed ? tr("Restore") : tr("Maximize"));
 }
 
 
@@ -561,5 +595,5 @@ void TitleBar::retranslateUi()
 
     if (mBtnSettings) mBtnSettings->setToolTip(tr("Settings"));
     if (mBtnClose)    mBtnClose->setToolTip(tr("Close"));
-    if (mBtnMax)      mBtnMax->setToolTip(window() && window()->isMaximized() ? tr("Restore") : tr("Maximize"));
+    if (mBtnMax)      mBtnMax->setToolTip(isWindowExpandedState(window()) ? tr("Restore") : tr("Maximize"));
 }
