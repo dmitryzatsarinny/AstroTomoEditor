@@ -539,7 +539,7 @@ void TitleBar::mousePressEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton &&
         !isOverNonDraggableChild(e->pos()) &&
-        !window()->isMaximized())
+        !isWindowExpandedState(window()))
     {
         mDragging = true;
         mDragPos = e->globalPos() - window()->frameGeometry().topLeft();
@@ -549,7 +549,7 @@ void TitleBar::mousePressEvent(QMouseEvent* e)
 
 void TitleBar::mouseMoveEvent(QMouseEvent* e)
 {
-    if (mDragging && (e->buttons() & Qt::LeftButton) && !window()->isMaximized()) {
+    if (mDragging && (e->buttons() & Qt::LeftButton) && !isWindowExpandedState(window())) {
         window()->move(e->globalPos() - mDragPos);
     }
     QWidget::mouseMoveEvent(e);

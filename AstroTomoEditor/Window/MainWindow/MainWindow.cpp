@@ -1123,6 +1123,12 @@ bool MainWindow::isWindowExpanded() const
 
 void MainWindow::applyMaximizedUi(bool maxed)
 {
+    if (mHasAppliedExpandedUi && mAppliedExpandedUiState == maxed)
+        return;
+
+    mHasAppliedExpandedUi = true;
+    mAppliedExpandedUiState = maxed;
+
     if (mOuter) mOuter->setContentsMargins(maxed ? 0 : 8, maxed ? 0 : 8,
         maxed ? 0 : 8, maxed ? 0 : 8);
 

@@ -111,6 +111,8 @@ private:
     CornerGrip* mCornerGrip{ nullptr };
 
     bool mLoading = false;
+    bool mHasAppliedExpandedUi{ false };
+    bool mAppliedExpandedUiState{ false };
     QWidget* mUiToDisable{ nullptr };
 };
 
