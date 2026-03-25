@@ -26,6 +26,17 @@
 
 namespace StorageUtils = MainWindowStorageUtils;
 
+namespace
+{
+    bool isCloseToRect(const QRect& current, const QRect& target, int tolerance)
+    {
+        return std::abs(current.left() - target.left()) <= tolerance
+            && std::abs(current.top() - target.top()) <= tolerance
+            && std::abs(current.right() - target.right()) <= tolerance
+            && std::abs(current.bottom() - target.bottom()) <= tolerance;
+    }
+}
+
 MainWindow::MainWindow(QWidget* parent,
     const QString& path,
     ExplorerDialog::SelectionKind kind)
@@ -1099,15 +1110,15 @@ bool MainWindow::isWindowExpanded() const
         return false;
 
     const QRect available = screen->availableGeometry();
-    const QRect current = frameGeometry();
+    const QRect full = screen->geometry();
+    const QRect current = geometry();
 
-    // Для frameless-окна snap/expand иногда не ставит WindowMaximized,
-    // поэтому считаем «развёрнутым» окно, которое фактически заняло рабочую область экрана.
-    constexpr int kTolerance = 1;
-    return std::abs(current.left() - available.left()) <= kTolerance
-        && std::abs(current.top() - available.top()) <= kTolerance
-        && std::abs(current.right() - available.right()) <= kTolerance
-        && std::abs(current.bottom() - available.bottom()) <= kTolerance;
+    // Для frameless-окна snap/expand иногда не ставит WindowMaximized.
+    // На системах без explorer.exe рабочая область может совпадать со всем экраном
+    // или меняться нестабильно, поэтому считаем оба варианта.
+    constexpr int kTolerance = 8;
+    return isCloseToRect(current, available, kTolerance)
+        || isCloseToRect(current, full, kTolerance);
 }
 
 void MainWindow::applyMaximizedUi(bool maxed)

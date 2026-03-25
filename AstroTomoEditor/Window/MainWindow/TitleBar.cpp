@@ -9,6 +9,14 @@
 
 namespace
 {
+    bool isCloseToRect(const QRect& current, const QRect& target, int tolerance)
+    {
+        return std::abs(current.left() - target.left()) <= tolerance
+            && std::abs(current.top() - target.top()) <= tolerance
+            && std::abs(current.right() - target.right()) <= tolerance
+            && std::abs(current.bottom() - target.bottom()) <= tolerance;
+    }
+
     bool isWindowExpandedState(const QWidget* w)
     {
         if (!w)
@@ -27,13 +35,15 @@ namespace
             return false;
 
         const QRect available = screen->availableGeometry();
-        const QRect current = w->frameGeometry();
+        const QRect full = screen->geometry();
+        const QRect current = w->geometry();
 
-        constexpr int kTolerance = 2;
-        return std::abs(current.left() - available.left()) <= kTolerance
-            && std::abs(current.top() - available.top()) <= kTolerance
-            && std::abs(current.right() - available.right()) <= kTolerance
-            && std::abs(current.bottom() - available.bottom()) <= kTolerance;
+        // На некоторых shell-конфигурациях (в т.ч. без explorer.exe)
+        // max-состояние у frameless-окна не всегда отражается флагами,
+        // а геометрия может совпадать либо с available, либо со всем экраном.
+        constexpr int kTolerance = 8;
+        return isCloseToRect(current, available, kTolerance)
+            || isCloseToRect(current, full, kTolerance);
     }
 }
 
