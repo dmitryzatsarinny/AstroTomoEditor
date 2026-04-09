@@ -78,7 +78,7 @@ private:
     void showInfo(const QString& text);
     void positionCornerGrip();
     void retranslateUi(bool loading);
-    bool isWindowExpanded() const;
+    bool isWindowExpanded(MyWindowState ws) const;
     bool copySelectedDicomSeries(const QString& targetRoot, const QVector<SeriesExportEntry>& selected, bool replaceExistingCt = false);
     QString hdBasePath() const;
 

@@ -7,6 +7,12 @@
 #include <QToolButton>
 #include "DialogShell.h"
 
+enum MyWindowState
+{
+    WindowNoState,
+    WindowMaximized
+};
+
 class TitleBar : public QWidget {
     Q_OBJECT
 public:
@@ -24,6 +30,7 @@ public:
     bool is3DVisible() { return mBtn3D->isVisible(); }
     void retranslateUi();
     void setTitle(const QString& title);
+    MyWindowState getwindowstate() { return mWindowsState; }
 
 signals:
     void patientClicked();
@@ -49,7 +56,9 @@ private:
     void updateOverlayGeometry();
     void buildnondefaulttitlebar(const QString titlename, const int typeofwindow);
     void initDragFilters();
-    
+    void toggleExpandedManually();
+    void expandWindowManually();
+    void restoreWindowManually();
 
     PatientInfo mInfo;
     QWidget* mLeft = nullptr;
@@ -66,9 +75,12 @@ private:
     QToolButton* mPatientBtn = nullptr;
     QToolButton* mBtnSettings = nullptr;
     QButtonGroup* mViewGroup = nullptr;
+    MyWindowState mWindowsState = MyWindowState::WindowNoState;
 
     bool          mDragging = false;
     QPoint        mDragPos;
+    QRect         mRestoreGeometry;
+    bool          mHasRestoreGeometry = false;
 };
 
 #endif

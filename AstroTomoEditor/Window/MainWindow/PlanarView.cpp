@@ -906,13 +906,12 @@ static inline uchar wl8(double v, double min, double max, Mode TypeOfRecord, boo
     double window = std::max(1.0, max - min);
 
 
-
     if (TypeOfRecord == CT)
     {
         if (v > max + window / 20)
             v = max + window / 20;
-        else if (v > max - window / 10)
-            v = max - window / 10;
+        else if (v > max - window / 15)
+            v = max - window / 15;
     }
 
     // проекция значения в шкалу [HistMin..HistMax]
@@ -1001,6 +1000,7 @@ void PlanarView::buildCache(vtkImageData* volume,
         const int xyStep = 3;
 
         QVector<uint32_t> hist(HistScale, 0u);
+        QVector<uint32_t> hist2000(2000, 0u);
 
         const float minPhys = float(Dicom.physicalMin);
         const float maxPhys = float(Dicom.physicalMax);
@@ -1049,6 +1049,10 @@ void PlanarView::buildCache(vtkImageData* volume,
                     if (bin < HistMin + 1) bin = HistMin;
                     else if (bin > HistMax) bin = HistMax;
 
+                    int vHU2000 = (int)vHU;
+                    if (vHU2000 < 2000)
+                    hist2000[vHU2000]++;
+
                     hist[bin] += 1u;
                 }
             }
@@ -1056,6 +1060,8 @@ void PlanarView::buildCache(vtkImageData* volume,
 
         hist[0] = 0;
 
+        /*for (int i = 0; i < 2000; i++)
+            qDebug() << i << "  " << hist2000[i];*/
 
         int peakHU = 0;
         if (detectFirstPeakAfter(hist, HistScale / 4, peakHU))
@@ -1076,11 +1082,11 @@ void PlanarView::buildCache(vtkImageData* volume,
     flipY = true;
     flipX = false;
 
-    qDebug() << "Dicom.TypeOfRecord = " << Dicom.TypeOfRecord;
+    /*qDebug() << "Dicom.TypeOfRecord = " << Dicom.TypeOfRecord;
     qDebug() << "Dicom.physicalMin = " << Dicom.physicalMin;
     qDebug() << "Dicom.physicalMax = " << Dicom.physicalMax;
     qDebug() << "Dicom.slope = " << Dicom.slope;
-    qDebug() << "Dicom.intercept = " << Dicom.intercept;
+    qDebug() << "Dicom.intercept = " << Dicom.intercept;*/
 
     // --- 3) Основной кеш: QImage без mirrored(), флипы через индексы ---
     // --- 3) Основной кеш: максимально быстро, флипы только через индексы dst/z ---
@@ -1116,6 +1122,8 @@ void PlanarView::buildCache(vtkImageData* volume,
             const double slope = Dicom.slope;
             const double inter = Dicom.intercept;
 
+           
+
             for (int yy = 0; yy < h; ++yy)
             {
                 // читаем src-строку линейно
@@ -1146,7 +1154,7 @@ void PlanarView::buildCache(vtkImageData* volume,
                         dst[w - 1 - xx] = wl8(vHU, Dicom.physicalMin, Dicom.physicalMax, Dicom.TypeOfRecord, invertMono1);
                     }
                 }
-            }
+            }       
         }
 
         mSlices.push_back(std::move(q));

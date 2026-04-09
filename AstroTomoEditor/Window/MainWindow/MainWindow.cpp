@@ -375,7 +375,7 @@ void MainWindow::retranslateUi(bool loading)
 
 void MainWindow::showEvent(QShowEvent* e) {
     QMainWindow::showEvent(e);
-    applyMaximizedUi(isWindowExpanded());
+    applyMaximizedUi(isWindowExpanded(mTitle->getwindowstate()));
     positionCornerGrip();      // на случай показа после построения
 }
 
@@ -1057,19 +1057,19 @@ void MainWindow::changeEvent(QEvent* e)
 
     if (e->type() == QEvent::WindowStateChange)
     {
-        applyMaximizedUi(isWindowExpanded());
+        applyMaximizedUi(isWindowExpanded(mTitle->getwindowstate()));
         positionCornerGrip();
-        QTimer::singleShot(0, this, [this] {
+       /* QTimer::singleShot(0, this, [this] {
             applyMaximizedUi(isWindowExpanded());
             positionCornerGrip();
-            });
+            });*/
     }
 }
 
 void MainWindow::resizeEvent(QResizeEvent* e)
 {
     QMainWindow::resizeEvent(e);
-    applyMaximizedUi(isWindowExpanded());
+    applyMaximizedUi(isWindowExpanded(mTitle->getwindowstate()));
     positionCornerGrip();
 }
 
@@ -1095,30 +1095,11 @@ void MainWindow::positionCornerGrip()
     mCornerGrip->move(x, y);
 }
 
-bool MainWindow::isWindowExpanded() const
+bool MainWindow::isWindowExpanded(MyWindowState ws) const
 {
-    const auto st = windowState();
-    if (st.testFlag(Qt::WindowMaximized) || st.testFlag(Qt::WindowFullScreen))
+    if (ws == WindowMaximized)
         return true;
-
-    const QScreen* screen = nullptr;
-    if (windowHandle())
-        screen = windowHandle()->screen();
-    if (!screen)
-        screen = QApplication::primaryScreen();
-    if (!screen)
-        return false;
-
-    const QRect available = screen->availableGeometry();
-    const QRect full = screen->geometry();
-    const QRect current = geometry();
-
-    // Для frameless-окна snap/expand иногда не ставит WindowMaximized.
-    // На системах без explorer.exe рабочая область может совпадать со всем экраном
-    // или меняться нестабильно, поэтому считаем оба варианта.
-    constexpr int kTolerance = 8;
-    return isCloseToRect(current, available, kTolerance)
-        || isCloseToRect(current, full, kTolerance);
+    return false;
 }
 
 void MainWindow::applyMaximizedUi(bool maxed)

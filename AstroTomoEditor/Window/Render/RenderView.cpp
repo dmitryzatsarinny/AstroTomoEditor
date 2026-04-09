@@ -1221,6 +1221,12 @@ void RenderView::onTemplateSetVisible(TemplateId id, bool on)
 {
     if (!mTemplateDlg) return;
 
+    if (mBtnSTL && mBtnSTL->isChecked())
+    {
+        mBtnSTL->setChecked(false);
+        onBuildStl();
+    }
+
     mLastTemplateForStl = id;
     if (on)
         mLastEnabledTemplateForStl = id;

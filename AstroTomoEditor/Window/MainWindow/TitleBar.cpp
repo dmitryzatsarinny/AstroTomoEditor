@@ -17,33 +17,30 @@ namespace
             && std::abs(current.bottom() - target.bottom()) <= tolerance;
     }
 
-    bool isWindowExpandedState(const QWidget* w)
+    bool isWindowExpandedState(MyWindowState WindowState)
+    {
+        if (WindowState == WindowMaximized)
+            return true;
+        return false;
+    }
+
+    QRect targetExpandedGeometry(const QWidget* w)
     {
         if (!w)
-            return false;
-
-        const auto st = w->windowState();
-        if (st.testFlag(Qt::WindowMaximized) || st.testFlag(Qt::WindowFullScreen))
-            return true;
+            return QRect();
 
         const QScreen* screen = nullptr;
         if (w->windowHandle())
             screen = w->windowHandle()->screen();
         if (!screen)
+            screen = QApplication::screenAt(w->frameGeometry().center());
+        if (!screen)
             screen = QApplication::primaryScreen();
         if (!screen)
-            return false;
+            return QRect();
 
         const QRect available = screen->availableGeometry();
-        const QRect full = screen->geometry();
-        const QRect current = w->geometry();
-
-        // На некоторых shell-конфигурациях (в т.ч. без explorer.exe)
-        // max-состояние у frameless-окна не всегда отражается флагами,
-        // а геометрия может совпадать либо с available, либо со всем экраном.
-        constexpr int kTolerance = 8;
-        return isCloseToRect(current, available, kTolerance)
-            || isCloseToRect(current, full, kTolerance);
+        return available.isValid() ? available : screen->geometry();
     }
 }
 
@@ -248,7 +245,7 @@ TitleBar::TitleBar(QWidget* parent, const int typeofwindow, const QString titlen
     connect(mBtnSettings, &QToolButton::clicked, this, &TitleBar::settingsClicked);
     connect(mBtnMax, &QToolButton::clicked, this, [this] {
         if (!window()) return;
-        isWindowExpandedState(window()) ? window()->showNormal() : window()->showMaximized();
+        toggleExpandedManually();
         updateMaximizeIcon();
         });
     connect(mBtnClose, &QToolButton::clicked, this, [this] {
@@ -429,7 +426,7 @@ bool TitleBar::eventFilter(QObject* obj, QEvent* ev)
 
         switch (ev->type()) {
         case QEvent::MouseButtonPress:
-            if (me->button() == Qt::LeftButton && !window()->isMaximized()) {
+            if (me->button() == Qt::LeftButton && !isWindowExpandedState(mWindowsState)) {
                 mDragging = true;
                 mDragPos = me->globalPos() - window()->frameGeometry().topLeft();
                 return true;    // событие «съели»
@@ -437,7 +434,7 @@ bool TitleBar::eventFilter(QObject* obj, QEvent* ev)
             break;
 
         case QEvent::MouseMove:
-            if (mDragging && (me->buttons() & Qt::LeftButton) && !window()->isMaximized()) {
+            if (mDragging && (me->buttons() & Qt::LeftButton) && !isWindowExpandedState(mWindowsState)) {
                 window()->move(me->globalPos() - mDragPos);
                 return true;
             }
@@ -539,7 +536,7 @@ void TitleBar::mousePressEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton &&
         !isOverNonDraggableChild(e->pos()) &&
-        !isWindowExpandedState(window()))
+        !isWindowExpandedState(mWindowsState))
     {
         mDragging = true;
         mDragPos = e->globalPos() - window()->frameGeometry().topLeft();
@@ -549,7 +546,7 @@ void TitleBar::mousePressEvent(QMouseEvent* e)
 
 void TitleBar::mouseMoveEvent(QMouseEvent* e)
 {
-    if (mDragging && (e->buttons() & Qt::LeftButton) && !isWindowExpandedState(window())) {
+    if (mDragging && (e->buttons() & Qt::LeftButton) && !isWindowExpandedState(mWindowsState)) {
         window()->move(e->globalPos() - mDragPos);
     }
     QWidget::mouseMoveEvent(e);
@@ -559,7 +556,7 @@ void TitleBar::mouseDoubleClickEvent(QMouseEvent* e)
 {
     if (e->button() == Qt::LeftButton && !isOverNonDraggableChild(e->pos()) && mBtnMax) {
         // двойной клик по заголовку — как в системе: переключить max/normal
-        isWindowExpandedState(window()) ? window()->showNormal() : window()->showMaximized();
+        toggleExpandedManually();
         updateMaximizeIcon();
     }
     QWidget::mouseDoubleClickEvent(e);
@@ -576,11 +573,61 @@ void TitleBar::updateMaximizeIcon() {
     if (!mBtnMax) return;
     auto* w = window();
     if (!w || !style()) return;
-    const bool maxed = isWindowExpandedState(w);
+    const bool maxed = isWindowExpandedState(mWindowsState);
     mBtnMax->setIcon(maxed ? QIcon(":/icons/Resources/fullscreen-exit.svg") : QIcon(":/icons/Resources/fullscreen.svg"));
     mBtnMax->setToolTip(maxed ? tr("Restore") : tr("Maximize"));
 }
 
+void TitleBar::toggleExpandedManually()
+{
+    auto* w = window();
+    if (!w)
+        return;
+
+    if (isWindowExpandedState(mWindowsState))
+        restoreWindowManually();
+    else
+        expandWindowManually();
+}
+
+void TitleBar::expandWindowManually()
+{
+    auto* w = window();
+    if (!w)
+        return;
+
+    if (!isWindowExpandedState(mWindowsState)) {
+        mRestoreGeometry = w->geometry();
+        mHasRestoreGeometry = mRestoreGeometry.isValid();
+    }
+
+    mWindowsState = MyWindowState::WindowMaximized;
+
+    QRect target = targetExpandedGeometry(w);
+    target.setLeft(target.left());
+    target.setRight(target.right());
+    target.setTop(target.top());
+    target.setBottom(target.bottom() - 1);
+    if (target.isValid())
+        w->setGeometry(target);
+}
+
+void TitleBar::restoreWindowManually()
+{
+    auto* w = window();
+    if (!w)
+        return;
+
+    mWindowsState = MyWindowState::WindowNoState;
+
+    if (mHasRestoreGeometry && mRestoreGeometry.isValid()) {
+        w->setGeometry(mRestoreGeometry);
+        return;
+    }
+
+    const QSize fallback = w->minimumSize().expandedTo(QSize(1069, 640));
+    w->resize(fallback);  
+}
 
 void TitleBar::changeEvent(QEvent* e)
 {
@@ -605,5 +652,5 @@ void TitleBar::retranslateUi()
 
     if (mBtnSettings) mBtnSettings->setToolTip(tr("Settings"));
     if (mBtnClose)    mBtnClose->setToolTip(tr("Close"));
-    if (mBtnMax)      mBtnMax->setToolTip(isWindowExpandedState(window()) ? tr("Restore") : tr("Maximize"));
+    if (mBtnMax)      mBtnMax->setToolTip(isWindowExpandedState(mWindowsState) ? tr("Restore") : tr("Maximize"));
 }
