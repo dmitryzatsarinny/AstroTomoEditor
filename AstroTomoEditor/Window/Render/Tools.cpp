@@ -15,12 +15,15 @@ class vtkImageData;
 namespace Tools 
 {
 
-    QMenu* CreateMenu(QWidget* parent, std::function<void(Action)> onAction)
+    QMenu* CreateMenu(QWidget* parent, std::function<void(Action)> onAction, const MenuOptions& options)
     {
         auto* menu = new QMenu(parent);
 
         QObject::connect(menu->addAction(QObject::tr("Scissors")), &QAction::triggered, [onAction] { onAction(Action::Scissors); });
         QObject::connect(menu->addAction(QObject::tr("Inverse scissors")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors); });
+        if (options.scissorsOnly)
+            return menu;
+
         menu->addSeparator();
         QObject::connect(menu->addAction(QObject::tr("Remove unconnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveUnconnected); });
         QObject::connect(menu->addAction(QObject::tr("Remove selected")), &QAction::triggered, [onAction] { onAction(Action::RemoveSelected); });

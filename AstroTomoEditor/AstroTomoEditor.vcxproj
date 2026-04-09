@@ -52,6 +52,7 @@
     <ClCompile Include="Window\Render\ElectrodeSurfaceDetector.cpp" />
     <ClCompile Include="Window\Render\FaceOnlyBoxRepresentation.cpp" />
     <ClCompile Include="Window\Render\FaceOnlyBoxWidget.cpp" />
+    <ClCompile Include="Window\Render\StlModeController.cpp" />
     <ClCompile Include="Window\Render\TemplateDialog.cpp" />
     <ClCompile Include="Window\Render\WheelSpinButton.cpp" />
     <ClCompile Include="Window\ServiceWindow\CustomMessageBox.cpp" />
@@ -107,6 +108,7 @@
     <ClInclude Include="Window\Render\FaceOnlyBoxWidget.h" />
     <ClInclude Include="Window\Render\HoverDelegate.h" />
     <QtMoc Include="Window\Render\TemplateDialog.h" />
+    <ClInclude Include="Window\Render\StlModeController.h" />
     <ClInclude Include="Window\Render\Tools.h" />
     <QtMoc Include="Window\Render\ToolsScissors.h" />
     <QtMoc Include="Window\Render\ToolsRemoveConnected.h" />

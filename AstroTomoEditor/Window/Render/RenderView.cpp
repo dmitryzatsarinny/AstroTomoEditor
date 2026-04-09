@@ -121,6 +121,8 @@ static void applyMenuStyle(QMenu* m, int width = 180)
 
 RenderView::RenderView(QWidget* parent) : QWidget(parent)
 {
+    mStlModeController.setHistoryLimit(mHistoryLimit);
+
     auto* lay = new QVBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
 
@@ -1430,11 +1432,18 @@ void RenderView::setMapperInput(vtkImageData* im)
 void RenderView::updateUndoRedoUi()
 {
     if (!mBtnUndo || !mBtnRedo) return;
-    mBtnUndo->setEnabled(!mUndoStack.isEmpty());
-    mBtnRedo->setEnabled(!mRedoStack.isEmpty());
-    mBtnUndo->setIcon(QIcon(!mUndoStack.isEmpty() ? ":/icons/Resources/undo-yes.svg"
+    const bool canUndo = mStlModeController.isActive()
+        ? mStlModeController.canUndoSurface()
+        : !mUndoStack.isEmpty();
+    const bool canRedo = mStlModeController.isActive()
+        ? mStlModeController.canRedoSurface()
+        : !mRedoStack.isEmpty();
+
+    mBtnUndo->setEnabled(canUndo);
+    mBtnRedo->setEnabled(canRedo);
+    mBtnUndo->setIcon(QIcon(canUndo ? ":/icons/Resources/undo-yes.svg"
         : ":/icons/Resources/undo-no.svg"));
-    mBtnRedo->setIcon(QIcon(!mRedoStack.isEmpty() ? ":/icons/Resources/redo-yes.svg"
+    mBtnRedo->setIcon(QIcon(canRedo ? ":/icons/Resources/redo-yes.svg"
         : ":/icons/Resources/redo-no.svg"));
 }
 
@@ -1534,6 +1543,22 @@ void RenderView::commitNewImage(vtkImageData* im)
 
 void RenderView::onUndo()
 {
+    if (mStlModeController.isActive())
+    {
+        if (!mIsoMesh)
+            return;
+
+        auto prevSurface = mStlModeController.undoSurface(mIsoMesh);
+        if (!prevSurface)
+            return;
+
+        mIsoMesh = prevSurface;
+        addStlPreview();
+        updateStlSizeLabel();
+        updateUndoRedoUi();
+        return;
+    }
+
     if (mUndoStack.isEmpty() || !mImage) return;
 
     // текущий в Redo
@@ -1549,6 +1574,22 @@ void RenderView::onUndo()
 
 void RenderView::onRedo()
 {
+    if (mStlModeController.isActive())
+    {
+        if (!mIsoMesh)
+            return;
+
+        auto nextSurface = mStlModeController.redoSurface(mIsoMesh);
+        if (!nextSurface)
+            return;
+
+        mIsoMesh = nextSurface;
+        addStlPreview();
+        updateStlSizeLabel();
+        updateUndoRedoUi();
+        return;
+    }
+
     if (mRedoStack.isEmpty() || !mImage) return;
 
     // текущий в Undo
@@ -1598,6 +1639,11 @@ void RenderView::setAppUiActive(bool on, App a)
 
 bool RenderView::ToolModeChanged(Action a)
 {
+    if (mStlModeController.isActive() &&
+        a != Action::Scissors &&
+        a != Action::InverseScissors)
+        return false;
+
     if (!mVolume) return false;
 
     if (mToolActive) {
@@ -1889,6 +1935,7 @@ void RenderView::onStlSimplify()
     // если это первое нажатие после построения, целимся сразу в 2-4 MB (в 3 MB)
     if (!mSimplifyStarted)
     {
+        mStlModeController.pushSurfaceUndoState(mIsoMesh);
         mIsoMesh = VolumeStlExporter::NormalizeSurface(mIsoMesh);
         mSimplifyTargetMB = kFirstAimMB;
         mSimplifyStarted = true;
@@ -1896,6 +1943,7 @@ void RenderView::onStlSimplify()
     else
     {
         // последующие нажатия: уменьшаем цель плавно
+        mStlModeController.pushSurfaceUndoState(mIsoMesh);
         mSimplifyTargetMB = std::max(kMinMB, mSimplifyTargetMB * kStepFactor);
     }
 
@@ -1916,6 +1964,7 @@ void RenderView::onStlSimplify()
 
     addStlPreview();
     updateStlSizeLabel();
+    updateUndoRedoUi();
 
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -1925,6 +1974,9 @@ void RenderView::onStlSimplify()
 void RenderView::onBuildStl()
 {
     if (!mImage || !mVolume || !mRenderer) {
+        mStlModeController.setActive(false);
+        reloadToolsMenu();
+        updateUndoRedoUi();
         emit showWarning(tr("No volume to build STL"));
         if (mBtnSTL) mBtnSTL->setChecked(false);
         if (mTopOverlay) { mTopOverlay->show(); }
@@ -1933,6 +1985,9 @@ void RenderView::onBuildStl()
 
     if (mBtnSTL->isChecked() == false)
     {
+        mStlModeController.setActive(false);
+        reloadToolsMenu();
+        updateUndoRedoUi();
         mRenderer->RemoveActor(mIsoActor);
         mIsoActor = nullptr;
         mVolume->SetVisibility(true);
@@ -1989,6 +2044,9 @@ void RenderView::onBuildStl()
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) 
     {
+        mStlModeController.setActive(false);
+        reloadToolsMenu();
+        updateUndoRedoUi();
         if (mBtnSTL) mBtnSTL->setChecked(false);
         mBtnSTLSave->setVisible(false);
         mBtnSTLSave->setEnabled(false);
@@ -2001,6 +2059,8 @@ void RenderView::onBuildStl()
         return;
     }
 
+    mStlModeController.setActive(true);
+    mStlModeController.resetSurfaceHistory(mIsoMesh);
     addStlPreview();
     updateStlSizeLabel();
 
@@ -2008,7 +2068,9 @@ void RenderView::onBuildStl()
     mBtnSTLSave->setEnabled(true);
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
-    if (mTopOverlay) { mTopOverlay->hide(); }
+    if (mTopOverlay) { mTopOverlay->show(); }
+    reloadToolsMenu();
+    updateUndoRedoUi();
     emit showInfo(tr("Ready surface"));
     QTimer::singleShot(800, this, [this] {
         emit showInfo(tr("Ready"));
@@ -2649,6 +2711,9 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     // чтобы в сцене не оставались старый меш и его оценка размера.
     clearStlPreview();
     mIsoMesh = nullptr;
+    mStlModeController.setActive(false);
+    mStlModeController.resetSurfaceHistory(nullptr);
+    reloadToolsMenu();
     mSimplifyStarted = false;
     mSimplifyTargetMB = kFirstAimMB;
 
@@ -3013,6 +3078,9 @@ void RenderView::reloadToolsMenu()
     if (mToolsMenu) { delete mToolsMenu; mToolsMenu = nullptr; }
 
     mToolsMenu = Tools::CreateMenu(mTopOverlay, [this](Action a) { ToolModeChanged(a); });
+    Tools::MenuOptions options;
+    options.scissorsOnly = mStlModeController.isActive();
+    mToolsMenu = Tools::CreateMenu(mTopOverlay, [this](Action a) { ToolModeChanged(a); }, options);
     applyMenuStyle(mToolsMenu, mBtnTools->width());
 
     connect(mToolsMenu, &QMenu::aboutToShow, this, [this] {

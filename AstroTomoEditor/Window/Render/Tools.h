@@ -33,9 +33,14 @@ enum class App
 };
 
 namespace Tools {
+    struct MenuOptions
+    {
+        bool scissorsOnly = false;
+    };
 
     QMenu* CreateMenu(QWidget* parent,
-        std::function<void(Action)> onAction);
+        std::function<void(Action)> onAction,
+        const MenuOptions& options = {});
 
     QString ToDisplayName(Action a);
 

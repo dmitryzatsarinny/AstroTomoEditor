@@ -179,6 +179,9 @@
     <ClCompile Include="Window\MainWindow\MainWindowStorageUtils.cpp">
       <Filter>Source Files\Window\MainWindow</Filter>
     </ClCompile>
+    <ClCompile Include="Window\Render\StlModeController.cpp">
+      <Filter>Source Files\Window\Render</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Services\Pool.h">
@@ -249,6 +252,9 @@
     </ClInclude>
     <ClInclude Include="Window\MainWindow\MainWindowStorageUtils.h">
       <Filter>Header Files\Window\MainWindow</Filter>
+    </ClInclude>
+    <ClInclude Include="Window\Render\StlModeController.h">
+      <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

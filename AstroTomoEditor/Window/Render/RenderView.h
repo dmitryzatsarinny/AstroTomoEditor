@@ -21,6 +21,7 @@
 #include <vtkDICOMReader.h>
 #include <Services/DicomRange.h>
 #include <QSpinBox>
+#include "StlModeController.h"
 #include "WheelSpinButton.h"
 #include "U8Span.h"
 #include "TemplateDialog.h"
@@ -192,6 +193,7 @@ private:
     QVector<vtkSmartPointer<vtkImageData>> mUndoStack;
     QVector<vtkSmartPointer<vtkImageData>> mRedoStack;
     int  mHistoryLimit = 128;
+    StlModeController mStlModeController;
     vtkSmartPointer<vtkImageData> cloneImage(vtkImageData* src);
     void commitNewImage(vtkImageData* im);
     void setMapperInput(vtkImageData* im);
