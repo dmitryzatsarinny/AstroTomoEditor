@@ -186,6 +186,8 @@ private:
     bool mToolActive{ false };
     Action mCurrentTool{};
     void setToolUiActive(bool on, Action a);
+    void updateTopPanelForStlMode(bool stlModeOn);
+    bool rebuildStlFromEditedImage(vtkImageData* editedImage);
 
     QToolButton* mBtnUndo{ nullptr };
     QToolButton* mBtnRedo{ nullptr };

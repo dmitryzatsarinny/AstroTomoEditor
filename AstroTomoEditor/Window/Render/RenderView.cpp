@@ -1057,6 +1057,8 @@ void RenderView::setElectrodesUiActive(bool on)
                 ElectrodeSurfaceDetector::instance().clear(mRenderer);
         }
     }
+    if (!on)
+        updateTopPanelForStlMode(mStlModeController.isActive());
 
     repositionOverlay();
 }
@@ -1637,6 +1639,34 @@ void RenderView::setAppUiActive(bool on, App a)
     }
 }
 
+void RenderView::updateTopPanelForStlMode(bool stlModeOn)
+{
+    if (mBtnTF)
+        mBtnTF->setVisible(!stlModeOn);
+    if (mBtnApps)
+        mBtnApps->setVisible(!stlModeOn);
+    if (mBtnShift)
+        mBtnShift->setVisible(!stlModeOn);
+}
+
+bool RenderView::rebuildStlFromEditedImage(vtkImageData* editedImage)
+{
+    if (!editedImage)
+        return false;
+
+    rebuildVisibleMaskFromImage(editedImage);
+    auto nextMesh = VolumeStlExporter::BuildFromBinaryVoxelsNew(mVisibleMask, VisibleExportOptions{});
+    if (!nextMesh || nextMesh->GetNumberOfCells() == 0)
+        return false;
+
+    mStlModeController.pushSurfaceUndoState(mIsoMesh);
+    mIsoMesh = nextMesh;
+    addStlPreview();
+    updateStlSizeLabel();
+    updateUndoRedoUi();
+    return true;
+}
+
 bool RenderView::ToolModeChanged(Action a)
 {
     if (mStlModeController.isActive() &&
@@ -1979,6 +2009,7 @@ void RenderView::onBuildStl()
         updateUndoRedoUi();
         emit showWarning(tr("No volume to build STL"));
         if (mBtnSTL) mBtnSTL->setChecked(false);
+        updateTopPanelForStlMode(false);
         if (mTopOverlay) { mTopOverlay->show(); }
         return;
     }
@@ -1996,6 +2027,8 @@ void RenderView::onBuildStl()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
+
+        updateTopPanelForStlMode(false);
 
         if (mTopOverlay) { mTopOverlay->show(); }
 
@@ -2052,6 +2085,7 @@ void RenderView::onBuildStl()
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
         mBtnSTLSimplify->setEnabled(false);
+        updateTopPanelForStlMode(false);
         if (mTopOverlay) { mTopOverlay->show(); }
         emit showInfo(tr("Ready volume"));
         QApplication::restoreOverrideCursor();
@@ -2068,6 +2102,24 @@ void RenderView::onBuildStl()
     mBtnSTLSave->setEnabled(true);
     mBtnSTLSimplify->setVisible(true);
     mBtnSTLSimplify->setEnabled(true);
+
+    if (mAppActive)
+    {
+        if (mHistDlg) mHistDlg->close();
+        if (mTemplateDlg) mTemplateDlg->close();
+        setAppUiActive(false, mCurrentApp);
+    }
+
+    if (mToolActive &&
+        mCurrentTool != Action::Scissors &&
+        mCurrentTool != Action::InverseScissors)
+    {
+        if (mScissors) mScissors->cancel();
+        if (mRemoveConn) mRemoveConn->cancel();
+        setToolUiActive(false, mCurrentTool);
+    }
+
+    updateTopPanelForStlMode(true);
     if (mTopOverlay) { mTopOverlay->show(); }
     reloadToolsMenu();
     updateUndoRedoUi();
@@ -2713,6 +2765,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     mIsoMesh = nullptr;
     mStlModeController.setActive(false);
     mStlModeController.resetSurfaceHistory(nullptr);
+    updateTopPanelForStlMode(false);
     reloadToolsMenu();
     mSimplifyStarted = false;
     mSimplifyTargetMB = kFirstAimMB;
@@ -2825,8 +2878,20 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         mScissors->setAllowNavigation(true);
         mScissors->setOnImageReplaced([this](vtkImageData* im)
             {
-                commitNewImage(im);
-                mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                if (mStlModeController.isActive())
+                {
+                    const bool rebuilt = rebuildStlFromEditedImage(im);
+                    setMapperInput(mImage);
+                    if (!rebuilt)
+                        emit showWarning(tr("STL scissors failed"));
+                    if (im)
+                        im->Delete();
+                }
+                else
+                {
+                    commitNewImage(im);
+                    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                }
             });
         mScissors->setOnFinished([this]() {
             setToolUiActive(false, mCurrentTool);
