@@ -54,6 +54,7 @@
     <ClCompile Include="Window\Render\FaceOnlyBoxWidget.cpp" />
     <ClCompile Include="Window\Render\StlModeController.cpp" />
     <ClCompile Include="Window\Render\TemplateDialog.cpp" />
+    <ClCompile Include="Window\Render\ToolsContour.cpp" />
     <ClCompile Include="Window\Render\WheelSpinButton.cpp" />
     <ClCompile Include="Window\ServiceWindow\CustomMessageBox.cpp" />
     <ClCompile Include="Window\ServiceWindow\PresetNameDialog.cpp" />
@@ -112,6 +113,7 @@
     <ClInclude Include="Window\Render\Tools.h" />
     <QtMoc Include="Window\Render\ToolsScissors.h" />
     <QtMoc Include="Window\Render\ToolsRemoveConnected.h" />
+    <QtMoc Include="Window\Render\ToolsContour.h" />
     <ClInclude Include="Window\Render\TransferFunction.h" />
     <ClInclude Include="Window\Render\U8Span.h" />
     <ClInclude Include="Window\Render\VolumeStlExporter.h" />

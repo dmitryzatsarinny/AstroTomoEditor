@@ -13,6 +13,7 @@
 #include "VolumeStlExporter.h"
 #include "Tools.h"
 #include "ToolsScissors.h"
+#include "ToolsContour.h"
 #include <vtkRenderer.h>
 #include <vtkVolume.h>
 #include <vtkImageData.h>
@@ -169,6 +170,7 @@ private:
     QMenu* mToolsMenu{ nullptr };
 
     std::unique_ptr<ToolsScissors> mScissors;
+    std::unique_ptr<ToolsContour> mContour;
     std::unique_ptr<ToolsRemoveConnected> mRemoveConn;
 
     void buildOverlay();

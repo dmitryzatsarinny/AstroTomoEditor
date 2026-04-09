@@ -21,8 +21,11 @@ namespace Tools
 
         QObject::connect(menu->addAction(QObject::tr("Scissors")), &QAction::triggered, [onAction] { onAction(Action::Scissors); });
         QObject::connect(menu->addAction(QObject::tr("Inverse scissors")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors); });
-        if (options.scissorsOnly)
+        if (options.scissorsOnly) {
+            menu->addSeparator();
+            QObject::connect(menu->addAction(QObject::tr("Contour")), &QAction::triggered, [onAction] { onAction(Action::Contour); });
             return menu;
+        }
 
         menu->addSeparator();
         QObject::connect(menu->addAction(QObject::tr("Remove unconnected")), &QAction::triggered, [onAction] { onAction(Action::RemoveUnconnected); });
@@ -49,14 +52,15 @@ namespace Tools
     {
         switch (a) 
         {
-        case Action::Scissors:        return QObject::tr("Scissors");
-        case Action::InverseScissors: return QObject::tr("Inverse scissors");
-        case Action::RemoveUnconnected:return QObject::tr("Remove unconnected");
-        case Action::RemoveSelected: return QObject::tr("Remove selected");
-        case Action::RemoveConnected: return QObject::tr("Remove connected");
-        case Action::SmartDeleting: return QObject::tr("Smart deleting");
-        case Action::VoxelEraser: return QObject::tr("Voxel eraser");
-        case Action::VoxelRecovery: return QObject::tr("Voxel recovery");
+        case Action::Scissors:          return QObject::tr("Scissors");
+        case Action::InverseScissors:   return QObject::tr("Inverse scissors");
+        case Action::Contour:           return QObject::tr("Contour");
+        case Action::RemoveUnconnected: return QObject::tr("Remove unconnected");
+        case Action::RemoveSelected:    return QObject::tr("Remove selected");
+        case Action::RemoveConnected:   return QObject::tr("Remove connected");
+        case Action::SmartDeleting:     return QObject::tr("Smart deleting");
+        case Action::VoxelEraser:       return QObject::tr("Voxel eraser");
+        case Action::VoxelRecovery:     return QObject::tr("Voxel recovery");
         }
         return QObject::tr("Edit");
     }

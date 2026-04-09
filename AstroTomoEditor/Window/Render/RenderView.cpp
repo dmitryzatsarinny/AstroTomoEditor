@@ -177,10 +177,13 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
 
 RenderView::~RenderView() {
     if (mScissors) { mScissors->setOnFinished(nullptr); }
+    if (mContour) { mContour->setOnFinished(nullptr); }
     if (mRemoveConn) { mRemoveConn->setOnFinished(nullptr); }
     if (mScissors)    mScissors->cancel();
+    if (mContour)     mContour->cancel();
     if (mRemoveConn)  mRemoveConn->cancel();
     mScissors.reset();
+    mContour.reset();
     mRemoveConn.reset();
     clearStlPreview();
 }
@@ -1029,6 +1032,7 @@ void RenderView::setElectrodesUiActive(bool on)
     if (on) {
         if (mToolActive) {
             if (mScissors)   mScissors->cancel();
+            if (mContour)    mContour->cancel();
             if (mRemoveConn) mRemoveConn->cancel();
             setToolUiActive(false, mCurrentTool);
         }
@@ -1671,13 +1675,15 @@ bool RenderView::ToolModeChanged(Action a)
 {
     if (mStlModeController.isActive() &&
         a != Action::Scissors &&
-        a != Action::InverseScissors)
+        a != Action::InverseScissors &&
+        a != Action::Contour)
         return false;
 
     if (!mVolume) return false;
 
     if (mToolActive) {
         if (mScissors)    mScissors->cancel();
+        if (mContour)     mContour->cancel();
         if (mRemoveConn)  mRemoveConn->cancel();
         setToolUiActive(false, mCurrentTool);
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -1688,6 +1694,16 @@ bool RenderView::ToolModeChanged(Action a)
         setToolUiActive(true, a);
         mScissors->attach(mVtk, mRenderer, mImage, mVolume);
         mScissors->handle(a);
+        return true;
+    }
+    else if (mContour && a == Action::Contour)
+    {
+        if (!mStlModeController.isActive() || !mIsoMesh || !mIsoActor)
+            return false;
+
+        setToolUiActive(true, a);
+        mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        mContour->handle(a);
         return true;
     }
     else if (mRemoveConn && (
@@ -2115,6 +2131,7 @@ void RenderView::onBuildStl()
         mCurrentTool != Action::InverseScissors)
     {
         if (mScissors) mScissors->cancel();
+        if (mContour)  mContour->cancel();
         if (mRemoveConn) mRemoveConn->cancel();
         setToolUiActive(false, mCurrentTool);
     }
@@ -2467,6 +2484,7 @@ void RenderView::repositionOverlay()
     const int pad = 8;
 
     if (mScissors) mScissors->onViewResized();
+    if (mContour)  mContour->onViewResized();
     if (mRemoveConn) mRemoveConn->onViewResized();
 
     if (mRightOverlay) {
@@ -2898,6 +2916,29 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
             });
     }
     mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+    if (!mContour)
+    {
+        mContour = std::make_unique<ToolsContour>(this);
+        mContour->setOnSurfaceReplaced([this](vtkPolyData* poly)
+            {
+                if (!poly || poly->GetNumberOfCells() == 0)
+                {
+                    emit showWarning(tr("Contour cut failed"));
+                    return;
+                }
+
+                mStlModeController.pushSurfaceUndoState(mIsoMesh);
+                mIsoMesh = poly;
+                addStlPreview();
+                updateStlSizeLabel();
+                updateUndoRedoUi();
+                mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
+            });
+        mContour->setOnFinished([this]() {
+            setToolUiActive(false, mCurrentTool);
+            });
+    }
+    mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
 
     if (!mRemoveConn) 
     {
@@ -3151,6 +3192,7 @@ void RenderView::reloadToolsMenu()
     connect(mToolsMenu, &QMenu::aboutToShow, this, [this] {
         if (!mToolActive) return;
         if (mScissors)   mScissors->cancel();
+        if (mContour)    mContour->cancel();
         if (mRemoveConn) mRemoveConn->cancel();
         setToolUiActive(false, mCurrentTool);
         });

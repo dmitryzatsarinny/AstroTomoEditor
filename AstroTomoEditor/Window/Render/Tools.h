@@ -10,6 +10,7 @@ enum class Action
 {
     Scissors,
     InverseScissors,
+    Contour,
     RemoveUnconnected,
     RemoveConnected,
     SmartDeleting,
