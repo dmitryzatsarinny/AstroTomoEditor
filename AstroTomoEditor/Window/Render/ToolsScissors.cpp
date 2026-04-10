@@ -5,7 +5,6 @@
 #include <QMouseEvent>
 #include <QKeyEvent>
 
-// VTK
 #include <vtkRenderer.h>
 #include <vtkCamera.h>
 #include <vtkImageData.h>
@@ -25,7 +24,6 @@
 #include <vtkClipPolyData.h>
 #include <vtkCleanPolyData.h>
 #include <vtkTriangleFilter.h>
-#include <vtkPoints.h>
 #include <vtkPointData.h>
 #include <vtkCellPicker.h>
 #include <QDebug>
@@ -35,8 +33,14 @@
 #include <cmath>
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTransform.h>
-#include <vtkTriangleFilter.h>
-#include <vtkCleanPolyData.h>
+#include <vtkFeatureEdges.h>
+#include <vtkStripper.h>
+#include <vtkContourTriangulator.h>
+#include <vtkAppendPolyData.h>
+#include <vtkPolyDataNormals.h>
+#include <vtkIdList.h>
+#include <vtkCellArray.h>
+#include <vtkPolygon.h>
 
 #include <QApplication>
 #include <QWheelEvent>
@@ -763,6 +767,142 @@ static vtkSmartPointer<vtkPolyData> BuildScreenFrustumWorld(
 #include <vtkClipPolyData.h>
 #include <vtkPolyDataConnectivityFilter.h>
 
+static vtkSmartPointer<vtkPolyData> CapCutHoles(vtkPolyData* input)
+{
+    if (!input || input->GetNumberOfCells() == 0)
+        return nullptr;
+
+    // 1. Ищем только открытые граничные рёбра
+    vtkNew<vtkFeatureEdges> boundaryEdges;
+    boundaryEdges->SetInputData(input);
+    boundaryEdges->BoundaryEdgesOn();
+    boundaryEdges->FeatureEdgesOff();
+    boundaryEdges->ManifoldEdgesOff();
+    boundaryEdges->NonManifoldEdgesOff();
+    boundaryEdges->Update();
+
+    vtkPolyData* edges = boundaryEdges->GetOutput();
+    if (!edges || edges->GetNumberOfCells() == 0)
+    {
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(input);
+        return out;
+    }
+
+    // 2. Собираем линии в полилинии/лупы
+    vtkNew<vtkStripper> stripper;
+    stripper->SetInputData(edges);
+    stripper->JoinContiguousSegmentsOn();
+    stripper->Update();
+
+    vtkPolyData* loops = stripper->GetOutput();
+    if (!loops || loops->GetNumberOfCells() == 0)
+    {
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(input);
+        return out;
+    }
+
+    // 3. Превращаем каждую полилинию в polygon contour
+    vtkNew<vtkPolyData> contourPoly;
+    vtkNew<vtkPoints> contourPoints;
+    vtkNew<vtkCellArray> contourPolys;
+
+    vtkIdType globalPtOffset = 0;
+
+    vtkCellArray* lines = loops->GetLines();
+    lines->InitTraversal();
+
+    vtkNew<vtkIdList> ids;
+    while (lines->GetNextCell(ids))
+    {
+        if (!ids || ids->GetNumberOfIds() < 3)
+            continue;
+
+        // Проверим, что это действительно замкнутый контур
+        double p0[3], pN[3];
+        loops->GetPoint(ids->GetId(0), p0);
+        loops->GetPoint(ids->GetId(ids->GetNumberOfIds() - 1), pN);
+
+        const double dx = p0[0] - pN[0];
+        const double dy = p0[1] - pN[1];
+        const double dz = p0[2] - pN[2];
+        const double dist2 = dx * dx + dy * dy + dz * dz;
+
+        const bool closed = dist2 < 1e-10;
+
+        vtkNew<vtkPolygon> poly;
+
+        // если луп уже замкнут последней точкой == первой, дубликат не нужен
+        const vtkIdType count = closed ? (ids->GetNumberOfIds() - 1) : ids->GetNumberOfIds();
+        if (count < 3)
+            continue;
+
+        poly->GetPointIds()->SetNumberOfIds(count);
+
+        for (vtkIdType i = 0; i < count; ++i)
+        {
+            double p[3];
+            loops->GetPoint(ids->GetId(i), p);
+            contourPoints->InsertNextPoint(p);
+            poly->GetPointIds()->SetId(i, globalPtOffset++);
+        }
+
+        contourPolys->InsertNextCell(poly);
+    }
+
+    contourPoly->SetPoints(contourPoints);
+    contourPoly->SetPolys(contourPolys);
+
+    if (contourPoly->GetNumberOfCells() == 0)
+    {
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(input);
+        return out;
+    }
+
+    // 4. Триангулируем контуры
+    vtkNew<vtkContourTriangulator> triangulator;
+    triangulator->SetInputData(contourPoly);
+    triangulator->Update();
+
+    vtkPolyData* cap = triangulator->GetOutput();
+    if (!cap || cap->GetNumberOfCells() == 0)
+    {
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(input);
+        return out;
+    }
+
+    // 5. Пришиваем cap к основной сетке
+    vtkNew<vtkAppendPolyData> append;
+    append->AddInputData(input);
+    append->AddInputData(cap);
+    append->Update();
+
+    vtkNew<vtkCleanPolyData> clean;
+    clean->SetInputConnection(append->GetOutputPort());
+    clean->Update();
+
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputConnection(clean->GetOutputPort());
+    tri->Update();
+
+    // 6. Пересчитываем нормали, чтобы cap смотрел наружу согласованно
+    vtkNew<vtkPolyDataNormals> normals;
+    normals->SetInputConnection(tri->GetOutputPort());
+    normals->ConsistencyOn();
+    normals->SplittingOff();
+    normals->AutoOrientNormalsOn();
+    normals->ComputePointNormalsOn();
+    normals->ComputeCellNormalsOn();
+    normals->Update();
+
+    auto out = vtkSmartPointer<vtkPolyData>::New();
+    out->DeepCopy(normals->GetOutput());
+    return out;
+}
+
 vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool cutInside)
 {
     if (!m_renderer || !m_vtk || !mSurfaceMesh)
@@ -793,11 +933,7 @@ vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool c
     vtkNew<vtkClipPolyData> clip;
     clip->SetInputConnection(inputTri->GetOutputPort());
     clip->SetClipFunction(implicitFrustum);
-
-    // Очень важно: получить ОБЕ части
     clip->GenerateClippedOutputOn();
-
-    // Знак тут больше не принципиален, потому что ниже мы сами выберем нужную часть.
     clip->SetInsideOut(false);
     clip->Update();
 
@@ -817,12 +953,12 @@ vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool c
 
     if (cutInside)
     {
-        // Обычные ножницы: удаляем меньший выделенный кусок, оставляем большую часть
+        // обычные ножницы: оставляем большую часть
         chosen = (cellsA >= cellsB) ? partA : partB;
     }
     else
     {
-        // Inverse scissors: оставляем только выделенный кусок, обычно он меньше
+        // inverse scissors: оставляем меньшую часть
         if (cellsA == 0) chosen = partB;
         else if (cellsB == 0) chosen = partA;
         else chosen = (cellsA <= cellsB) ? partA : partB;
@@ -839,12 +975,15 @@ vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool c
     tri->SetInputConnection(clean->GetOutputPort());
     tri->Update();
 
-    qDebug() << "applySurfaceCut: final cells =" << tri->GetOutput()->GetNumberOfCells();
+    qDebug() << "applySurfaceCut: before cap cells =" << tri->GetOutput()->GetNumberOfCells();
 
-    if (!tri->GetOutput() || tri->GetOutput()->GetNumberOfCells() == 0)
+    auto capped = CapCutHoles(tri->GetOutput());
+    if (!capped || capped->GetNumberOfCells() == 0)
         return nullptr;
 
+    qDebug() << "applySurfaceCut: after cap cells =" << capped->GetNumberOfCells();
+
     vtkPolyData* out = vtkPolyData::New();
-    out->DeepCopy(tri->GetOutput());
+    out->DeepCopy(capped);
     return out;
 }

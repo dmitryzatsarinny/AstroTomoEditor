@@ -14,16 +14,14 @@ void StlModeController::setActive(bool active)
 
 void StlModeController::resetSurfaceHistory(vtkPolyData* currentSurface)
 {
+    (void)currentSurface;
     mSurfaceUndoStack.clear();
     mSurfaceRedoStack.clear();
-
-    if (currentSurface)
-        mSurfaceUndoStack.push_back(cloneSurface(currentSurface));
 }
 
 bool StlModeController::canUndoSurface() const
 {
-    return mSurfaceUndoStack.size() > 1;
+    return !mSurfaceUndoStack.isEmpty();
 }
 
 bool StlModeController::canRedoSurface() const
@@ -52,8 +50,7 @@ vtkSmartPointer<vtkPolyData> StlModeController::undoSurface(vtkPolyData* current
     while (mSurfaceRedoStack.size() > mHistoryLimit)
         mSurfaceRedoStack.pop_front();
 
-    mSurfaceUndoStack.pop_back();
-    return cloneSurface(mSurfaceUndoStack.back());
+    return mSurfaceUndoStack.takeLast();
 }
 
 vtkSmartPointer<vtkPolyData> StlModeController::redoSurface(vtkPolyData* currentSurface)
