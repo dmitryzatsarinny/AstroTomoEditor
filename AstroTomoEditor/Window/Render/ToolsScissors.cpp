@@ -21,6 +21,16 @@
 #include <vtkSmartPointer.h>
 #include <vtkRenderWindow.h>
 #include <QPainterPath.h>
+#include <vtkSelectPolyData.h>
+#include <vtkClipPolyData.h>
+#include <vtkCleanPolyData.h>
+#include <vtkTriangleFilter.h>
+#include <vtkPoints.h>
+#include <vtkPointData.h>
+#include <vtkCellPicker.h>
+#include <QDebug>
+#include <vtkOBBTree.h>
+#include <vtkIdList.h>
 
 #include <cmath>
 #include <vtkTransformPolyDataFilter.h>
@@ -55,6 +65,28 @@ void ToolsScissors::attach(QVTKOpenGLNativeWidget* vtk,
     m_renderer = renderer;
     m_image = image;
     m_volume = volume;
+
+    mSurfaceMesh = nullptr;
+    mSurfaceActor = nullptr;
+    mSurfaceMode = false;
+
+    onViewResized();
+}
+
+void ToolsScissors::attachSurface(QVTKOpenGLNativeWidget* vtk,
+    vtkRenderer* renderer,
+    vtkPolyData* mesh,
+    vtkActor* actor)
+{
+    m_vtk = vtk;
+    m_renderer = renderer;
+    mSurfaceMesh = mesh;
+    mSurfaceActor = actor;
+
+    m_image = nullptr;
+    m_volume = nullptr;
+    mSurfaceMode = true;
+
     onViewResized();
 }
 
@@ -254,20 +286,28 @@ void ToolsScissors::cancel()
 
 void ToolsScissors::start(bool cutInside)
 {
-    if (!m_vtk || !m_renderer || !m_volume || !m_image)
+    if (!m_vtk || !m_renderer)
         return;
+
+    if (mSurfaceMode) {
+        if (!mSurfaceMesh || !mSurfaceActor)
+            return;
+    }
+    else {
+        if (!m_volume || !m_image)
+            return;
+    }
 
     m_cutInside = cutInside;
     m_pts.clear();
     m_state = State::Collecting;
 
-    onViewResized();                // подгони размер overlay под VTK
+    onViewResized();
 
     m_overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
     m_overlay->removeEventFilter(this);
     m_overlay->installEventFilter(this);
     m_overlay->setMouseTracking(true);
-    //m_overlay->raise();
     m_overlay->setFocus(Qt::OtherFocusReason);
     m_overlay->show();
 
@@ -277,31 +317,54 @@ void ToolsScissors::start(bool cutInside)
 void ToolsScissors::repeat()
 {
     m_pts.clear();
+    m_hasCursor = false;
+    redraw();
 }
 
 void ToolsScissors::finish()
 {
-    if (m_pts.size() < 3) 
-    { 
-       return; 
+    qDebug() << "ToolsScissors::finish, pts =" << m_pts.size()
+        << "surfaceMode =" << mSurfaceMode;
+
+    if (m_pts.size() < 3)
+        return;
+
+    if (mSurfaceMode)
+    {
+        vtkPolyData* out = applySurfaceCut(m_pts, m_cutInside);
+        repeat();
+
+        qDebug() << "finish surface result =" << (out ? "ok" : "null");
+
+        if (!out)
+            return;
+
+        if (mOnSurfaceReplaced)
+            mOnSurfaceReplaced(out);
+
+        if (m_vtk && m_vtk->renderWindow())
+            m_vtk->renderWindow()->Render();
+
+        return;
     }
 
     vtkImageData* out = applyPolygonCut(m_pts, m_cutInside);
     repeat();
-    if (!out) 
+
+    qDebug() << "finish image result =" << (out ? "ok" : "null");
+
+    if (!out)
         return;
 
-    // Подменяем вход маппера
     if (auto* gm = vtkGPUVolumeRayCastMapper::SafeDownCast(m_volume->GetMapper()))
         gm->SetInputData(out);
     else
         m_volume->GetMapper()->SetInputDataObject(out);
 
-    // Передаём наружу, чтобы RenderView обновил свой mImage
-    if (m_onImageReplaced) 
+    if (m_onImageReplaced)
         m_onImageReplaced(out);
 
-    if (m_vtk && m_vtk->renderWindow()) 
+    if (m_vtk && m_vtk->renderWindow())
         m_vtk->renderWindow()->Render();
 }
 
@@ -574,5 +637,214 @@ vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool 
     // Возвращаем новый vtkImageData во владение VTK (жить будет, пока держим ссылку в маппере и RenderView)
     vtkImageData* out = vtkImageData::New();
     out->DeepCopy(sten->GetOutput());
+    return out;
+}
+
+static vtkSmartPointer<vtkPolyData> BuildScreenFrustumWorld(
+    QVTKOpenGLNativeWidget* vtk,
+    vtkRenderer* renderer,
+    const QVector<QPoint>& pts2D)
+{
+    if (!vtk || !renderer || pts2D.size() < 3)
+        return nullptr;
+
+    const double dpr = vtk->devicePixelRatioF();
+
+    int rwW = 0, rwH = 0;
+    if (auto* rw = vtk->renderWindow()) {
+        const int* sz = rw->GetSize();
+        rwW = sz[0];
+        rwH = sz[1];
+    }
+    else {
+        rwW = int(vtk->width() * dpr);
+        rwH = int(vtk->height() * dpr);
+    }
+
+    vtkNew<vtkPoints> nearW;
+    vtkNew<vtkPoints> farW;
+    nearW->SetNumberOfPoints(pts2D.size());
+    farW->SetNumberOfPoints(pts2D.size());
+
+    for (int i = 0; i < pts2D.size(); ++i)
+    {
+        const double xd = pts2D[i].x() * dpr;
+        const double yd = (rwH - 1) - pts2D[i].y() * dpr;
+
+        renderer->SetDisplayPoint(xd, yd, 0.0);
+        renderer->DisplayToWorld();
+        double nw[4];
+        renderer->GetWorldPoint(nw);
+        if (std::abs(nw[3]) < 1e-12)
+            return nullptr;
+        nearW->SetPoint(i, nw[0] / nw[3], nw[1] / nw[3], nw[2] / nw[3]);
+
+        renderer->SetDisplayPoint(xd, yd, 1.0);
+        renderer->DisplayToWorld();
+        double fw[4];
+        renderer->GetWorldPoint(fw);
+        if (std::abs(fw[3]) < 1e-12)
+            return nullptr;
+        farW->SetPoint(i, fw[0] / fw[3], fw[1] / fw[3], fw[2] / fw[3]);
+    }
+
+    const vtkIdType N = static_cast<vtkIdType>(pts2D.size());
+
+    vtkNew<vtkPoints> allPts;
+    allPts->SetNumberOfPoints(2 * N);
+
+    for (vtkIdType i = 0; i < N; ++i)
+    {
+        double p[3];
+        nearW->GetPoint(i, p);
+        allPts->SetPoint(i, p);
+
+        farW->GetPoint(i, p);
+        allPts->SetPoint(N + i, p);
+    }
+
+    vtkNew<vtkCellArray> faces;
+
+    {
+        vtkNew<vtkPolygon> cap;
+        cap->GetPointIds()->SetNumberOfIds(N);
+        for (vtkIdType i = 0; i < N; ++i)
+            cap->GetPointIds()->SetId(i, i);
+        faces->InsertNextCell(cap);
+    }
+
+    {
+        vtkNew<vtkPolygon> cap;
+        cap->GetPointIds()->SetNumberOfIds(N);
+        for (vtkIdType i = 0; i < N; ++i)
+            cap->GetPointIds()->SetId(i, N + (N - 1 - i));
+        faces->InsertNextCell(cap);
+    }
+
+    for (vtkIdType i = 0; i < N; ++i)
+    {
+        const vtkIdType i0 = i;
+        const vtkIdType i1 = (i + 1) % N;
+        const vtkIdType j0 = N + i0;
+        const vtkIdType j1 = N + i1;
+
+        faces->InsertNextCell(3);
+        faces->InsertCellPoint(i0);
+        faces->InsertCellPoint(i1);
+        faces->InsertCellPoint(j1);
+
+        faces->InsertNextCell(3);
+        faces->InsertCellPoint(i0);
+        faces->InsertCellPoint(j1);
+        faces->InsertCellPoint(j0);
+    }
+
+    vtkNew<vtkPolyData> frustum;
+    frustum->SetPoints(allPts);
+    frustum->SetPolys(faces);
+
+    vtkNew<vtkCleanPolyData> clean;
+    clean->SetInputData(frustum);
+    clean->ConvertPolysToLinesOff();
+    clean->ConvertLinesToPointsOff();
+    clean->ConvertStripsToPolysOn();
+    clean->Update();
+
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputConnection(clean->GetOutputPort());
+    tri->Update();
+
+    auto out = vtkSmartPointer<vtkPolyData>::New();
+    out->DeepCopy(tri->GetOutput());
+    return out;
+}
+
+#include <vtkImplicitPolyDataDistance.h>
+#include <vtkClipPolyData.h>
+#include <vtkPolyDataConnectivityFilter.h>
+
+vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool cutInside)
+{
+    if (!m_renderer || !m_vtk || !mSurfaceMesh)
+        return nullptr;
+
+    if (pts2D.size() < 3)
+        return nullptr;
+
+    auto frustum = BuildScreenFrustumWorld(m_vtk, m_renderer, pts2D);
+    if (!frustum || frustum->GetNumberOfCells() == 0)
+        return nullptr;
+
+    qDebug() << "applySurfaceCut: frustum cells =" << frustum->GetNumberOfCells();
+
+    vtkNew<vtkCleanPolyData> inputClean;
+    inputClean->SetInputData(mSurfaceMesh);
+    inputClean->Update();
+
+    vtkNew<vtkTriangleFilter> inputTri;
+    inputTri->SetInputConnection(inputClean->GetOutputPort());
+    inputTri->Update();
+
+    qDebug() << "applySurfaceCut: input cells =" << inputTri->GetOutput()->GetNumberOfCells();
+
+    vtkNew<vtkImplicitPolyDataDistance> implicitFrustum;
+    implicitFrustum->SetInput(frustum);
+
+    vtkNew<vtkClipPolyData> clip;
+    clip->SetInputConnection(inputTri->GetOutputPort());
+    clip->SetClipFunction(implicitFrustum);
+
+    // Очень важно: получить ОБЕ части
+    clip->GenerateClippedOutputOn();
+
+    // Знак тут больше не принципиален, потому что ниже мы сами выберем нужную часть.
+    clip->SetInsideOut(false);
+    clip->Update();
+
+    vtkPolyData* partA = clip->GetOutput();
+    vtkPolyData* partB = clip->GetClippedOutput();
+
+    const vtkIdType cellsA = partA ? partA->GetNumberOfCells() : 0;
+    const vtkIdType cellsB = partB ? partB->GetNumberOfCells() : 0;
+
+    qDebug() << "applySurfaceCut: partA cells =" << cellsA;
+    qDebug() << "applySurfaceCut: partB cells =" << cellsB;
+
+    if (cellsA == 0 && cellsB == 0)
+        return nullptr;
+
+    vtkPolyData* chosen = nullptr;
+
+    if (cutInside)
+    {
+        // Обычные ножницы: удаляем меньший выделенный кусок, оставляем большую часть
+        chosen = (cellsA >= cellsB) ? partA : partB;
+    }
+    else
+    {
+        // Inverse scissors: оставляем только выделенный кусок, обычно он меньше
+        if (cellsA == 0) chosen = partB;
+        else if (cellsB == 0) chosen = partA;
+        else chosen = (cellsA <= cellsB) ? partA : partB;
+    }
+
+    if (!chosen || chosen->GetNumberOfCells() == 0)
+        return nullptr;
+
+    vtkNew<vtkCleanPolyData> clean;
+    clean->SetInputData(chosen);
+    clean->Update();
+
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputConnection(clean->GetOutputPort());
+    tri->Update();
+
+    qDebug() << "applySurfaceCut: final cells =" << tri->GetOutput()->GetNumberOfCells();
+
+    if (!tri->GetOutput() || tri->GetOutput()->GetNumberOfCells() == 0)
+        return nullptr;
+
+    vtkPolyData* out = vtkPolyData::New();
+    out->DeepCopy(tri->GetOutput());
     return out;
 }

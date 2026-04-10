@@ -56,6 +56,16 @@ static vtkMatrix3x3* fetchDirectionMatrix(vtkImageData* img, vtkNew<vtkMatrix3x3
     return holder.GetPointer();
 }
 
+static vtkSmartPointer<vtkPolyData> clonePolyData(vtkPolyData* src)
+{
+    if (!src)
+        return nullptr;
+
+    auto out = vtkSmartPointer<vtkPolyData>::New();
+    out->DeepCopy(src);
+    return out;
+}
+
 static void getPatientAxes(vtkImageData* img, double L[3], double P[3], double S[3])
 {
     vtkNew<vtkMatrix3x3> keep;
@@ -1663,8 +1673,8 @@ bool RenderView::rebuildStlFromEditedImage(vtkImageData* editedImage)
     if (!nextMesh || nextMesh->GetNumberOfCells() == 0)
         return false;
 
-    mStlModeController.pushSurfaceUndoState(mIsoMesh);
-    mIsoMesh = nextMesh;
+    mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+    mIsoMesh = clonePolyData(nextMesh);
     addStlPreview();
     updateStlSizeLabel();
     updateUndoRedoUi();
@@ -1680,7 +1690,7 @@ bool RenderView::ToolModeChanged(Action a)
         return false;
 
     if (!mStlModeController.isActive() &&
-        (a == Action::Scissors || a == Action::InverseScissors || a == Action::Contour))
+        a == Action::Contour)
         return false;
 
     if (!mVolume) return false;
@@ -1693,10 +1703,22 @@ bool RenderView::ToolModeChanged(Action a)
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
-    if (mScissors && (a == Action::Scissors || a == Action::InverseScissors)) 
+    if (mScissors && (a == Action::Scissors || a == Action::InverseScissors))
     {
         setToolUiActive(true, a);
-        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+
+        if (mStlModeController.isActive())
+        {
+            if (!mIsoMesh || !mIsoActor)
+                return false;
+
+            mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        }
+        else
+        {
+            mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+        }
+
         mScissors->handle(a);
         return true;
     }
@@ -1985,7 +2007,7 @@ void RenderView::onStlSimplify()
     // если это первое нажатие после построения, целимся сразу в 2-4 MB (в 3 MB)
     if (!mSimplifyStarted)
     {
-        mStlModeController.pushSurfaceUndoState(mIsoMesh);
+        mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
         mIsoMesh = VolumeStlExporter::NormalizeSurface(mIsoMesh);
         mSimplifyTargetMB = kFirstAimMB;
         mSimplifyStarted = true;
@@ -1993,7 +2015,7 @@ void RenderView::onStlSimplify()
     else
     {
         // последующие нажатия: уменьшаем цель плавно
-        mStlModeController.pushSurfaceUndoState(mIsoMesh);
+        mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
         mSimplifyTargetMB = std::max(kMinMB, mSimplifyTargetMB * kStepFactor);
     }
 
@@ -2003,7 +2025,8 @@ void RenderView::onStlSimplify()
     const int smoothIter = first ? 16 : 10;
     const double passBand = first ? 0.12 : 0.16;;
 
-    mIsoMesh = VolumeStlExporter::SimplifyToTargetBytes(mIsoMesh, targetBytes, smoothIter, passBand);
+    auto simplified = VolumeStlExporter::SimplifyToTargetBytes(mIsoMesh, targetBytes, smoothIter, passBand);
+    mIsoMesh = clonePolyData(simplified);
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
     {
@@ -2114,7 +2137,7 @@ void RenderView::onBuildStl()
     }
 
     mStlModeController.setActive(true);
-    mStlModeController.resetSurfaceHistory(mIsoMesh);
+    mStlModeController.resetSurfaceHistory(clonePolyData(mIsoMesh));
     addStlPreview();
     updateStlSizeLabel();
 
@@ -2900,20 +2923,27 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         mScissors->setAllowNavigation(true);
         mScissors->setOnImageReplaced([this](vtkImageData* im)
             {
-                if (mStlModeController.isActive())
-                {
-                    const bool rebuilt = rebuildStlFromEditedImage(im);
-                    setMapperInput(mImage);
-                    if (!rebuilt)
-                        emit showWarning(tr("STL scissors failed"));
-                    if (im)
-                        im->Delete();
-                }
-                else
-                {
                     commitNewImage(im);
                     mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+            });
+        mScissors->setOnSurfaceReplaced([this](vtkPolyData* poly)
+            {
+                if (!poly || poly->GetNumberOfCells() == 0)
+                {
+                    emit showWarning(tr("STL scissors failed"));
+                    return;
                 }
+
+                if (mIsoMesh)
+                    mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+
+                mIsoMesh = clonePolyData(poly);
+
+                addStlPreview();
+                updateStlSizeLabel();
+                updateUndoRedoUi();
+
+                mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
             });
         mScissors->setOnFinished([this]() {
             setToolUiActive(false, mCurrentTool);
@@ -2931,8 +2961,10 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                     return;
                 }
 
-                mStlModeController.pushSurfaceUndoState(mIsoMesh);
-                mIsoMesh = poly;
+                if (mIsoMesh)
+                    mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+
+                mIsoMesh = clonePolyData(poly);
                 addStlPreview();
                 updateStlSizeLabel();
                 updateUndoRedoUi();
