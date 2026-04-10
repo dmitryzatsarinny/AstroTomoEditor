@@ -1692,10 +1692,7 @@ bool RenderView::ToolModeChanged(Action a)
     if (mScissors && (a == Action::Scissors || a == Action::InverseScissors)) 
     {
         setToolUiActive(true, a);
-        vtkImageData* scissorsImage = mStlModeController.isActive() && mStlWorkingImage
-            ? mStlWorkingImage.GetPointer()
-            : mImage.GetPointer();
-        mScissors->attach(mVtk, mRenderer, scissorsImage, mVolume);
+        mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
         mScissors->handle(a);
         return true;
     }
@@ -2024,7 +2021,6 @@ void RenderView::onBuildStl()
 {
     if (!mImage || !mVolume || !mRenderer) {
         mStlModeController.setActive(false);
-        mStlWorkingImage = nullptr;
         reloadToolsMenu();
         updateUndoRedoUi();
         emit showWarning(tr("No volume to build STL"));
@@ -2037,7 +2033,6 @@ void RenderView::onBuildStl()
     if (mBtnSTL->isChecked() == false)
     {
         mStlModeController.setActive(false);
-        mStlWorkingImage = nullptr;
         reloadToolsMenu();
         updateUndoRedoUi();
         mRenderer->RemoveActor(mIsoActor);
@@ -2099,7 +2094,6 @@ void RenderView::onBuildStl()
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) 
     {
         mStlModeController.setActive(false);
-        mStlWorkingImage = nullptr;
         reloadToolsMenu();
         updateUndoRedoUi();
         if (mBtnSTL) mBtnSTL->setChecked(false);
@@ -2117,7 +2111,6 @@ void RenderView::onBuildStl()
 
     mStlModeController.setActive(true);
     mStlModeController.resetSurfaceHistory(mIsoMesh);
-    mStlWorkingImage = cloneImage(mImage);
     addStlPreview();
     updateStlSizeLabel();
 
@@ -2790,7 +2783,6 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     mIsoMesh = nullptr;
     mStlModeController.setActive(false);
     mStlModeController.resetSurfaceHistory(nullptr);
-    mStlWorkingImage = nullptr;
     updateTopPanelForStlMode(false);
     reloadToolsMenu();
     mSimplifyStarted = false;
@@ -2904,29 +2896,28 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         mScissors->setAllowNavigation(true);
         mScissors->setOnImageReplaced([this](vtkImageData* im)
             {
-                if (mStlModeController.isActive())
+                commitNewImage(im);
+                mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
+            });
+        mScissors->setOnSurfaceReplaced([this](vtkPolyData* poly)
+            {
+                if (!poly || poly->GetNumberOfCells() == 0)
                 {
-                    mStlWorkingImage = im;
-                    const bool rebuilt = rebuildStlFromEditedImage(mStlWorkingImage);
-                    setMapperInput(mImage);
-                    if (!rebuilt)
-                        emit showWarning(tr("STL scissors failed"));
-                    mScissors->attach(mVtk, mRenderer, mStlWorkingImage, mVolume);
+                    emit showWarning(tr("STL scissors failed"));
+                    return;
                 }
-                else
-                {
-                    commitNewImage(im);
-                    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
-                }
+                mStlModeController.pushSurfaceUndoState(mIsoMesh);
+                mIsoMesh = poly;
+                addStlPreview();
+                updateStlSizeLabel();
+                updateUndoRedoUi();
+                mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
             });
         mScissors->setOnFinished([this]() {
             setToolUiActive(false, mCurrentTool);
             });
     }
-    vtkImageData* scissorsImage = mStlModeController.isActive() && mStlWorkingImage
-        ? mStlWorkingImage.GetPointer()
-        : mImage.GetPointer();
-    mScissors->attach(mVtk, mRenderer, scissorsImage, mVolume);
+    mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
     if (!mContour)
     {
         mContour = std::make_unique<ToolsContour>(this);
