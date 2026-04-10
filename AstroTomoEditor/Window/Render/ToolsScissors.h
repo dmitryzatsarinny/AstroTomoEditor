@@ -9,8 +9,6 @@ class QVTKOpenGLNativeWidget;
 class vtkRenderer;
 class vtkImageData;
 class vtkVolume;
-class vtkPolyData;
-class vtkActor;
 
 enum class Action; // из Tools.h
 
@@ -26,13 +24,10 @@ public:
     void attach(QVTKOpenGLNativeWidget* vtk,
         vtkRenderer* renderer,
         vtkImageData* image,
-        vtkVolume* volume,
-        vtkPolyData* mesh = nullptr,
-        vtkActor* meshActor = nullptr);
+        vtkVolume* volume);
 
     // Колбэк, чтобы заменить mImage в RenderView (иначе только маппер обновится)
     void setOnImageReplaced(std::function<void(vtkImageData*)> cb) { m_onImageReplaced = std::move(cb); }
-    void setOnSurfaceReplaced(std::function<void(vtkPolyData*)> cb) { m_onSurfaceReplaced = std::move(cb); }
 
     // Обработка выбора из меню Tools (Scissors / InverseScissors)
     bool handle(Action a);
@@ -64,11 +59,8 @@ private:
     vtkRenderer* m_renderer{ nullptr };
     vtkImageData* m_image{ nullptr };
     vtkVolume* m_volume{ nullptr };
-    vtkPolyData* m_mesh{ nullptr };
-    vtkActor* m_meshActor{ nullptr };
 
     std::function<void(vtkImageData*)> m_onImageReplaced;
-    std::function<void(vtkPolyData*)> m_onSurfaceReplaced;
     std::function<void()> m_onFinished;
 
     // Внутренняя логика
@@ -79,7 +71,6 @@ private:
 
     // Построение маски/вырез тома
     vtkImageData* applyPolygonCut(const QVector<QPoint>& pts2D, bool cutInside);
-    vtkPolyData* applyPolygonCutSurface(const QVector<QPoint>& pts2D, bool cutInside);
 
     // События overlay
     void paintOverlay(QPainter& p);

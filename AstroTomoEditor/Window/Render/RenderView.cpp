@@ -1679,6 +1679,10 @@ bool RenderView::ToolModeChanged(Action a)
         a != Action::Contour)
         return false;
 
+    if (!mStlModeController.isActive() &&
+        (a == Action::Scissors || a == Action::InverseScissors || a == Action::Contour))
+        return false;
+
     if (!mVolume) return false;
 
     if (mToolActive) {
@@ -1692,7 +1696,7 @@ bool RenderView::ToolModeChanged(Action a)
     if (mScissors && (a == Action::Scissors || a == Action::InverseScissors)) 
     {
         setToolUiActive(true, a);
-        mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
+        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
         mScissors->handle(a);
         return true;
     }
@@ -2896,28 +2900,26 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         mScissors->setAllowNavigation(true);
         mScissors->setOnImageReplaced([this](vtkImageData* im)
             {
-                commitNewImage(im);
-                mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
-            });
-        mScissors->setOnSurfaceReplaced([this](vtkPolyData* poly)
-            {
-                if (!poly || poly->GetNumberOfCells() == 0)
+                if (mStlModeController.isActive())
                 {
-                    emit showWarning(tr("STL scissors failed"));
-                    return;
+                    const bool rebuilt = rebuildStlFromEditedImage(im);
+                    setMapperInput(mImage);
+                    if (!rebuilt)
+                        emit showWarning(tr("STL scissors failed"));
+                    if (im)
+                        im->Delete();
                 }
-                mStlModeController.pushSurfaceUndoState(mIsoMesh);
-                mIsoMesh = poly;
-                addStlPreview();
-                updateStlSizeLabel();
-                updateUndoRedoUi();
-                mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
+                else
+                {
+                    commitNewImage(im);
+                    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                }
             });
         mScissors->setOnFinished([this]() {
             setToolUiActive(false, mCurrentTool);
             });
     }
-    mScissors->attach(mVtk, mRenderer, mImage, mVolume, mIsoMesh, mIsoActor);
+    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
     if (!mContour)
     {
         mContour = std::make_unique<ToolsContour>(this);

@@ -27,14 +27,6 @@
 #include <vtkTransform.h>
 #include <vtkTriangleFilter.h>
 #include <vtkCleanPolyData.h>
-#include <vtkClipPolyData.h>
-#include <vtkImplicitPolyDataDistance.h>
-#include <vtkCellPicker.h>
-#include <vtkPlaneCollection.h>
-#include <vtkPlanes.h>
-#include <vtkSelectPolyData.h>
-#include <vtkFillHolesFilter.h>
-#include <vtkPolyDataNormals.h>
 
 #include <QApplication>
 #include <QWheelEvent>
@@ -57,16 +49,12 @@ ToolsScissors::ToolsScissors(QWidget* hostParent)
 void ToolsScissors::attach(QVTKOpenGLNativeWidget* vtk,
     vtkRenderer* renderer,
     vtkImageData* image,
-    vtkVolume* volume,
-    vtkPolyData* mesh,
-    vtkActor* meshActor)
+    vtkVolume* volume)
 {
     m_vtk = vtk;
     m_renderer = renderer;
     m_image = image;
     m_volume = volume;
-    m_mesh = mesh;
-    m_meshActor = meshActor;
     onViewResized();
 }
 
@@ -266,9 +254,7 @@ void ToolsScissors::cancel()
 
 void ToolsScissors::start(bool cutInside)
 {
-    const bool volumeModeReady = m_volume && m_image;
-    const bool surfaceModeReady = m_mesh && m_meshActor;
-    if (!m_vtk || !m_renderer || (!volumeModeReady && !surfaceModeReady))
+    if (!m_vtk || !m_renderer || !m_volume || !m_image)
         return;
 
     m_cutInside = cutInside;
@@ -298,19 +284,6 @@ void ToolsScissors::finish()
     if (m_pts.size() < 3) 
     { 
        return; 
-    }
-
-    if (m_mesh && m_meshActor)
-    {
-        vtkPolyData* outSurface = applyPolygonCutSurface(m_pts, m_cutInside);
-        repeat();
-        if (!outSurface)
-            return;
-
-        if (m_onSurfaceReplaced)
-            m_onSurfaceReplaced(outSurface);
-
-        return;
     }
 
     vtkImageData* out = applyPolygonCut(m_pts, m_cutInside);
@@ -602,104 +575,4 @@ vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool 
     vtkImageData* out = vtkImageData::New();
     out->DeepCopy(sten->GetOutput());
     return out;
-}
-
-vtkPolyData* ToolsScissors::applyPolygonCutSurface(const QVector<QPoint>& pts2D, bool cutInside)
-{
-    if (!m_renderer || !m_vtk || !m_mesh || !m_meshActor || pts2D.size() < 3)
-        return nullptr;
-
-    auto* rw = m_vtk->renderWindow();
-    if (!rw)
-        return nullptr;
-
-    const double dpr = m_vtk->devicePixelRatioF();
-    const int rwH = rw->GetSize()[1] > 0 ? rw->GetSize()[1] : int(m_vtk->height() * dpr);
-    if (rwH <= 0)
-        return nullptr;
-
-    vtkNew<vtkPoints> worldPts;
-    worldPts->SetNumberOfPoints(pts2D.size());
-
-    double foc[3]{};
-    if (auto* cam = m_renderer->GetActiveCamera())
-        cam->GetFocalPoint(foc);
-
-    double focDisp[3]{ 0,0,0 };
-    m_renderer->SetWorldPoint(foc[0], foc[1], foc[2], 1.0);
-    m_renderer->WorldToDisplay();
-    m_renderer->GetDisplayPoint(focDisp);
-
-    for (int i = 0; i < pts2D.size(); ++i)
-    {
-        const double xd = pts2D[i].x() * dpr;
-        const double yd = (rwH - 1) - pts2D[i].y() * dpr;
-        m_renderer->SetDisplayPoint(xd, yd, focDisp[2]);
-        m_renderer->DisplayToWorld();
-        double w[4]{};
-        m_renderer->GetWorldPoint(w);
-        if (std::abs(w[3]) <= 1e-12)
-            return nullptr;
-        worldPts->SetPoint(i, w[0] / w[3], w[1] / w[3], w[2] / w[3]);
-    }
-
-    vtkNew<vtkSelectPolyData> select;
-    select->SetInputData(m_mesh);
-    select->SetLoop(worldPts);
-    select->GenerateSelectionScalarsOn();
-    if (cutInside)
-        select->SetSelectionModeToSmallestRegion();
-    else
-        select->SetSelectionModeToLargestRegion();
-    select->Update();
-
-    vtkNew<vtkClipPolyData> clip;
-    clip->SetInputConnection(select->GetOutputPort());
-    clip->SetValue(0.0);
-    clip->InsideOutOff();
-    clip->GenerateClippedOutputOff();
-    clip->Update();
-
-    vtkNew<vtkTriangleFilter> tri;
-    tri->SetInputConnection(clip->GetOutputPort());
-    tri->PassLinesOff();
-    tri->PassVertsOff();
-    tri->Update();
-
-    vtkNew<vtkCleanPolyData> clean;
-    clean->SetInputConnection(tri->GetOutputPort());
-    clean->PointMergingOn();
-    clean->Update();
-
-    vtkNew<vtkFillHolesFilter> fillHoles;
-    fillHoles->SetInputConnection(clean->GetOutputPort());
-    double bounds[6]{};
-    m_mesh->GetBounds(bounds);
-    const double dx = bounds[1] - bounds[0];
-    const double dy = bounds[3] - bounds[2];
-    const double dz = bounds[5] - bounds[4];
-    const double diag = std::sqrt(dx * dx + dy * dy + dz * dz);
-    fillHoles->SetHoleSize(diag > 0.0 ? diag : 1.0);
-    fillHoles->Update();
-
-    vtkNew<vtkTriangleFilter> triCap;
-    triCap->SetInputConnection(fillHoles->GetOutputPort());
-    triCap->PassLinesOff();
-    triCap->PassVertsOff();
-    triCap->Update();
-
-    vtkNew<vtkPolyDataNormals> normals;
-    normals->SetInputConnection(triCap->GetOutputPort());
-    normals->ConsistencyOn();
-    normals->SplittingOff();
-    normals->AutoOrientNormalsOn();
-    normals->Update();
-
-    vtkPolyData* out = normals->GetOutput();
-    if (!out || out->GetNumberOfCells() == 0)
-        return nullptr;
-
-    vtkPolyData* next = vtkPolyData::New();
-    next->DeepCopy(out);
-    return next;
 }
