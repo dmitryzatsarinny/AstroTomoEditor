@@ -33,6 +33,8 @@
 #include <vtkPlaneCollection.h>
 #include <vtkPlanes.h>
 #include <vtkSelectPolyData.h>
+#include <vtkFillHolesFilter.h>
+#include <vtkPolyDataNormals.h>
 
 #include <QApplication>
 #include <QWheelEvent>
@@ -669,7 +671,31 @@ vtkPolyData* ToolsScissors::applyPolygonCutSurface(const QVector<QPoint>& pts2D,
     clean->PointMergingOn();
     clean->Update();
 
-    vtkPolyData* out = clean->GetOutput();
+    vtkNew<vtkFillHolesFilter> fillHoles;
+    fillHoles->SetInputConnection(clean->GetOutputPort());
+    double bounds[6]{};
+    m_mesh->GetBounds(bounds);
+    const double dx = bounds[1] - bounds[0];
+    const double dy = bounds[3] - bounds[2];
+    const double dz = bounds[5] - bounds[4];
+    const double diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+    fillHoles->SetHoleSize(diag > 0.0 ? diag : 1.0);
+    fillHoles->Update();
+
+    vtkNew<vtkTriangleFilter> triCap;
+    triCap->SetInputConnection(fillHoles->GetOutputPort());
+    triCap->PassLinesOff();
+    triCap->PassVertsOff();
+    triCap->Update();
+
+    vtkNew<vtkPolyDataNormals> normals;
+    normals->SetInputConnection(triCap->GetOutputPort());
+    normals->ConsistencyOn();
+    normals->SplittingOff();
+    normals->AutoOrientNormalsOn();
+    normals->Update();
+
+    vtkPolyData* out = normals->GetOutput();
     if (!out || out->GetNumberOfCells() == 0)
         return nullptr;
 
