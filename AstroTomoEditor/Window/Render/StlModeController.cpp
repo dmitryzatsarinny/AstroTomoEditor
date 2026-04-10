@@ -50,7 +50,8 @@ vtkSmartPointer<vtkPolyData> StlModeController::undoSurface(vtkPolyData* current
     while (mSurfaceRedoStack.size() > mHistoryLimit)
         mSurfaceRedoStack.pop_front();
 
-    return mSurfaceUndoStack.takeLast();
+    auto prev = mSurfaceUndoStack.takeLast();
+    return cloneSurface(prev);
 }
 
 vtkSmartPointer<vtkPolyData> StlModeController::redoSurface(vtkPolyData* currentSurface)
