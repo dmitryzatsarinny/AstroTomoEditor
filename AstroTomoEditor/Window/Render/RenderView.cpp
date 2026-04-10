@@ -1529,7 +1529,9 @@ void RenderView::updateAfterImageChange(bool reattachTools)
         if (mRemoveConn)
             mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
         if (mScissors)
+        {
             mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+        }
     }
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible())
@@ -1572,6 +1574,12 @@ void RenderView::onUndo()
         addStlPreview();
         updateStlSizeLabel();
         updateUndoRedoUi();
+
+        if (mContour)
+            mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        if (mScissors)
+            mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+
         return;
     }
 
@@ -1603,6 +1611,12 @@ void RenderView::onRedo()
         addStlPreview();
         updateStlSizeLabel();
         updateUndoRedoUi();
+
+        if (mContour)
+            mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        if (mScissors)
+            mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+
         return;
     }
 
@@ -2038,6 +2052,11 @@ void RenderView::onStlSimplify()
     addStlPreview();
     updateStlSizeLabel();
     updateUndoRedoUi();
+
+    if (mContour)
+        mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
+    if (mScissors)
+        mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
 
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
