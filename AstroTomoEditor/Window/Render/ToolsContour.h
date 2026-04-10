@@ -1,23 +1,29 @@
 #pragma once
-#pragma once
 
-#include <QWidget>
-#include <QVector>
+#include <QObject>
 #include <QPoint>
-#include <functional>
-#include <vtkSmartPointer.h>
+#include <QVector>
 #include <array>
+#include <functional>
+
+#include <vtkSmartPointer.h>
 #include <vtkType.h>
 
+class QEvent;
+class QWidget;
 class QVTKOpenGLNativeWidget;
+
 class vtkActor;
-class vtkPolyData;
-class vtkRenderer;
 class vtkCellPicker;
+class vtkGlyph3DMapper;
+class vtkPolyData;
+class vtkPolyDataMapper;
+class vtkRenderer;
+class vtkSphereSource;
 
 enum class Action;
 
-class ToolsContour : public QObject
+class ToolsContour final : public QObject
 {
     Q_OBJECT
 public:
@@ -30,7 +36,7 @@ public:
         vtkActor* meshActor);
 
     bool handle(Action a);
-    void onViewResized();
+    void onViewResized(); // оставлен для совместимости, сейчас не нужен
     void cancel();
 
     void setOnSurfaceReplaced(std::function<void(vtkPolyData*)> cb) { m_onSurfaceReplaced = std::move(cb); }
@@ -40,10 +46,27 @@ protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
 
 private:
-    enum class State { Off, Collecting };
+    enum class State
+    {
+        Off,
+        Collecting
+    };
 
+private:
+    bool pickPoint(const QPoint& viewPos, vtkIdType& pointId, std::array<double, 3>& worldPoint) const;
+    bool appendGeodesicPath(vtkIdType fromId, vtkIdType toId);
+    bool applyContourCut();
+
+    void start();
+    void finish();
+
+    void createPreviewActors();
+    void destroyPreviewActors();
+    void updatePreviewGeometry();
+    void renderNow();
+
+private:
     QWidget* m_host{ nullptr };
-    QWidget* m_overlay{ nullptr };
 
     State m_state{ State::Off };
 
@@ -60,12 +83,14 @@ private:
     std::function<void(vtkPolyData*)> m_onSurfaceReplaced;
     std::function<void()> m_onFinished;
 
-    bool pickPoint(const QPoint& overlayPos, vtkIdType& pointId, std::array<double, 3>& worldPoint) const;
-    bool appendGeodesicPath(vtkIdType fromId, vtkIdType toId);
-    bool applyContourCut();
-    void start();
-    void finish();
-    void redraw();
-    void paintOverlay(QPainter& p);
-    bool worldToOverlay(const std::array<double, 3>& world, QPointF& out) const;
+    // preview линии
+    vtkSmartPointer<vtkPolyData> m_previewLineData;
+    vtkSmartPointer<vtkPolyDataMapper> m_previewLineMapper;
+    vtkSmartPointer<vtkActor> m_previewLineActor;
+
+    // preview точек
+    vtkSmartPointer<vtkPolyData> m_previewPointsData;
+    vtkSmartPointer<vtkSphereSource> m_previewSphereSource;
+    vtkSmartPointer<vtkGlyph3DMapper> m_previewPointsMapper;
+    vtkSmartPointer<vtkActor> m_previewPointsActor;
 };

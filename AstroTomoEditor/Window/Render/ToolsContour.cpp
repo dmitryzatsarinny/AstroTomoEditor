@@ -2,42 +2,37 @@
 
 #include "Tools.h"
 
-#include <QApplication>
 #include <QEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
-#include <QPainter>
-#include <QPainterPath>
 #include <QVTKOpenGLNativeWidget.h>
 
+#include <algorithm>
+#include <vector>
+
 #include <vtkActor.h>
+#include <vtkCellArray.h>
 #include <vtkCellPicker.h>
-#include <vtkClipPolyData.h>
 #include <vtkCleanPolyData.h>
+#include <vtkClipPolyData.h>
 #include <vtkDijkstraGraphGeodesicPath.h>
-#include <vtkIdList.h>
-#include <vtkPointData.h>
+#include <vtkGlyph3DMapper.h>
+#include <vtkNew.h>
+#include <vtkPoints.h>
 #include <vtkPolyData.h>
+#include <vtkPolyDataMapper.h>
+#include <vtkPolyLine.h>
+#include <vtkProperty.h>
 #include <vtkRenderWindow.h>
 #include <vtkRenderer.h>
 #include <vtkSelectPolyData.h>
-#include <vtkSmartPointer.h>
-#include <vtkStripper.h>
+#include <vtkSphereSource.h>
 #include <vtkTriangleFilter.h>
 
 ToolsContour::ToolsContour(QWidget* hostParent)
     : QObject(nullptr)
     , m_host(hostParent)
 {
-    m_overlay = new QWidget(hostParent);
-    m_overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    m_overlay->setAttribute(Qt::WA_NoSystemBackground, true);
-    m_overlay->setAttribute(Qt::WA_TranslucentBackground, true);
-    m_overlay->setMouseTracking(true);
-    m_overlay->setFocusPolicy(Qt::StrongFocus);
-    m_overlay->hide();
-    m_overlay->installEventFilter(this);
-
     m_picker = vtkSmartPointer<vtkCellPicker>::New();
     m_picker->SetTolerance(0.0008);
 }
@@ -47,11 +42,16 @@ void ToolsContour::attach(QVTKOpenGLNativeWidget* vtk,
     vtkPolyData* mesh,
     vtkActor* meshActor)
 {
+    if (m_vtk && m_vtk != vtk)
+        m_vtk->removeEventFilter(this);
+
     m_vtk = vtk;
     m_renderer = renderer;
     m_mesh = mesh;
     m_meshActor = meshActor;
-    onViewResized();
+
+    if (m_vtk)
+        m_vtk->installEventFilter(this);
 }
 
 bool ToolsContour::handle(Action a)
@@ -65,24 +65,20 @@ bool ToolsContour::handle(Action a)
 
 void ToolsContour::onViewResized()
 {
-    if (!m_vtk || !m_overlay)
-        return;
-
-    m_overlay->setGeometry(m_vtk->geometry());
+    // Оставлено специально пустым для совместимости с существующим кодом.
+    // Preview теперь рисуется внутри VTK, а не поверх QWidget.
 }
 
 void ToolsContour::cancel()
 {
     const bool wasActive = (m_state != State::Off);
+
     m_state = State::Off;
     m_controlIds.clear();
     m_contourWorldPoints.clear();
 
-    if (m_overlay)
-    {
-        m_overlay->unsetCursor();
-        m_overlay->hide();
-    }
+    destroyPreviewActors();
+    renderNow();
 
     if (wasActive && m_onFinished)
         m_onFinished();
@@ -97,11 +93,13 @@ void ToolsContour::start()
     m_controlIds.clear();
     m_contourWorldPoints.clear();
 
-    onViewResized();
-    m_overlay->setAttribute(Qt::WA_TransparentForMouseEvents, false);
-    m_overlay->setFocus(Qt::OtherFocusReason);
-    m_overlay->show();
-    redraw();
+    createPreviewActors();
+    updatePreviewGeometry();
+
+    if (m_vtk)
+        m_vtk->setFocus(Qt::OtherFocusReason);
+
+    renderNow();
 }
 
 void ToolsContour::finish()
@@ -114,24 +112,29 @@ void ToolsContour::finish()
 
     const vtkIdType firstId = m_controlIds.front();
     const vtkIdType lastId = m_controlIds.back();
+
     if (!appendGeodesicPath(lastId, firstId))
     {
         cancel();
         return;
     }
 
+    updatePreviewGeometry();
+    renderNow();
+
     const bool ok = applyContourCut();
+
     cancel();
+
     if (!ok)
         return;
 
-    if (m_vtk && m_vtk->renderWindow())
-        m_vtk->renderWindow()->Render();
+    renderNow();
 }
 
 bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
 {
-    if (obj != m_overlay || m_state != State::Collecting)
+    if (obj != m_vtk || m_state != State::Collecting)
         return QObject::eventFilter(obj, ev);
 
     switch (ev->type())
@@ -139,10 +142,12 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
     case QEvent::MouseButtonPress:
     {
         auto* me = static_cast<QMouseEvent*>(ev);
+
         if (me->button() == Qt::LeftButton)
         {
             vtkIdType pointId = -1;
             std::array<double, 3> worldPoint{};
+
             if (!pickPoint(me->pos(), pointId, worldPoint))
                 return true;
 
@@ -157,7 +162,8 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
             }
 
             m_controlIds.push_back(pointId);
-            redraw();
+            updatePreviewGeometry();
+            renderNow();
             return true;
         }
 
@@ -166,25 +172,23 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
             finish();
             return true;
         }
+
         break;
     }
+
     case QEvent::KeyPress:
     {
         auto* ke = static_cast<QKeyEvent*>(ev);
+
         if (ke->key() == Qt::Key_Escape)
         {
             cancel();
             return true;
         }
+
         break;
     }
-    case QEvent::Paint:
-    {
-        QPainter p(m_overlay);
-        p.fillRect(m_overlay->rect(), QColor(0, 0, 0, 0));
-        paintOverlay(p);
-        return true;
-    }
+
     default:
         break;
     }
@@ -192,20 +196,22 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
     return QObject::eventFilter(obj, ev);
 }
 
-bool ToolsContour::pickPoint(const QPoint& overlayPos, vtkIdType& pointId, std::array<double, 3>& worldPoint) const
+bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, std::array<double, 3>& worldPoint) const
 {
     if (!m_vtk || !m_renderer || !m_mesh || !m_meshActor || !m_picker)
         return false;
 
     const double dpr = m_vtk->devicePixelRatioF();
+
     int rwH = 0;
     if (auto* rw = m_vtk->renderWindow())
         rwH = rw->GetSize()[1];
-    if (rwH <= 0)
-        rwH = int(m_vtk->height() * dpr);
 
-    const double xd = overlayPos.x() * dpr;
-    const double yd = (rwH - 1) - overlayPos.y() * dpr;
+    if (rwH <= 0)
+        rwH = static_cast<int>(m_vtk->height() * dpr);
+
+    const double xd = static_cast<double>(viewPos.x()) * dpr;
+    const double yd = static_cast<double>((rwH - 1)) - static_cast<double>(viewPos.y()) * dpr;
 
     m_picker->InitializePickList();
     m_picker->AddPickList(m_meshActor);
@@ -219,12 +225,14 @@ bool ToolsContour::pickPoint(const QPoint& overlayPos, vtkIdType& pointId, std::
 
     double pickPos[3]{};
     m_picker->GetPickPosition(pickPos);
+
     pointId = m_mesh->FindPoint(pickPos);
     if (pointId < 0)
         return false;
 
     double pt[3]{};
     m_mesh->GetPoint(pointId, pt);
+
     worldPoint = { pt[0], pt[1], pt[2] };
     return true;
 }
@@ -244,13 +252,39 @@ bool ToolsContour::appendGeodesicPath(vtkIdType fromId, vtkIdType toId)
     if (!out || !out->GetPoints() || out->GetNumberOfPoints() == 0)
         return false;
 
-    const vtkIdType begin = (m_contourWorldPoints.isEmpty() ? 0 : 1);
-    for (vtkIdType i = begin; i < out->GetNumberOfPoints(); ++i)
+    std::vector<std::array<double, 3>> path;
+    path.reserve(static_cast<size_t>(out->GetNumberOfPoints()));
+
+    for (vtkIdType i = 0; i < out->GetNumberOfPoints(); ++i)
     {
         double p[3]{};
         out->GetPoint(i, p);
-        m_contourWorldPoints.push_back({ p[0], p[1], p[2] });
+        path.push_back({ p[0], p[1], p[2] });
     }
+
+    double fromPoint[3]{};
+    m_mesh->GetPoint(fromId, fromPoint);
+
+    const auto dist2 = [](const std::array<double, 3>& a, const double* b)
+        {
+            const double dx = a[0] - b[0];
+            const double dy = a[1] - b[1];
+            const double dz = a[2] - b[2];
+            return dx * dx + dy * dy + dz * dz;
+        };
+
+    if (path.size() >= 2)
+    {
+        const double frontDist = dist2(path.front(), fromPoint);
+        const double backDist = dist2(path.back(), fromPoint);
+
+        if (backDist < frontDist)
+            std::reverse(path.begin(), path.end());
+    }
+
+    const vtkIdType begin = m_contourWorldPoints.isEmpty() ? 0 : 1;
+    for (vtkIdType i = begin; i < static_cast<vtkIdType>(path.size()); ++i)
+        m_contourWorldPoints.push_back(path[static_cast<int>(i)]);
 
     return true;
 }
@@ -260,7 +294,7 @@ bool ToolsContour::applyContourCut()
     if (!m_mesh || m_contourWorldPoints.size() < 3)
         return false;
 
-    auto loopPts = vtkSmartPointer<vtkPoints>::New();
+    vtkNew<vtkPoints> loopPts;
     for (const auto& p : m_contourWorldPoints)
         loopPts->InsertNextPoint(p[0], p[1], p[2]);
 
@@ -302,72 +336,136 @@ bool ToolsContour::applyContourCut()
     return true;
 }
 
-void ToolsContour::redraw()
+void ToolsContour::createPreviewActors()
 {
-    if (m_overlay)
-        m_overlay->update();
-}
-
-bool ToolsContour::worldToOverlay(const std::array<double, 3>& world, QPointF& out) const
-{
-    if (!m_renderer || !m_vtk)
-        return false;
-
-    const double dpr = m_vtk->devicePixelRatioF();
-    int rwH = 0;
-    if (auto* rw = m_vtk->renderWindow())
-        rwH = rw->GetSize()[1];
-    if (rwH <= 0)
-        rwH = int(m_vtk->height() * dpr);
-
-    m_renderer->SetWorldPoint(world[0], world[1], world[2], 1.0);
-    m_renderer->WorldToDisplay();
-    double d[3]{};
-    m_renderer->GetDisplayPoint(d);
-
-    const double x = d[0] / dpr;
-    const double y = ((rwH - 1) - d[1]) / dpr;
-    out = QPointF(x, y);
-    return true;
-}
-
-void ToolsContour::paintOverlay(QPainter& p)
-{
-    if (m_contourWorldPoints.isEmpty())
+    if (!m_renderer)
         return;
 
-    p.setRenderHint(QPainter::Antialiasing, true);
-
-    QPolygonF poly;
-    for (const auto& w : m_contourWorldPoints)
+    if (!m_previewLineActor)
     {
-        QPointF q;
-        if (worldToOverlay(w, q))
-            poly << q;
+        m_previewLineData = vtkSmartPointer<vtkPolyData>::New();
+
+        m_previewLineMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+        m_previewLineMapper->SetInputData(m_previewLineData);
+
+        m_previewLineActor = vtkSmartPointer<vtkActor>::New();
+        m_previewLineActor->SetMapper(m_previewLineMapper);
+        m_previewLineActor->PickableOff();
+        m_previewLineActor->GetProperty()->SetColor(1.0, 0.86, 0.31);
+        m_previewLineActor->GetProperty()->SetLineWidth(3.0);
+        m_previewLineActor->GetProperty()->SetLighting(false);
+        m_previewLineActor->GetProperty()->RenderLinesAsTubesOn();
+
+        m_renderer->AddActor(m_previewLineActor);
     }
 
-    if (poly.size() >= 2)
+    if (!m_previewPointsActor)
     {
-        QPen pen(QColor(255, 220, 80));
-        pen.setWidth(2);
-        p.setPen(pen);
-        p.setBrush(Qt::NoBrush);
-        p.drawPolyline(poly);
+        m_previewPointsData = vtkSmartPointer<vtkPolyData>::New();
+
+        m_previewSphereSource = vtkSmartPointer<vtkSphereSource>::New();
+        m_previewSphereSource->SetRadius(1.0);
+        m_previewSphereSource->SetThetaResolution(12);
+        m_previewSphereSource->SetPhiResolution(12);
+
+        m_previewPointsMapper = vtkSmartPointer<vtkGlyph3DMapper>::New();
+        m_previewPointsMapper->SetInputData(m_previewPointsData);
+        m_previewPointsMapper->SetSourceConnection(m_previewSphereSource->GetOutputPort());
+        m_previewPointsMapper->ScalingOff();
+        m_previewPointsMapper->ScalarVisibilityOff();
+
+        m_previewPointsActor = vtkSmartPointer<vtkActor>::New();
+        m_previewPointsActor->SetMapper(m_previewPointsMapper);
+        m_previewPointsActor->PickableOff();
+        m_previewPointsActor->GetProperty()->SetColor(1.0, 0.86, 0.31);
+        m_previewPointsActor->GetProperty()->SetLighting(false);
+
+        m_renderer->AddActor(m_previewPointsActor);
+    }
+}
+
+void ToolsContour::destroyPreviewActors()
+{
+    if (m_renderer)
+    {
+        if (m_previewLineActor)
+            m_renderer->RemoveActor(m_previewLineActor);
+
+        if (m_previewPointsActor)
+            m_renderer->RemoveActor(m_previewPointsActor);
     }
 
-    p.setBrush(QColor(255, 220, 80));
-    p.setPen(Qt::NoPen);
-    for (const QPointF& pt : poly)
-        p.drawEllipse(pt, 3, 3);
+    m_previewLineActor = nullptr;
+    m_previewLineMapper = nullptr;
+    m_previewLineData = nullptr;
 
-    if (poly.size() >= 3)
+    m_previewPointsActor = nullptr;
+    m_previewPointsMapper = nullptr;
+    m_previewSphereSource = nullptr;
+    m_previewPointsData = nullptr;
+}
+
+void ToolsContour::updatePreviewGeometry()
+{
+    if (!m_mesh)
+        return;
+
+    if (!m_previewLineData || !m_previewPointsData)
+        return;
+
+    vtkNew<vtkPoints> pts;
+    for (const auto& p : m_contourWorldPoints)
+        pts->InsertNextPoint(p[0], p[1], p[2]);
+
+    // Линия
+    vtkNew<vtkCellArray> lines;
+    if (pts->GetNumberOfPoints() >= 2)
     {
-        QColor fill(255, 220, 80, 45);
-        p.setPen(Qt::NoPen);
-        p.setBrush(fill);
+        vtkNew<vtkPolyLine> polyLine;
+        polyLine->GetPointIds()->SetNumberOfIds(pts->GetNumberOfPoints());
 
-        QPainterPath path;
-        path.addPolygon(poly);
-        p.drawPath(path);
+        for (vtkIdType i = 0; i < pts->GetNumberOfPoints(); ++i)
+            polyLine->GetPointIds()->SetId(i, i);
+
+        lines->InsertNextCell(polyLine);
     }
+
+    m_previewLineData->SetPoints(pts);
+    m_previewLineData->SetLines(lines);
+    m_previewLineData->Modified();
+
+    // Точки
+    vtkNew<vtkCellArray> verts;
+    for (vtkIdType i = 0; i < pts->GetNumberOfPoints(); ++i)
+    {
+        verts->InsertNextCell(1);
+        verts->InsertCellPoint(i);
+    }
+
+    m_previewPointsData->SetPoints(pts);
+    m_previewPointsData->SetVerts(verts);
+    m_previewPointsData->Modified();
+
+    // Подбираем размер сфер под масштаб модели
+    if (m_previewSphereSource && m_mesh->GetNumberOfPoints() > 0)
+    {
+        double bounds[6]{};
+        m_mesh->GetBounds(bounds);
+
+        const double dx = bounds[1] - bounds[0];
+        const double dy = bounds[3] - bounds[2];
+        const double dz = bounds[5] - bounds[4];
+        const double diag = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+        // Можно подправить коэффициент под свою сцену
+        const double radius = std::max(0.1, diag * 0.0035);
+        m_previewSphereSource->SetRadius(radius);
+        m_previewSphereSource->Update();
+    }
+}
+
+void ToolsContour::renderNow()
+{
+    if (m_vtk && m_vtk->renderWindow())
+        m_vtk->renderWindow()->Render();
 }
