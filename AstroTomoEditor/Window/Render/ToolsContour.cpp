@@ -8,10 +8,12 @@
 #include <QVTKOpenGLNativeWidget.h>
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include <vtkActor.h>
 #include <vtkCellArray.h>
+#include <vtkCellLocator.h>
 #include <vtkCellPicker.h>
 #include <vtkCleanPolyData.h>
 #include <vtkClipPolyData.h>
@@ -294,8 +296,106 @@ bool ToolsContour::applyContourCut()
     if (!m_mesh || m_contourWorldPoints.size() < 3)
         return false;
 
+    auto smoothedLoop = [&]() -> QVector<std::array<double, 3>>
+        {
+            std::vector<std::array<double, 3>> points;
+            points.reserve(static_cast<size_t>(m_contourWorldPoints.size()));
+            for (const auto& p : m_contourWorldPoints)
+                points.push_back(p);
+
+            // Chaikin smoothing keeps the contour closed and visually softer.
+            constexpr int smoothIterations = 2;
+            for (int iteration = 0; iteration < smoothIterations && points.size() >= 3; ++iteration)
+            {
+                std::vector<std::array<double, 3>> refined;
+                refined.reserve(points.size() * 2);
+
+                for (size_t i = 0; i < points.size(); ++i)
+                {
+                    const auto& p0 = points[i];
+                    const auto& p1 = points[(i + 1) % points.size()];
+
+                    std::array<double, 3> q{};
+                    std::array<double, 3> r{};
+                    for (int axis = 0; axis < 3; ++axis)
+                    {
+                        q[axis] = 0.75 * p0[axis] + 0.25 * p1[axis];
+                        r[axis] = 0.25 * p0[axis] + 0.75 * p1[axis];
+                    }
+
+                    refined.push_back(q);
+                    refined.push_back(r);
+                }
+
+                points = std::move(refined);
+            }
+
+            if (points.size() < 3)
+                return m_contourWorldPoints;
+
+            std::vector<double> lengths(points.size() + 1, 0.0);
+            for (size_t i = 0; i < points.size(); ++i)
+            {
+                const auto& p0 = points[i];
+                const auto& p1 = points[(i + 1) % points.size()];
+                const double dx = p1[0] - p0[0];
+                const double dy = p1[1] - p0[1];
+                const double dz = p1[2] - p0[2];
+                lengths[i + 1] = lengths[i] + std::sqrt(dx * dx + dy * dy + dz * dz);
+            }
+
+            const double totalLength = lengths.back();
+            if (totalLength <= 0.0)
+                return m_contourWorldPoints;
+
+            const size_t targetCount = std::max<size_t>(64, points.size());
+            std::vector<std::array<double, 3>> sampled;
+            sampled.reserve(targetCount);
+
+            for (size_t i = 0; i < targetCount; ++i)
+            {
+                const double targetLen = totalLength * static_cast<double>(i) / static_cast<double>(targetCount);
+                auto upper = std::lower_bound(lengths.begin(), lengths.end(), targetLen);
+                size_t seg = static_cast<size_t>(std::distance(lengths.begin(), upper));
+                seg = std::clamp<size_t>(seg, 1, points.size());
+
+                const double segStartLen = lengths[seg - 1];
+                const double segEndLen = lengths[seg];
+                const double segSpan = std::max(1e-12, segEndLen - segStartLen);
+                const double t = (targetLen - segStartLen) / segSpan;
+
+                const auto& p0 = points[seg - 1];
+                const auto& p1 = points[seg % points.size()];
+
+                std::array<double, 3> p{};
+                for (int axis = 0; axis < 3; ++axis)
+                    p[axis] = p0[axis] + (p1[axis] - p0[axis]) * t;
+
+                sampled.push_back(p);
+            }
+
+            vtkNew<vtkCellLocator> locator;
+            locator->SetDataSet(m_mesh);
+            locator->BuildLocator();
+
+            QVector<std::array<double, 3>> projected;
+            projected.reserve(static_cast<qsizetype>(sampled.size()));
+
+            for (const auto& p : sampled)
+            {
+                double closest[3]{};
+                double dist2 = 0.0;
+                vtkIdType cellId = -1;
+                int subId = -1;
+                locator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+                projected.push_back({ closest[0], closest[1], closest[2] });
+            }
+
+            return projected;
+        }();
+
     vtkNew<vtkPoints> loopPts;
-    for (const auto& p : m_contourWorldPoints)
+    for (const auto& p : smoothedLoop)
         loopPts->InsertNextPoint(p[0], p[1], p[2]);
 
     vtkNew<vtkSelectPolyData> select;

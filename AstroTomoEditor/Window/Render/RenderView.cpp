@@ -2899,17 +2899,29 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                 if (mStlModeController.isActive())
                 {
                     const bool rebuilt = rebuildStlFromEditedImage(im);
+                    if (rebuilt && im)
+                        mImage = im;
+
                     setMapperInput(mImage);
                     if (!rebuilt)
+                    {
                         emit showWarning(tr("STL scissors failed"));
-                    if (im)
-                        im->Delete();
+                        if (im)
+                            im->Delete();
+                    }
+
+                    if (mScissors)
+                        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
                 }
                 else
                 {
                     commitNewImage(im);
-                    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                    if (mScissors)
+                        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
                 }
+
+                if (mVtk && mVtk->renderWindow())
+                    mVtk->renderWindow()->Render();
             });
         mScissors->setOnFinished([this]() {
             setToolUiActive(false, mCurrentTool);
