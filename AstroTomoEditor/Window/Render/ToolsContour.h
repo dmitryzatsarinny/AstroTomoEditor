@@ -132,6 +132,6 @@ private:
     int m_previewSmoothIterations = 8;
     double m_previewSmoothFactor = 0.42;
 
-    // 0 = быстрее, 1 = более мягкий край выреза за счёт дополнительной триангуляции.
-    int m_cutSubdivisionIterations = 1;
+    int m_cutSubdivisionIterations = 0;
+    double m_maxSubdivisionGrowthRatio = 1.6;
 };

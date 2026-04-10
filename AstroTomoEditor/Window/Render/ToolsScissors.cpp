@@ -112,15 +112,26 @@ vtkImageData* ToolsScissors::buildVoxelVolumeFromSurface(vtkPolyData* surface) c
     const double sz = mSurfaceVoxelSpacing[2];
     const int pad = std::max(1, mSurfaceVoxelPadding);
 
+    const double halfSx = 0.5 * sx;
+    const double halfSy = 0.5 * sy;
+    const double halfSz = 0.5 * sz;
+
+    const double minX = bounds[0] - halfSx;
+    const double maxX = bounds[1] + halfSx;
+    const double minY = bounds[2] - halfSy;
+    const double maxY = bounds[3] + halfSy;
+    const double minZ = bounds[4] - halfSz;
+    const double maxZ = bounds[5] + halfSz;
+
     double origin[3];
-    origin[0] = bounds[0] - pad * sx;
-    origin[1] = bounds[2] - pad * sy;
-    origin[2] = bounds[4] - pad * sz;
+    origin[0] = minX - pad * sx;
+    origin[1] = minY - pad * sy;
+    origin[2] = minZ - pad * sz;
 
     int dims[3];
-    dims[0] = static_cast<int>(std::ceil((bounds[1] - bounds[0]) / sx)) + 1 + 2 * pad;
-    dims[1] = static_cast<int>(std::ceil((bounds[3] - bounds[2]) / sy)) + 1 + 2 * pad;
-    dims[2] = static_cast<int>(std::ceil((bounds[5] - bounds[4]) / sz)) + 1 + 2 * pad;
+    dims[0] = static_cast<int>(std::ceil((maxX - minX) / sx)) + 1 + 2 * pad;
+    dims[1] = static_cast<int>(std::ceil((maxY - minY) / sy)) + 1 + 2 * pad;
+    dims[2] = static_cast<int>(std::ceil((maxZ - minZ) / sz)) + 1 + 2 * pad;
 
     if (dims[0] <= 1 || dims[1] <= 1 || dims[2] <= 1)
         return nullptr;

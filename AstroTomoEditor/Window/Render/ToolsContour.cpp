@@ -584,6 +584,7 @@ bool ToolsContour::applyContourCut()
     // 5. И только теперь optional subdivision
     if (m_cutSubdivisionIterations > 0)
     {
+        const vtkIdType baseCells = result->GetNumberOfCells();
         vtkNew<vtkLinearSubdivisionFilter> subdiv;
         subdiv->SetInputData(result);
         subdiv->SetNumberOfSubdivisions(m_cutSubdivisionIterations);
@@ -595,19 +596,31 @@ bool ToolsContour::applyContourCut()
 
         if (subdivOut && subdivCells > 0)
         {
-            vtkNew<vtkCleanPolyData> cleanSubdiv;
-            cleanSubdiv->SetInputConnection(subdiv->GetOutputPort());
-            cleanSubdiv->PointMergingOn();
-            cleanSubdiv->Update();
+            const double growthRatio = (baseCells > 0)
+                ? static_cast<double>(subdivCells) / static_cast<double>(baseCells)
+                : 0.0;
 
-            vtkPolyData* cleanSubdivOut = cleanSubdiv->GetOutput();
-            if (cleanSubdivOut && cleanSubdivOut->GetNumberOfCells() > 0)
+            if (growthRatio <= m_maxSubdivisionGrowthRatio)
             {
-                result->DeepCopy(cleanSubdivOut);
+                vtkNew<vtkCleanPolyData> cleanSubdiv;
+                cleanSubdiv->SetInputConnection(subdiv->GetOutputPort());
+                cleanSubdiv->PointMergingOn();
+                cleanSubdiv->Update();
+
+                vtkPolyData* cleanSubdivOut = cleanSubdiv->GetOutput();
+                if (cleanSubdivOut && cleanSubdivOut->GetNumberOfCells() > 0)
+                {
+                    result->DeepCopy(cleanSubdivOut);
+                }
+                else
+                {
+                    qDebug() << "post-clip subdivision clean failed, keep unclipped result";
+                }
             }
             else
             {
-                qDebug() << "post-clip subdivision clean failed, keep unclipped result";
+                qDebug() << "post-clip subdivision skipped, growth ratio =" << growthRatio
+                    << "limit =" << m_maxSubdivisionGrowthRatio;
             }
         }
         else

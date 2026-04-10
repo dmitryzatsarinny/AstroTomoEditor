@@ -639,13 +639,10 @@ void RenderView::buildOverlay()
 
     connect(mAppsMenu, &QMenu::aboutToShow, this, [this] {
         if (!mAppActive) return;
-        if (mHistDlg)
-            mHistDlg->close();
-        if (mTemplateDlg)
-            mTemplateDlg->close();
-        if (mElectrodePanel)
+        if (mCurrentApp == App::Electrodes && mElectrodePanel)
             mElectrodePanel->setModeEnabled(false);
-        setAppUiActive(false, mCurrentApp);
+        if (mCurrentApp == App::Electrodes)
+            setAppUiActive(false, mCurrentApp);
         });
 
     connect(mElectrodePanel, &ElectrodePanel::saveRequested,
@@ -1121,7 +1118,8 @@ void RenderView::ensureElectrodPanel()
         this, &RenderView::onTemplateClearScene);
 
     mTemplateDlg->setOnFinished([this] {
-        setAppUiActive(false, mCurrentApp);
+        if (!mHistDlg || !mHistDlg->isVisible())
+            setAppUiActive(false, mCurrentApp);
         });
 }
 
@@ -1151,7 +1149,8 @@ void RenderView::ensureTemplateDialog()
         this, &RenderView::onTemplateClearScene);
 
     mTemplateDlg->setOnFinished([this] {
-        setAppUiActive(false, mCurrentApp);
+        if (!mHistDlg || !mHistDlg->isVisible())
+            setAppUiActive(false, mCurrentApp);
         });
 }
 
@@ -1412,7 +1411,8 @@ void RenderView::reloadHistogram()
 
         mHistDlg->setOnFinished([this]()
             {
-                setAppUiActive(false, mCurrentApp);
+                if (!mTemplateDlg || !mTemplateDlg->isVisible())
+                    setAppUiActive(false, mCurrentApp);
             });
 
         mHistDlg->refreshFromImage(mImage);
@@ -1794,22 +1794,16 @@ bool RenderView::AppModeChanged(App a)
 {
     if (!mVolume) return false;
 
-    if (mAppActive)
+    if (mCurrentApp == App::Electrodes && mAppActive)
     {
-        if (mCurrentApp == App::Electrodes)
-        {
-            endElectrodesPreview();
-            setElectrodesUiActive(false);
-        }
-
-        if (mHistDlg) mHistDlg->close();
-        if (mTemplateDlg) mTemplateDlg->close();
+        endElectrodesPreview();
+        setElectrodesUiActive(false);
 
         setAppUiActive(false, mCurrentApp);
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
-    if (mHistDlg && (a == App::Histogram))
+    if (a == App::Histogram)
     {
         setAppUiActive(true, a);
         openHistogram();
@@ -1827,6 +1821,9 @@ bool RenderView::AppModeChanged(App a)
     {
         if (!AppConfig::loadCurrent().electrodesEnabled)
             return false;
+
+        if (mHistDlg) mHistDlg->close();
+        if (mTemplateDlg) mTemplateDlg->close();
 
         beginElectrodesPreview();
         setAppUiActive(true, a);
@@ -2170,9 +2167,12 @@ void RenderView::onBuildStl()
 
     if (mAppActive)
     {
-        if (mHistDlg) mHistDlg->close();
-        if (mTemplateDlg) mTemplateDlg->close();
-        setAppUiActive(false, mCurrentApp);
+        if (mCurrentApp == App::Electrodes)
+        {
+            endElectrodesPreview();
+            setElectrodesUiActive(false);
+            setAppUiActive(false, mCurrentApp);
+        }
     }
 
     if (mToolActive &&
