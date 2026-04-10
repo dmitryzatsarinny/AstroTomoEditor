@@ -1700,6 +1700,8 @@ bool RenderView::ToolModeChanged(Action a)
     if (mStlModeController.isActive() &&
         a != Action::Scissors &&
         a != Action::InverseScissors &&
+        a != Action::Scissors2 &&
+        a != Action::InverseScissors2 &&
         a != Action::Contour)
         return false;
 
@@ -1717,7 +1719,8 @@ bool RenderView::ToolModeChanged(Action a)
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
     }
 
-    if (mScissors && (a == Action::Scissors || a == Action::InverseScissors))
+    if (mScissors && (a == Action::Scissors || a == Action::InverseScissors ||
+        a == Action::Scissors2 || a == Action::InverseScissors2))
     {
         setToolUiActive(true, a);
 
@@ -2174,7 +2177,9 @@ void RenderView::onBuildStl()
 
     if (mToolActive &&
         mCurrentTool != Action::Scissors &&
-        mCurrentTool != Action::InverseScissors)
+        mCurrentTool != Action::InverseScissors &&
+        mCurrentTool != Action::Scissors2 &&
+        mCurrentTool != Action::InverseScissors2)
     {
         if (mScissors) mScissors->cancel();
         if (mContour)  mContour->cancel();

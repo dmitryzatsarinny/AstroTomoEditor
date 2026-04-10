@@ -22,6 +22,8 @@ namespace Tools
         QObject::connect(menu->addAction(QObject::tr("Scissors")), &QAction::triggered, [onAction] { onAction(Action::Scissors); });
         QObject::connect(menu->addAction(QObject::tr("Inverse scissors")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors); });
         if (options.scissorsOnly) {
+            QObject::connect(menu->addAction(QObject::tr("Scissors 2")), &QAction::triggered, [onAction] { onAction(Action::Scissors2); });
+            QObject::connect(menu->addAction(QObject::tr("Inverse scissors 2")), &QAction::triggered, [onAction] { onAction(Action::InverseScissors2); });
             menu->addSeparator();
             QObject::connect(menu->addAction(QObject::tr("Contour")), &QAction::triggered, [onAction] { onAction(Action::Contour); });
             return menu;
@@ -54,6 +56,8 @@ namespace Tools
         {
         case Action::Scissors:          return QObject::tr("Scissors");
         case Action::InverseScissors:   return QObject::tr("Inverse scissors");
+        case Action::Scissors2:         return QObject::tr("Scissors 2");
+        case Action::InverseScissors2:  return QObject::tr("Inverse scissors 2");
         case Action::Contour:           return QObject::tr("Contour");
         case Action::RemoveUnconnected: return QObject::tr("Remove unconnected");
         case Action::RemoveSelected:    return QObject::tr("Remove selected");

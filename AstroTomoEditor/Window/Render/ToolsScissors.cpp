@@ -4,6 +4,7 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QKeyEvent>
+#include "VolumeStlExporter.h"
 
 // VTK
 #include <vtkRenderer.h>
@@ -33,6 +34,7 @@
 #include <vtkIdList.h>
 
 #include <cmath>
+#include <cstring>
 #include <vtkTransformPolyDataFilter.h>
 #include <vtkTransform.h>
 #include <vtkTriangleFilter.h>
@@ -80,14 +82,107 @@ void ToolsScissors::attachSurface(QVTKOpenGLNativeWidget* vtk,
 {
     m_vtk = vtk;
     m_renderer = renderer;
+
     mSurfaceMesh = mesh;
     mSurfaceActor = actor;
-
-    m_image = nullptr;
-    m_volume = nullptr;
     mSurfaceMode = true;
 
+    // В surface-режиме старый volume нам не нужен
+    m_image = nullptr;
+    m_volume = nullptr;
+
     onViewResized();
+}
+
+vtkImageData* ToolsScissors::buildVoxelVolumeFromSurface(vtkPolyData* surface) const
+{
+    if (!surface || surface->GetNumberOfPoints() == 0)
+        return nullptr;
+
+    double bounds[6];
+    surface->GetBounds(bounds);
+
+    if (bounds[1] <= bounds[0] ||
+        bounds[3] <= bounds[2] ||
+        bounds[5] <= bounds[4])
+        return nullptr;
+
+    const double sx = mSurfaceVoxelSpacing[0];
+    const double sy = mSurfaceVoxelSpacing[1];
+    const double sz = mSurfaceVoxelSpacing[2];
+    const int pad = std::max(1, mSurfaceVoxelPadding);
+
+    double origin[3];
+    origin[0] = bounds[0] - pad * sx;
+    origin[1] = bounds[2] - pad * sy;
+    origin[2] = bounds[4] - pad * sz;
+
+    int dims[3];
+    dims[0] = static_cast<int>(std::ceil((bounds[1] - bounds[0]) / sx)) + 1 + 2 * pad;
+    dims[1] = static_cast<int>(std::ceil((bounds[3] - bounds[2]) / sy)) + 1 + 2 * pad;
+    dims[2] = static_cast<int>(std::ceil((bounds[5] - bounds[4]) / sz)) + 1 + 2 * pad;
+
+    if (dims[0] <= 1 || dims[1] <= 1 || dims[2] <= 1)
+        return nullptr;
+
+    vtkNew<vtkImageData> binaryMask;
+    binaryMask->SetOrigin(origin);
+    binaryMask->SetSpacing(sx, sy, sz);
+    binaryMask->SetExtent(0, dims[0] - 1,
+        0, dims[1] - 1,
+        0, dims[2] - 1);
+    binaryMask->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
+
+    const vtkIdType voxelCount =
+        static_cast<vtkIdType>(dims[0]) *
+        static_cast<vtkIdType>(dims[1]) *
+        static_cast<vtkIdType>(dims[2]);
+
+    auto* ptr = static_cast<unsigned char*>(binaryMask->GetScalarPointer());
+    if (!ptr || voxelCount <= 0)
+        return nullptr;
+
+    // Весь объём сначала белый
+    std::memset(ptr, 255, static_cast<size_t>(voxelCount));
+
+    vtkNew<vtkCleanPolyData> cleanMesh;
+    cleanMesh->SetInputData(surface);
+    cleanMesh->Update();
+
+    vtkNew<vtkTriangleFilter> triMesh;
+    triMesh->SetInputConnection(cleanMesh->GetOutputPort());
+    triMesh->Update();
+
+    vtkNew<vtkPolyDataToImageStencil> p2s;
+    p2s->SetInputConnection(triMesh->GetOutputPort());
+    p2s->SetOutputOrigin(origin);
+    p2s->SetOutputSpacing(sx, sy, sz);
+    p2s->SetOutputWholeExtent(binaryMask->GetExtent());
+    p2s->Update();
+
+    vtkNew<vtkImageStencil> fillInside;
+    fillInside->SetInputData(binaryMask);
+    fillInside->SetStencilConnection(p2s->GetOutputPort());
+    fillInside->SetReverseStencil(false);
+    fillInside->SetBackgroundValue(0);   // снаружи обнуляем
+    fillInside->Update();
+
+    vtkImageData* out = vtkImageData::New();
+    out->DeepCopy(fillInside->GetOutput());
+
+    double range[2];
+    out->GetScalarRange(range);
+
+    qDebug() << "buildVoxelVolumeFromSurface:"
+        << "bounds =" << bounds[0] << bounds[1]
+        << bounds[2] << bounds[3]
+        << bounds[4] << bounds[5]
+        << "dims =" << dims[0] << dims[1] << dims[2]
+        << "origin =" << origin[0] << origin[1] << origin[2]
+        << "spacing =" << sx << sy << sz
+        << "range =" << range[0] << range[1];
+
+    return out;
 }
 
 static void forwardMouseToWidget(QWidget* target, QMouseEvent* me)
@@ -255,8 +350,11 @@ bool ToolsScissors::eventFilter(QObject* obj, QEvent* ev)
 
 bool ToolsScissors::handle(Action a)
 {
+    mUseVoxelizedSurfaceCut = false;
     if (a == Action::Scissors) { start(true);  return true; }
     if (a == Action::InverseScissors) { start(false); return true; }
+    if (a == Action::Scissors2) { mUseVoxelizedSurfaceCut = true; start(true); return true; }
+    if (a == Action::InverseScissors2) { mUseVoxelizedSurfaceCut = true; start(false); return true; }
     return false;
 }
 
@@ -331,7 +429,9 @@ void ToolsScissors::finish()
 
     if (mSurfaceMode)
     {
-        vtkPolyData* out = applySurfaceCut(m_pts, m_cutInside);
+        vtkPolyData* out = mUseVoxelizedSurfaceCut
+            ? applySurfaceCutVoxelized(m_pts, m_cutInside)
+            : applySurfaceCut(m_pts, m_cutInside);
         repeat();
 
         qDebug() << "finish surface result =" << (out ? "ok" : "null");
@@ -417,13 +517,13 @@ void ToolsScissors::paintOverlay(QPainter& p)
         p.drawEllipse(m_cursorPos, 2, 2);
 }
 
-vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool cutInside)
+vtkImageData* ToolsScissors::applyPolygonCut(vtkImageData* sourceImage, const QVector<QPoint>& pts2D, bool cutInside)
 {
-    if (!m_renderer || !m_vtk || !m_image) return nullptr;
+    if (!m_renderer || !m_vtk || !sourceImage) return nullptr;
 
     // 0) Вспомогалка: взять DirectionMatrix (или I)
     vtkNew<vtkMatrix3x3> M;
-    if (auto* dm = m_image->GetDirectionMatrix()) M->DeepCopy(dm);
+    if (auto* dm = sourceImage->GetDirectionMatrix()) M->DeepCopy(dm);
     else M->Identity();
 
     // построим D^T (world->IJK поворот)
@@ -434,8 +534,8 @@ vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool 
     };
 
     // origin и spacing изображения
-    double org[3]; m_image->GetOrigin(org);
-    double sp[3]; m_image->GetSpacing(sp);
+    double org[3]; sourceImage->GetOrigin(org);
+    double sp[3]; sourceImage->GetSpacing(sp);
 
     // --- 1) POV камеры (лучи) ---
     auto* cam = m_renderer->GetActiveCamera();
@@ -617,7 +717,7 @@ vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool 
     tri->Update();
 
     // --- 5) Растеризация в сетку изображения ---
-    int   ext[6]; m_image->GetExtent(ext);
+    int   ext[6]; sourceImage->GetExtent(ext);
 
     vtkNew<vtkPolyDataToImageStencil> p2s;
     p2s->SetInputConnection(tri->GetOutputPort());
@@ -627,7 +727,7 @@ vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool 
     p2s->Update();
 
     vtkNew<vtkImageStencil> sten;
-    sten->SetInputData(m_image);
+    sten->SetInputData(sourceImage);
     sten->SetStencilConnection(p2s->GetOutputPort());
     // семантика меню: Scissors = оставить внутри, Inverse = снаружи
     sten->SetReverseStencil(cutInside);
@@ -638,6 +738,11 @@ vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool 
     vtkImageData* out = vtkImageData::New();
     out->DeepCopy(sten->GetOutput());
     return out;
+}
+
+vtkImageData* ToolsScissors::applyPolygonCut(const QVector<QPoint>& pts2D, bool cutInside)
+{
+    return applyPolygonCut(m_image, pts2D, cutInside);
 }
 
 static vtkSmartPointer<vtkPolyData> BuildScreenFrustumWorld(
@@ -846,5 +951,45 @@ vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool c
 
     vtkPolyData* out = vtkPolyData::New();
     out->DeepCopy(tri->GetOutput());
+    return out;
+}
+
+vtkPolyData* ToolsScissors::applySurfaceCutVoxelized(const QVector<QPoint>& pts2D, bool cutInside)
+{
+    if (!mSurfaceMesh || pts2D.size() < 3)
+        return nullptr;
+
+    vtkImageData* surfaceVolume = buildVoxelVolumeFromSurface(mSurfaceMesh);
+    if (!surfaceVolume)
+        return nullptr;
+
+    vtkImageData* cutVolume = applyPolygonCut(surfaceVolume, pts2D, cutInside);
+    surfaceVolume->Delete();
+
+    if (!cutVolume)
+        return nullptr;
+
+    auto rebuilt = VolumeStlExporter::BuildFromBinaryVoxelsNew(cutVolume, VisibleExportOptions{});
+    cutVolume->Delete();
+
+    if (!rebuilt || rebuilt->GetNumberOfCells() == 0)
+        return nullptr;
+
+    vtkNew<vtkCleanPolyData> clean;
+    clean->SetInputData(rebuilt);
+    clean->Update();
+
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputConnection(clean->GetOutputPort());
+    tri->Update();
+
+    if (!tri->GetOutput() || tri->GetOutput()->GetNumberOfCells() == 0)
+        return nullptr;
+
+    vtkPolyData* out = vtkPolyData::New();
+    out->DeepCopy(tri->GetOutput());
+
+    qDebug() << "applySurfaceCutVoxelized: final cells =" << out->GetNumberOfCells();
+
     return out;
 }

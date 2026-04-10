@@ -77,6 +77,9 @@ private:
     std::function<void(vtkPolyData*)> mOnSurfaceReplaced;
     std::function<void()> m_onFinished;
 
+    double mSurfaceVoxelSpacing[3]{ 0.8, 0.8, 0.8 };
+    int mSurfaceVoxelPadding = 4;
+
     // Внутренняя логика
     void start(bool cutInside);
     void finish();
@@ -84,12 +87,16 @@ private:
     void repeat();
 
     // Построение маски/вырез тома
+    vtkImageData* applyPolygonCut(vtkImageData* sourceImage, const QVector<QPoint>& pts2D, bool cutInside);
     vtkImageData* applyPolygonCut(const QVector<QPoint>& pts2D, bool cutInside);
     vtkPolyData* applySurfaceCut(const QVector<QPoint>& pts2D, bool cutInside);
+    vtkPolyData* applySurfaceCutVoxelized(const QVector<QPoint>& pts2D, bool cutInside);
 
     // События overlay
     void paintOverlay(QPainter& p);
 
     bool m_allowNav{ true }; // по умолчанию — включено
     void forwardMouseToVtk(QEvent* e); // проброс в QVTK
+    bool mUseVoxelizedSurfaceCut{ false };
+    vtkImageData* buildVoxelVolumeFromSurface(vtkPolyData* surface) const;
 };
