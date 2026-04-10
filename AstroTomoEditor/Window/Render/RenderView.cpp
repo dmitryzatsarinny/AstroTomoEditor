@@ -1692,7 +1692,10 @@ bool RenderView::ToolModeChanged(Action a)
     if (mScissors && (a == Action::Scissors || a == Action::InverseScissors)) 
     {
         setToolUiActive(true, a);
-        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+        vtkImageData* scissorsImage = mStlModeController.isActive() && mStlWorkingImage
+            ? mStlWorkingImage.GetPointer()
+            : mImage.GetPointer();
+        mScissors->attach(mVtk, mRenderer, scissorsImage, mVolume);
         mScissors->handle(a);
         return true;
     }
@@ -2021,6 +2024,7 @@ void RenderView::onBuildStl()
 {
     if (!mImage || !mVolume || !mRenderer) {
         mStlModeController.setActive(false);
+        mStlWorkingImage = nullptr;
         reloadToolsMenu();
         updateUndoRedoUi();
         emit showWarning(tr("No volume to build STL"));
@@ -2033,6 +2037,7 @@ void RenderView::onBuildStl()
     if (mBtnSTL->isChecked() == false)
     {
         mStlModeController.setActive(false);
+        mStlWorkingImage = nullptr;
         reloadToolsMenu();
         updateUndoRedoUi();
         mRenderer->RemoveActor(mIsoActor);
@@ -2094,6 +2099,7 @@ void RenderView::onBuildStl()
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) 
     {
         mStlModeController.setActive(false);
+        mStlWorkingImage = nullptr;
         reloadToolsMenu();
         updateUndoRedoUi();
         if (mBtnSTL) mBtnSTL->setChecked(false);
@@ -2111,6 +2117,7 @@ void RenderView::onBuildStl()
 
     mStlModeController.setActive(true);
     mStlModeController.resetSurfaceHistory(mIsoMesh);
+    mStlWorkingImage = cloneImage(mImage);
     addStlPreview();
     updateStlSizeLabel();
 
@@ -2783,6 +2790,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     mIsoMesh = nullptr;
     mStlModeController.setActive(false);
     mStlModeController.resetSurfaceHistory(nullptr);
+    mStlWorkingImage = nullptr;
     updateTopPanelForStlMode(false);
     reloadToolsMenu();
     mSimplifyStarted = false;
@@ -2898,36 +2906,27 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
             {
                 if (mStlModeController.isActive())
                 {
-                    const bool rebuilt = rebuildStlFromEditedImage(im);
-                    if (rebuilt && im)
-                        mImage = im;
-
+                    mStlWorkingImage = im;
+                    const bool rebuilt = rebuildStlFromEditedImage(mStlWorkingImage);
                     setMapperInput(mImage);
                     if (!rebuilt)
-                    {
                         emit showWarning(tr("STL scissors failed"));
-                        if (im)
-                            im->Delete();
-                    }
-
-                    if (mScissors)
-                        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                    mScissors->attach(mVtk, mRenderer, mStlWorkingImage, mVolume);
                 }
                 else
                 {
                     commitNewImage(im);
-                    if (mScissors)
-                        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
                 }
-
-                if (mVtk && mVtk->renderWindow())
-                    mVtk->renderWindow()->Render();
             });
         mScissors->setOnFinished([this]() {
             setToolUiActive(false, mCurrentTool);
             });
     }
-    mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+    vtkImageData* scissorsImage = mStlModeController.isActive() && mStlWorkingImage
+        ? mStlWorkingImage.GetPointer()
+        : mImage.GetPointer();
+    mScissors->attach(mVtk, mRenderer, scissorsImage, mVolume);
     if (!mContour)
     {
         mContour = std::make_unique<ToolsContour>(this);

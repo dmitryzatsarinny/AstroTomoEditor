@@ -1,6 +1,4 @@
-#include "ToolsContour.h"
-
-#include "Tools.h"
+Ôªø#include "ToolsContour.h"
 
 #include <QEvent>
 #include <QKeyEvent>
@@ -19,6 +17,7 @@
 #include <vtkClipPolyData.h>
 #include <vtkDijkstraGraphGeodesicPath.h>
 #include <vtkGlyph3DMapper.h>
+#include <vtkLinearSubdivisionFilter.h>
 #include <vtkNew.h>
 #include <vtkPoints.h>
 #include <vtkPolyData.h>
@@ -67,23 +66,7 @@ bool ToolsContour::handle(Action a)
 
 void ToolsContour::onViewResized()
 {
-    // ŒÒÚ‡‚ÎÂÌÓ ÒÔÂˆË‡Î¸ÌÓ ÔÛÒÚ˚Ï ‰Îˇ ÒÓ‚ÏÂÒÚËÏÓÒÚË Ò ÒÛ˘ÂÒÚ‚Û˛˘ËÏ ÍÓ‰ÓÏ.
-    // Preview ÚÂÔÂ¸ ËÒÛÂÚÒˇ ‚ÌÛÚË VTK, ‡ ÌÂ ÔÓ‚Âı QWidget.
-}
-
-void ToolsContour::cancel()
-{
-    const bool wasActive = (m_state != State::Off);
-
-    m_state = State::Off;
-    m_controlIds.clear();
-    m_contourWorldPoints.clear();
-
-    destroyPreviewActors();
-    renderNow();
-
-    if (wasActive && m_onFinished)
-        m_onFinished();
+    // –ù–∏—á–µ–≥–æ –Ω–µ –Ω—É–∂–Ω–æ: –ø—Ä–µ–≤—å—é —Ä–∏—Å—É–µ—Ç—Å—è VTK-–∞–∫—Ç–æ—Ä–∞–º–∏.
 }
 
 void ToolsContour::start()
@@ -93,7 +76,9 @@ void ToolsContour::start()
 
     m_state = State::Collecting;
     m_controlIds.clear();
-    m_contourWorldPoints.clear();
+    m_controlWorldPoints.clear();
+    m_rawContourWorldPoints.clear();
+    m_displayContourWorldPoints.clear();
 
     createPreviewActors();
     updatePreviewGeometry();
@@ -104,33 +89,45 @@ void ToolsContour::start()
     renderNow();
 }
 
-void ToolsContour::finish()
+void ToolsContour::cancel()
 {
-    if (m_controlIds.size() < 3)
-    {
-        cancel();
-        return;
-    }
+    const bool wasActive = (m_state != State::Off);
 
-    const vtkIdType firstId = m_controlIds.front();
-    const vtkIdType lastId = m_controlIds.back();
+    m_state = State::Off;
+    m_controlIds.clear();
+    m_controlWorldPoints.clear();
+    m_rawContourWorldPoints.clear();
+    m_displayContourWorldPoints.clear();
 
-    if (!appendGeodesicPath(lastId, firstId))
-    {
-        cancel();
-        return;
-    }
-
-    updatePreviewGeometry();
+    destroyPreviewActors();
     renderNow();
 
-    const bool ok = applyContourCut();
+    if (wasActive && m_onFinished)
+        m_onFinished();
+}
 
-    cancel();
-
-    if (!ok)
+void ToolsContour::finish()
+{
+    if (m_finishing || m_state != State::Collecting)
         return;
 
+    if (m_controlIds.size() < 3)
+        return;
+
+    m_finishing = true;
+
+    const bool ok = applyContourCut();
+    if (!ok)
+    {
+        qDebug() << "Contour cut failed";
+        m_finishing = false;
+        renderNow();
+        return;
+    }
+
+    qDebug() << "Contour cut applied";
+    cancel();
+    m_finishing = false;
     renderNow();
 }
 
@@ -148,22 +145,15 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
         if (me->button() == Qt::LeftButton)
         {
             vtkIdType pointId = -1;
-            std::array<double, 3> worldPoint{};
+            WorldPoint worldPoint{};
 
             if (!pickPoint(me->pos(), pointId, worldPoint))
                 return true;
 
-            if (!m_controlIds.isEmpty())
-            {
-                if (!appendGeodesicPath(m_controlIds.back(), pointId))
-                    return true;
-            }
-            else
-            {
-                m_contourWorldPoints.push_back(worldPoint);
-            }
-
             m_controlIds.push_back(pointId);
+            m_controlWorldPoints.push_back(worldPoint);
+
+            rebuildContourFromControls();
             updatePreviewGeometry();
             renderNow();
             return true;
@@ -177,6 +167,9 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
 
         break;
     }
+
+    case QEvent::ContextMenu:
+        return true;
 
     case QEvent::KeyPress:
     {
@@ -198,7 +191,7 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
     return QObject::eventFilter(obj, ev);
 }
 
-bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, std::array<double, 3>& worldPoint) const
+bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, WorldPoint& worldPoint) const
 {
     if (!m_vtk || !m_renderer || !m_mesh || !m_meshActor || !m_picker)
         return false;
@@ -213,7 +206,7 @@ bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, std::arr
         rwH = static_cast<int>(m_vtk->height() * dpr);
 
     const double xd = static_cast<double>(viewPos.x()) * dpr;
-    const double yd = static_cast<double>((rwH - 1)) - static_cast<double>(viewPos.y()) * dpr;
+    const double yd = static_cast<double>(rwH - 1) - static_cast<double>(viewPos.y()) * dpr;
 
     m_picker->InitializePickList();
     m_picker->AddPickList(m_meshActor);
@@ -234,13 +227,17 @@ bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, std::arr
 
     double pt[3]{};
     m_mesh->GetPoint(pointId, pt);
-
     worldPoint = { pt[0], pt[1], pt[2] };
+
     return true;
 }
 
-bool ToolsContour::appendGeodesicPath(vtkIdType fromId, vtkIdType toId)
+bool ToolsContour::computeGeodesicSegment(vtkIdType fromId,
+    vtkIdType toId,
+    std::vector<WorldPoint>& outPath) const
 {
+    outPath.clear();
+
     if (!m_mesh || fromId < 0 || toId < 0)
         return false;
 
@@ -254,157 +251,296 @@ bool ToolsContour::appendGeodesicPath(vtkIdType fromId, vtkIdType toId)
     if (!out || !out->GetPoints() || out->GetNumberOfPoints() == 0)
         return false;
 
-    std::vector<std::array<double, 3>> path;
-    path.reserve(static_cast<size_t>(out->GetNumberOfPoints()));
-
+    outPath.reserve(static_cast<size_t>(out->GetNumberOfPoints()));
     for (vtkIdType i = 0; i < out->GetNumberOfPoints(); ++i)
     {
         double p[3]{};
         out->GetPoint(i, p);
-        path.push_back({ p[0], p[1], p[2] });
+        outPath.push_back({ p[0], p[1], p[2] });
     }
 
     double fromPoint[3]{};
     m_mesh->GetPoint(fromId, fromPoint);
 
-    const auto dist2 = [](const std::array<double, 3>& a, const double* b)
+    const auto dist2ToFrom = [&](const WorldPoint& p)
         {
-            const double dx = a[0] - b[0];
-            const double dy = a[1] - b[1];
-            const double dz = a[2] - b[2];
+            const double dx = p[0] - fromPoint[0];
+            const double dy = p[1] - fromPoint[1];
+            const double dz = p[2] - fromPoint[2];
             return dx * dx + dy * dy + dz * dz;
         };
 
-    if (path.size() >= 2)
+    if (outPath.size() >= 2)
     {
-        const double frontDist = dist2(path.front(), fromPoint);
-        const double backDist = dist2(path.back(), fromPoint);
+        const double frontDist = dist2ToFrom(outPath.front());
+        const double backDist = dist2ToFrom(outPath.back());
 
         if (backDist < frontDist)
-            std::reverse(path.begin(), path.end());
+            std::reverse(outPath.begin(), outPath.end());
     }
 
-    const vtkIdType begin = m_contourWorldPoints.isEmpty() ? 0 : 1;
-    for (vtkIdType i = begin; i < static_cast<vtkIdType>(path.size()); ++i)
-        m_contourWorldPoints.push_back(path[static_cast<int>(i)]);
+    return !outPath.empty();
+}
 
-    return true;
+void ToolsContour::rebuildContourFromControls()
+{
+    m_rawContourWorldPoints.clear();
+
+    if (m_controlIds.isEmpty() || !m_mesh)
+    {
+        updateDisplayContour();
+        return;
+    }
+
+    if (m_controlIds.size() == 1)
+    {
+        m_rawContourWorldPoints.push_back(m_controlWorldPoints.front());
+        updateDisplayContour();
+        return;
+    }
+
+    std::vector<WorldPoint> segment;
+
+    auto appendSegment = [&](vtkIdType fromId, vtkIdType toId, bool skipFirstPoint)
+        {
+            if (!computeGeodesicSegment(fromId, toId, segment))
+                return false;
+
+            const int beginIndex = skipFirstPoint ? 1 : 0;
+            for (int i = beginIndex; i < static_cast<int>(segment.size()); ++i)
+                m_rawContourWorldPoints.push_back(segment[static_cast<size_t>(i)]);
+
+            return true;
+        };
+
+    bool firstSegment = true;
+
+    for (int i = 1; i < m_controlIds.size(); ++i)
+    {
+        if (!appendSegment(m_controlIds[i - 1], m_controlIds[i], !firstSegment))
+        {
+            updateDisplayContour();
+            return;
+        }
+        firstSegment = false;
+    }
+
+    // –ü–æ—Å–ª–µ —Ç—Ä–µ—Ç—å–µ–≥–æ –∫–ª–∏–∫–∞ –∏ –¥–∞–ª—å—à–µ —Å—Ä–∞–∑—É –¥–µ—Ä–∂–∏–º –∫–æ–Ω—Ç—É—Ä –∑–∞–º–∫–Ω—É—Ç—ã–º.
+    if (m_controlIds.size() >= 3)
+    {
+        appendSegment(m_controlIds.back(), m_controlIds.front(), !m_rawContourWorldPoints.isEmpty());
+    }
+
+    updateDisplayContour();
+}
+
+void ToolsContour::updateDisplayContour()
+{
+    m_displayContourWorldPoints.clear();
+
+    if (m_rawContourWorldPoints.isEmpty())
+        return;
+
+    if (m_controlIds.size() < 3)
+    {
+        m_displayContourWorldPoints = m_rawContourWorldPoints;
+        return;
+    }
+
+    m_displayContourWorldPoints = buildSmoothedClosedLoop(m_rawContourWorldPoints);
+}
+
+QVector<ToolsContour::WorldPoint> ToolsContour::buildSmoothedClosedLoop(const QVector<WorldPoint>& closedLoop) const
+{
+    if (closedLoop.size() < 3 || !m_mesh)
+        return closedLoop;
+
+    QVector<WorldPoint> loop = closedLoop;
+
+    // –ï—Å–ª–∏ –ø–æ—Å–ª–µ–¥–Ω–∏–π —ç–ª–µ–º–µ–Ω—Ç —Å–æ–≤–ø–∞–¥–∞–µ—Ç —Å –ø–µ—Ä–≤—ã–º, —É–±–∏—Ä–∞–µ–º –¥—É–±–ª—å –¥–ª—è –≤–Ω—É—Ç—Ä–µ–Ω–Ω–∏—Ö –≤—ã—á–∏—Å–ª–µ–Ω–∏–π.
+    if (loop.size() >= 2 && almostEqual(loop.front(), loop.back()))
+        loop.removeLast();
+
+    if (loop.size() < 3)
+        return closedLoop;
+
+    const int targetCount = std::max(m_previewMinSampleCount, (int)loop.size());
+    QVector<WorldPoint> resampled = resampleClosedLoop(loop, targetCount);
+    QVector<WorldPoint> smoothed = smoothClosedLoopOnSurface(
+        resampled,
+        m_previewSmoothIterations,
+        m_previewSmoothFactor);
+
+    return smoothed;
+}
+
+QVector<ToolsContour::WorldPoint> ToolsContour::resampleClosedLoop(const QVector<WorldPoint>& closedLoop,
+    int targetCount) const
+{
+    QVector<WorldPoint> result;
+
+    if (closedLoop.size() < 3 || targetCount < 3)
+        return closedLoop;
+
+    std::vector<double> cumulative(static_cast<size_t>(closedLoop.size()) + 1, 0.0);
+
+    for (int i = 0; i < closedLoop.size(); ++i)
+    {
+        const WorldPoint& a = closedLoop[i];
+        const WorldPoint& b = closedLoop[(i + 1) % closedLoop.size()];
+
+        const double dx = b[0] - a[0];
+        const double dy = b[1] - a[1];
+        const double dz = b[2] - a[2];
+
+        cumulative[static_cast<size_t>(i + 1)] =
+            cumulative[static_cast<size_t>(i)] + std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    const double totalLength = cumulative.back();
+    if (totalLength <= 1e-12)
+        return closedLoop;
+
+    result.reserve(targetCount);
+
+    for (int i = 0; i < targetCount; ++i)
+    {
+        const double targetLen = totalLength * static_cast<double>(i) / static_cast<double>(targetCount);
+
+        auto upper = std::lower_bound(cumulative.begin(), cumulative.end(), targetLen);
+        size_t seg = static_cast<size_t>(std::distance(cumulative.begin(), upper));
+        seg = std::clamp<size_t>(seg, 1, static_cast<size_t>(closedLoop.size()));
+
+        const double segStart = cumulative[seg - 1];
+        const double segEnd = cumulative[seg];
+        const double span = std::max(1e-12, segEnd - segStart);
+        const double t = (targetLen - segStart) / span;
+
+        const WorldPoint& p0 = closedLoop[static_cast<int>(seg - 1)];
+        const WorldPoint& p1 = closedLoop[static_cast<int>(seg % static_cast<size_t>(closedLoop.size()))];
+
+        WorldPoint p{};
+        for (int axis = 0; axis < 3; ++axis)
+            p[axis] = p0[axis] + (p1[axis] - p0[axis]) * t;
+
+        result.push_back(p);
+    }
+
+    return result;
+}
+
+QVector<ToolsContour::WorldPoint> ToolsContour::smoothClosedLoopOnSurface(const QVector<WorldPoint>& closedLoop,
+    int iterations,
+    double factor) const
+{
+    if (!m_mesh || closedLoop.size() < 3)
+        return closedLoop;
+
+    vtkNew<vtkCellLocator> locator;
+    locator->SetDataSet(m_mesh);
+    locator->BuildLocator();
+
+    QVector<WorldPoint> current = closedLoop;
+    QVector<WorldPoint> next = current;
+
+    factor = std::clamp(factor, 0.0, 1.0);
+
+    for (int iter = 0; iter < iterations; ++iter)
+    {
+        for (int i = 0; i < current.size(); ++i)
+        {
+            const WorldPoint& prev = current[(i - 1 + current.size()) % current.size()];
+            const WorldPoint& cur = current[i];
+            const WorldPoint& nxt = current[(i + 1) % current.size()];
+
+            WorldPoint blended{};
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                const double neighborMean = 0.5 * (prev[axis] + nxt[axis]);
+                blended[axis] = (1.0 - factor) * cur[axis] + factor * neighborMean;
+            }
+
+            double closest[3]{};
+            double dist2 = 0.0;
+            vtkIdType cellId = -1;
+            int subId = -1;
+
+            locator->FindClosestPoint(blended.data(), closest, cellId, subId, dist2);
+            next[i] = { closest[0], closest[1], closest[2] };
+        }
+
+        current.swap(next);
+    }
+
+    return current;
 }
 
 bool ToolsContour::applyContourCut()
 {
-    if (!m_mesh || m_contourWorldPoints.size() < 3)
+    if (!m_mesh || m_controlIds.size() < 3)
+    {
+        qDebug() << "applyContourCut: invalid input";
         return false;
+    }
 
-    auto smoothedLoop = [&]() -> QVector<std::array<double, 3>>
-        {
-            std::vector<std::array<double, 3>> points;
-            points.reserve(static_cast<size_t>(m_contourWorldPoints.size()));
-            for (const auto& p : m_contourWorldPoints)
-                points.push_back(p);
+    QVector<WorldPoint> smoothLoop = m_displayContourWorldPoints;
+    if (smoothLoop.size() < 3)
+        smoothLoop = buildSmoothedClosedLoop(m_rawContourWorldPoints);
 
-            // Chaikin smoothing keeps the contour closed and visually softer.
-            constexpr int smoothIterations = 2;
-            for (int iteration = 0; iteration < smoothIterations && points.size() >= 3; ++iteration)
-            {
-                std::vector<std::array<double, 3>> refined;
-                refined.reserve(points.size() * 2);
-
-                for (size_t i = 0; i < points.size(); ++i)
-                {
-                    const auto& p0 = points[i];
-                    const auto& p1 = points[(i + 1) % points.size()];
-
-                    std::array<double, 3> q{};
-                    std::array<double, 3> r{};
-                    for (int axis = 0; axis < 3; ++axis)
-                    {
-                        q[axis] = 0.75 * p0[axis] + 0.25 * p1[axis];
-                        r[axis] = 0.25 * p0[axis] + 0.75 * p1[axis];
-                    }
-
-                    refined.push_back(q);
-                    refined.push_back(r);
-                }
-
-                points = std::move(refined);
-            }
-
-            if (points.size() < 3)
-                return m_contourWorldPoints;
-
-            std::vector<double> lengths(points.size() + 1, 0.0);
-            for (size_t i = 0; i < points.size(); ++i)
-            {
-                const auto& p0 = points[i];
-                const auto& p1 = points[(i + 1) % points.size()];
-                const double dx = p1[0] - p0[0];
-                const double dy = p1[1] - p0[1];
-                const double dz = p1[2] - p0[2];
-                lengths[i + 1] = lengths[i] + std::sqrt(dx * dx + dy * dy + dz * dz);
-            }
-
-            const double totalLength = lengths.back();
-            if (totalLength <= 0.0)
-                return m_contourWorldPoints;
-
-            const size_t targetCount = std::max<size_t>(64, points.size());
-            std::vector<std::array<double, 3>> sampled;
-            sampled.reserve(targetCount);
-
-            for (size_t i = 0; i < targetCount; ++i)
-            {
-                const double targetLen = totalLength * static_cast<double>(i) / static_cast<double>(targetCount);
-                auto upper = std::lower_bound(lengths.begin(), lengths.end(), targetLen);
-                size_t seg = static_cast<size_t>(std::distance(lengths.begin(), upper));
-                seg = std::clamp<size_t>(seg, 1, points.size());
-
-                const double segStartLen = lengths[seg - 1];
-                const double segEndLen = lengths[seg];
-                const double segSpan = std::max(1e-12, segEndLen - segStartLen);
-                const double t = (targetLen - segStartLen) / segSpan;
-
-                const auto& p0 = points[seg - 1];
-                const auto& p1 = points[seg % points.size()];
-
-                std::array<double, 3> p{};
-                for (int axis = 0; axis < 3; ++axis)
-                    p[axis] = p0[axis] + (p1[axis] - p0[axis]) * t;
-
-                sampled.push_back(p);
-            }
-
-            vtkNew<vtkCellLocator> locator;
-            locator->SetDataSet(m_mesh);
-            locator->BuildLocator();
-
-            QVector<std::array<double, 3>> projected;
-            projected.reserve(static_cast<qsizetype>(sampled.size()));
-
-            for (const auto& p : sampled)
-            {
-                double closest[3]{};
-                double dist2 = 0.0;
-                vtkIdType cellId = -1;
-                int subId = -1;
-                locator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
-                projected.push_back({ closest[0], closest[1], closest[2] });
-            }
-
-            return projected;
-        }();
+    if (smoothLoop.size() < 3)
+    {
+        qDebug() << "applyContourCut: smooth loop too small";
+        return false;
+    }
 
     vtkNew<vtkPoints> loopPts;
-    for (const auto& p : smoothedLoop)
+    for (const auto& p : smoothLoop)
         loopPts->InsertNextPoint(p[0], p[1], p[2]);
 
+    qDebug() << "applyContourCut: loop pts =" << loopPts->GetNumberOfPoints();
+
+    // 1. –ì–æ—Ç–æ–≤–∏–º –∏—Å—Ö–æ–¥–Ω—É—é —Å–µ—Ç–∫—É, –Ω–æ –ù–ï subdivision –ø–µ—Ä–µ–¥ select
+    vtkNew<vtkTriangleFilter> triInput;
+    triInput->SetInputData(m_mesh);
+    triInput->PassLinesOff();
+    triInput->PassVertsOff();
+    triInput->Update();
+
+    qDebug() << "triInput cells =" << triInput->GetOutput()->GetNumberOfCells();
+
+    vtkNew<vtkCleanPolyData> cleanInput;
+    cleanInput->SetInputConnection(triInput->GetOutputPort());
+    cleanInput->PointMergingOn();
+    cleanInput->Update();
+
+    vtkPolyData* cleanInputOut = cleanInput->GetOutput();
+    if (!cleanInputOut || cleanInputOut->GetNumberOfCells() == 0)
+    {
+        qDebug() << "cleanInput empty";
+        return false;
+    }
+
+    qDebug() << "cleanInput cells =" << cleanInputOut->GetNumberOfCells();
+
+    // 2. –°—Ç—Ä–æ–∏–º –≤—ã–¥–µ–ª–µ–Ω–∏–µ –ø–æ –ò–°–•–û–î–ù–û–ô –ø–æ–≤–µ—Ä—Ö–Ω–æ—Å—Ç–∏
     vtkNew<vtkSelectPolyData> select;
-    select->SetInputData(m_mesh);
+    select->SetInputConnection(cleanInput->GetOutputPort());
     select->SetLoop(loopPts);
     select->GenerateSelectionScalarsOn();
     select->SetSelectionModeToSmallestRegion();
     select->Update();
 
+    vtkPolyData* selectOut = select->GetOutput();
+    const vtkIdType selectCells = selectOut ? selectOut->GetNumberOfCells() : 0;
+    qDebug() << "select output cells =" << selectCells;
+
+    if (!selectOut || selectCells == 0)
+    {
+        qDebug() << "applyContourCut: select output empty";
+        return false;
+    }
+
+    // 3. –í—ã—Ä–µ–∑–∞–µ–º –º–µ–Ω—å—à—É—é –æ–±–ª–∞—Å—Ç—å
     vtkNew<vtkClipPolyData> clip;
     clip->SetInputConnection(select->GetOutputPort());
     clip->SetValue(0.0);
@@ -412,6 +548,17 @@ bool ToolsContour::applyContourCut()
     clip->GenerateClippedOutputOff();
     clip->Update();
 
+    vtkPolyData* clipOut = clip->GetOutput();
+    const vtkIdType clipCells = clipOut ? clipOut->GetNumberOfCells() : 0;
+    qDebug() << "clip output cells =" << clipCells;
+
+    if (!clipOut || clipCells == 0)
+    {
+        qDebug() << "applyContourCut: clip output empty";
+        return false;
+    }
+
+    // 4. –§–∏–Ω–∞–ª—å–Ω–∞—è —Ç—Ä–∏–∞–Ω–≥—É–ª—è—Ü–∏—è –∏ –æ—á–∏—Å—Ç–∫–∞ –ø–æ—Å–ª–µ –≤—ã—Ä–µ–∑–∞
     vtkNew<vtkTriangleFilter> tri;
     tri->SetInputConnection(clip->GetOutputPort());
     tri->PassLinesOff();
@@ -423,15 +570,63 @@ bool ToolsContour::applyContourCut()
     clean->PointMergingOn();
     clean->Update();
 
-    vtkPolyData* out = clean->GetOutput();
-    if (!out || out->GetNumberOfCells() == 0)
-        return false;
+    vtkSmartPointer<vtkPolyData> result = vtkSmartPointer<vtkPolyData>::New();
+    result->DeepCopy(clean->GetOutput());
 
-    auto next = vtkSmartPointer<vtkPolyData>::New();
-    next->DeepCopy(out);
+    if (!result || result->GetNumberOfCells() == 0)
+    {
+        qDebug() << "clean output empty";
+        return false;
+    }
+
+    qDebug() << "post-clip clean cells =" << result->GetNumberOfCells();
+
+    // 5. –ò —Ç–æ–ª—å–∫–æ —Ç–µ–ø–µ—Ä—å optional subdivision
+    if (m_cutSubdivisionIterations > 0)
+    {
+        vtkNew<vtkLinearSubdivisionFilter> subdiv;
+        subdiv->SetInputData(result);
+        subdiv->SetNumberOfSubdivisions(m_cutSubdivisionIterations);
+        subdiv->Update();
+
+        vtkPolyData* subdivOut = subdiv->GetOutput();
+        const vtkIdType subdivCells = subdivOut ? subdivOut->GetNumberOfCells() : 0;
+        qDebug() << "post-clip subdiv cells =" << subdivCells;
+
+        if (subdivOut && subdivCells > 0)
+        {
+            vtkNew<vtkCleanPolyData> cleanSubdiv;
+            cleanSubdiv->SetInputConnection(subdiv->GetOutputPort());
+            cleanSubdiv->PointMergingOn();
+            cleanSubdiv->Update();
+
+            vtkPolyData* cleanSubdivOut = cleanSubdiv->GetOutput();
+            if (cleanSubdivOut && cleanSubdivOut->GetNumberOfCells() > 0)
+            {
+                result->DeepCopy(cleanSubdivOut);
+            }
+            else
+            {
+                qDebug() << "post-clip subdivision clean failed, keep unclipped result";
+            }
+        }
+        else
+        {
+            qDebug() << "post-clip subdivision failed, keep unclipped result";
+        }
+    }
+
+    qDebug() << "final output cells =" << result->GetNumberOfCells();
 
     if (m_onSurfaceReplaced)
-        m_onSurfaceReplaced(next);
+    {
+        qDebug() << "calling m_onSurfaceReplaced";
+        m_onSurfaceReplaced(result);
+    }
+    else
+    {
+        qDebug() << "m_onSurfaceReplaced is not set";
+    }
 
     return true;
 }
@@ -465,8 +660,8 @@ void ToolsContour::createPreviewActors()
 
         m_previewSphereSource = vtkSmartPointer<vtkSphereSource>::New();
         m_previewSphereSource->SetRadius(1.0);
-        m_previewSphereSource->SetThetaResolution(12);
-        m_previewSphereSource->SetPhiResolution(12);
+        m_previewSphereSource->SetThetaResolution(14);
+        m_previewSphereSource->SetPhiResolution(14);
 
         m_previewPointsMapper = vtkSmartPointer<vtkGlyph3DMapper>::New();
         m_previewPointsMapper->SetInputData(m_previewPointsData);
@@ -477,7 +672,7 @@ void ToolsContour::createPreviewActors()
         m_previewPointsActor = vtkSmartPointer<vtkActor>::New();
         m_previewPointsActor->SetMapper(m_previewPointsMapper);
         m_previewPointsActor->PickableOff();
-        m_previewPointsActor->GetProperty()->SetColor(1.0, 0.86, 0.31);
+        m_previewPointsActor->GetProperty()->SetColor(1.0, 0.62, 0.12);
         m_previewPointsActor->GetProperty()->SetLighting(false);
 
         m_renderer->AddActor(m_previewPointsActor);
@@ -507,46 +702,57 @@ void ToolsContour::destroyPreviewActors()
 
 void ToolsContour::updatePreviewGeometry()
 {
-    if (!m_mesh)
+    if (!m_mesh || !m_previewLineData || !m_previewPointsData)
         return;
 
-    if (!m_previewLineData || !m_previewPointsData)
-        return;
+    // ---------- –õ–ò–ù–ò–Ø ----------
+    vtkNew<vtkPoints> linePts;
 
-    vtkNew<vtkPoints> pts;
-    for (const auto& p : m_contourWorldPoints)
-        pts->InsertNextPoint(p[0], p[1], p[2]);
+    const bool closedPreview = (m_controlIds.size() >= 3);
+    const QVector<WorldPoint>& lineSource =
+        m_displayContourWorldPoints.isEmpty() ? m_rawContourWorldPoints : m_displayContourWorldPoints;
 
-    // ÀËÌËˇ
+    for (const auto& p : lineSource)
+        linePts->InsertNextPoint(p[0], p[1], p[2]);
+
+    if (closedPreview && linePts->GetNumberOfPoints() >= 3)
+    {
+        const WorldPoint& first = lineSource.front();
+        linePts->InsertNextPoint(first[0], first[1], first[2]);
+    }
+
     vtkNew<vtkCellArray> lines;
-    if (pts->GetNumberOfPoints() >= 2)
+    if (linePts->GetNumberOfPoints() >= 2)
     {
         vtkNew<vtkPolyLine> polyLine;
-        polyLine->GetPointIds()->SetNumberOfIds(pts->GetNumberOfPoints());
+        polyLine->GetPointIds()->SetNumberOfIds(linePts->GetNumberOfPoints());
 
-        for (vtkIdType i = 0; i < pts->GetNumberOfPoints(); ++i)
+        for (vtkIdType i = 0; i < linePts->GetNumberOfPoints(); ++i)
             polyLine->GetPointIds()->SetId(i, i);
 
         lines->InsertNextCell(polyLine);
     }
 
-    m_previewLineData->SetPoints(pts);
+    m_previewLineData->SetPoints(linePts);
     m_previewLineData->SetLines(lines);
     m_previewLineData->Modified();
 
-    // “Ó˜ÍË
+    // ---------- –ö–û–ù–¢–†–û–õ–¨–ù–´–ï –¢–û–ß–ö–ò ----------
+    vtkNew<vtkPoints> controlPts;
+    for (const auto& p : m_controlWorldPoints)
+        controlPts->InsertNextPoint(p[0], p[1], p[2]);
+
     vtkNew<vtkCellArray> verts;
-    for (vtkIdType i = 0; i < pts->GetNumberOfPoints(); ++i)
+    for (vtkIdType i = 0; i < controlPts->GetNumberOfPoints(); ++i)
     {
         verts->InsertNextCell(1);
         verts->InsertCellPoint(i);
     }
 
-    m_previewPointsData->SetPoints(pts);
+    m_previewPointsData->SetPoints(controlPts);
     m_previewPointsData->SetVerts(verts);
     m_previewPointsData->Modified();
 
-    // œÓ‰·Ë‡ÂÏ ‡ÁÏÂ ÒÙÂ ÔÓ‰ Ï‡Ò¯Ú‡· ÏÓ‰ÂÎË
     if (m_previewSphereSource && m_mesh->GetNumberOfPoints() > 0)
     {
         double bounds[6]{};
@@ -557,8 +763,7 @@ void ToolsContour::updatePreviewGeometry()
         const double dz = bounds[5] - bounds[4];
         const double diag = std::sqrt(dx * dx + dy * dy + dz * dz);
 
-        // ÃÓÊÌÓ ÔÓ‰Ô‡‚ËÚ¸ ÍÓ˝ÙÙËˆËÂÌÚ ÔÓ‰ Ò‚Ó˛ ÒˆÂÌÛ
-        const double radius = std::max(0.1, diag * 0.0035);
+        const double radius = std::max(0.1, diag * 0.0040);
         m_previewSphereSource->SetRadius(radius);
         m_previewSphereSource->Update();
     }
@@ -568,4 +773,17 @@ void ToolsContour::renderNow()
 {
     if (m_vtk && m_vtk->renderWindow())
         m_vtk->renderWindow()->Render();
+}
+
+double ToolsContour::distanceSquared(const WorldPoint& a, const WorldPoint& b)
+{
+    const double dx = a[0] - b[0];
+    const double dy = a[1] - b[1];
+    const double dz = a[2] - b[2];
+    return dx * dx + dy * dy + dz * dz;
+}
+
+bool ToolsContour::almostEqual(const WorldPoint& a, const WorldPoint& b, double eps2)
+{
+    return distanceSquared(a, b) <= eps2;
 }
