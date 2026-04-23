@@ -51,5 +51,7 @@ public:
 
     static quint64 estimateBinaryStlBytesFast(vtkPolyData* pd);
 
+    static double estimateEnclosedVolumeCm3(vtkPolyData* pd);
+
     static QString makeStlSizeText(vtkPolyData* pd);
 };

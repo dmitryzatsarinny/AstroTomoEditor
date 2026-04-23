@@ -10,6 +10,7 @@
 #include <vtkPointData.h>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vtkImageDilateErode3D.h>
 #include <vtkImageData.h>
 #include <vtkVolume.h>
@@ -21,6 +22,7 @@
 #include <vtkPolyDataMapper.h>
 #include <vtkSTLWriter.h>
 #include <vtkQuadricClustering.h>
+#include <vtkMassProperties.h>
 #include <QCoreApplication>
 #include <qfile.h>
 #include <qfileinfo.h>
@@ -264,7 +266,40 @@ QString VolumeStlExporter::makeStlSizeText(vtkPolyData* pd)
     if (!pd) return QString();
     const quint64 tri = quint64(pd->GetNumberOfPolys());
     const quint64 bytes = 84ull + 50ull * tri;
-    return QString("~%1\n(%2 tris)").arg(prettyBytes(bytes)).arg(tri);
+    const double volumeCm3 = estimateEnclosedVolumeCm3(pd);
+
+    if (std::isfinite(volumeCm3) && volumeCm3 > 0.0)
+    {
+        return QString("~%1\n(%2 tris)\n%3 cm³")
+            .arg(prettyBytes(bytes))
+            .arg(tri)
+            .arg(QString::number(volumeCm3, 'f', 2));
+    }
+
+    return QString("~%1\n(%2 tris)\n- cm³").arg(prettyBytes(bytes)).arg(tri);
+}
+
+double VolumeStlExporter::estimateEnclosedVolumeCm3(vtkPolyData* pd)
+{
+    if (!pd || pd->GetNumberOfCells() == 0)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputData(pd);
+    tri->PassLinesOff();
+    tri->PassVertsOff();
+    tri->Update();
+
+    vtkNew<vtkMassProperties> mass;
+    mass->SetInputConnection(tri->GetOutputPort());
+    mass->Update();
+
+    const double mm3 = mass->GetVolume();
+    if (!std::isfinite(mm3) || mm3 <= 0.0)
+        return std::numeric_limits<double>::quiet_NaN();
+
+    // 1 cm^3 = 1000 mm^3.
+    return mm3 / 1000.0;
 }
 
 

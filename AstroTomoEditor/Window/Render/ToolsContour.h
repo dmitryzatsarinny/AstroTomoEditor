@@ -156,18 +156,18 @@ private:
 
 private:
     // Параметры можно подстраивать под сцену.
-    int m_previewMinSampleCount = 20;
-    int m_previewWindowHalfSize = 2;
-    int m_previewWindowIterations = 1;
-    int m_previewSurfaceRelaxIterations = 1;
-    double m_previewSurfaceRelaxFactor = 0.08;
+    int m_previewMinSampleCount = 180;
+    int m_previewWindowHalfSize = 5;
+    int m_previewWindowIterations = 4;
+    int m_previewSurfaceRelaxIterations = 4;
+    double m_previewSurfaceRelaxFactor = 0.22;
 
     int m_pathfindingSubdivisionIterations = 1;
     double m_maxPathfindingSubdivisionGrowthRatio = 12.0;
 
-    int m_segmentSmoothIterations = 1;
-    double m_segmentSmoothLambda = 0.08;
-    double m_segmentSmoothMu = -0.04;
+    int m_segmentSmoothIterations = 3;
+    double m_segmentSmoothLambda = 0.18;
+    double m_segmentSmoothMu = -0.19;
 
 
     // Перед вырезом можно слегка уплотнить сетку,

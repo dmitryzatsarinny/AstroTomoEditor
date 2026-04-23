@@ -32,6 +32,7 @@
 #include <vtkActor.h>
 #include <vtkProperty.h>
 #include <vtkPolyDataNormals.h>
+#include <vtkCellLocator.h>
 #include <Services/DicomRange.h>
 #include <QTimer>
 #include <QLineEdit>
@@ -180,7 +181,12 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
     mClip->setRenderer(mRenderer);
     mClip->setInteractor(mVtk->interactor());
 
-    connect(mBtnClip, &QToolButton::toggled, this, [this](bool on) { mClip->setEnabled(on); });
+    connect(mBtnClip, &QToolButton::toggled, this, [this](bool on) {
+        mClip->setEnabled(on);
+        rebuildContourOverlay();
+        if (mVtk && mVtk->renderWindow())
+            mVtk->renderWindow()->Render();
+        });
     connect(mBtnSTL, &QToolButton::clicked, this, &RenderView::onBuildStl);
     connect(mBtnSTLSimplify, &QToolButton::clicked, this, &RenderView::onStlSimplify);
     connect(mBtnSTLSave, &QToolButton::clicked, this, &RenderView::onSaveBuiltStl);
@@ -345,7 +351,7 @@ void RenderView::buildOverlay()
     // ширина = ширина кнопки Save (чтобы точно совпало)
     const int w = mBtnSTLSave ? mBtnSTLSave->width() : 86;
     mLblStlSize->setFixedWidth(w);
-    const int h = mLblStlSize->fontMetrics().lineSpacing() * 2;
+    const int h = mLblStlSize->fontMetrics().lineSpacing() * 3;
     mLblStlSize->setFixedHeight(h);
 
     // центр текста внутри
@@ -1635,10 +1641,18 @@ void RenderView::rebuildContourOverlay()
     mContourOverlayMapper = nullptr;
     mContourOverlayMesh = nullptr;
 
+    if (!mStlModeController.isActive())
+        return;
+    if (mBtnClip && mBtnClip->isChecked())
+        return;
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
         return;
     if (mSavedContourPoints.isEmpty() || mVisibleContoursNow.isEmpty())
         return;
+
+    vtkNew<vtkCellLocator> surfaceLocator;
+    surfaceLocator->SetDataSet(mIsoMesh);
+    surfaceLocator->BuildLocator();
 
     vtkNew<vtkPoints> points;
     vtkNew<vtkCellArray> lines;
@@ -1660,7 +1674,32 @@ void RenderView::rebuildContourOverlay()
         if (pointCount < 3)
             continue;
 
+        QVector<std::array<double, 3>> snappedPoints;
+        snappedPoints.reserve(pointCount);
+        bool contourStillOnSurface = true;
+        constexpr double kMaxAttachDistanceMm = 1.5;
+        const double maxDist2 = kMaxAttachDistanceMm * kMaxAttachDistanceMm;
+
+        for (const auto& p : contourPoints)
+        {
+            double closest[3]{ 0.0, 0.0, 0.0 };
+            double dist2 = std::numeric_limits<double>::max();
+            vtkIdType cellId = -1;
+            int subId = 0;
+            surfaceLocator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+            if (cellId < 0 || dist2 > maxDist2)
+            {
+                contourStillOnSurface = false;
+                break;
+            }
+            snappedPoints.push_back({ closest[0], closest[1], closest[2] });
+        }
+
+        if (!contourStillOnSurface || snappedPoints.size() < 3)
+            continue;
+
         const vtkIdType startId = points->GetNumberOfPoints();
+        for (const auto& p : snappedPoints)
         for (const auto& p : contourPoints)
             points->InsertNextPoint(p[0], p[1], p[2]);
 
@@ -2225,8 +2264,8 @@ void RenderView::addStlPreview()
     }
 
     mIsoActor = MakeSurfaceActor(mIsoMesh);
-    if (mIsoActor) mRenderer->AddActor(mIsoActor);
-        rebuildContourOverlay();
+    if (mIsoActor)
+        mRenderer->AddActor(mIsoActor);
 
     if (mClip && mIsoActor) 
     {
@@ -2238,9 +2277,10 @@ void RenderView::addStlPreview()
         if (wasClipOn) mClip->applyNow();
     }
 
+    rebuildContourOverlay();
+
     if (mVtk && mVtk->renderWindow()) 
         mVtk->renderWindow()->Render();
-
 }
 
 void RenderView::onStlSimplify()
@@ -2322,6 +2362,7 @@ void RenderView::onBuildStl()
         updateUndoRedoUi();
         mRenderer->RemoveActor(mIsoActor);
         mIsoActor = nullptr;
+        rebuildContourOverlay();
         mVolume->SetVisibility(true);
         mPrevVolumeVisible = true;
         mBtnSTLSave->setVisible(false);
@@ -3234,6 +3275,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                 mIsoMesh = clonePolyData(poly);*/
 
                 applyNewStlSurface(poly);
+                resetStlContourHistory();
 
                 addStlPreview();
                 updateStlSizeLabel();
