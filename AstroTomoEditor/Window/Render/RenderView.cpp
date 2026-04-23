@@ -45,6 +45,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <Window/ServiceWindow/ShellFileDialog.h>
+#include <Window/ServiceWindow/CustomMessageBox.h>
 #include "ElectrodeAutoIdentifier.h"
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
@@ -1640,6 +1641,23 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
 
     const QFileInfo stlInfo(stlPath);
     const QString txtPath = stlInfo.absolutePath() + "/" + stlInfo.completeBaseName() + "_counters.txt";
+
+    bool hasVisibleContourPoints = false;
+    for (const auto& rec : mSavedContourPoints)
+    {
+        if (mVisibleContoursNow.contains(rec.contourNumber))
+        {
+            hasVisibleContourPoints = true;
+            break;
+        }
+    }
+
+    if (!hasVisibleContourPoints)
+    {
+        if (QFile::exists(txtPath))
+            QFile::remove(txtPath);
+        return true;
+    }
 
     QFile out(txtPath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Text))
@@ -3703,5 +3721,12 @@ void RenderView::onSaveElectrodesCoords()
             << e.x << "\t"
             << e.z << "\t"
             << e.y << "\n";
+        f.close();
+
+        CustomMessageBox::information(
+            this,
+            tr("Save electrodes coords"),
+            tr("Coordinates saved to:\n%1").arg(filePath),
+            ServiceWindow);
     }
 }
