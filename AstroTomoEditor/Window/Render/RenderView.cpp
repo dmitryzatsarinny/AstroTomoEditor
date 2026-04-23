@@ -1532,9 +1532,7 @@ void RenderView::updateAfterImageChange(bool reattachTools)
         if (mRemoveConn)
             mRemoveConn->attach(mVtk, mRenderer, mImage, mVolume, mHistMaskLo, mHistMaskHi);
         if (mScissors)
-        {
             mScissors->attach(mVtk, mRenderer, mImage, mVolume);
-        }
     }
     updateUndoRedoUi();
     if (mHistDlg && mHistDlg->isVisible())
@@ -1591,6 +1589,7 @@ void RenderView::resetStlContourHistory()
     mSavedContourPoints.clear();
     mVisibleContoursNow.clear();
     mNextContourNumber = 1;
+    rebuildContourOverlay();
 }
 
 void RenderView::applyNewStlSurface(vtkPolyData* poly)
@@ -1620,7 +1619,91 @@ void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPo
     }
 
     mVisibleContoursNow.insert(contourNumber);
+    rebuildContourOverlay();
 }
+
+void RenderView::rebuildContourOverlay()
+{
+    if (!mRenderer)
+        return;
+
+    if (mContourOverlayActor)
+    {
+        mRenderer->RemoveActor(mContourOverlayActor);
+        mContourOverlayActor = nullptr;
+    }
+    mContourOverlayMapper = nullptr;
+    mContourOverlayMesh = nullptr;
+
+    if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
+        return;
+    if (mSavedContourPoints.isEmpty() || mVisibleContoursNow.isEmpty())
+        return;
+
+    vtkNew<vtkPoints> points;
+    vtkNew<vtkCellArray> lines;
+
+    QHash<int, QVector<std::array<double, 3>>> contourToPoints;
+    contourToPoints.reserve(mVisibleContoursNow.size());
+    for (const auto& rec : mSavedContourPoints)
+    {
+        if (!mVisibleContoursNow.contains(rec.contourNumber))
+            continue;
+
+        contourToPoints[rec.contourNumber].push_back(rec.world);
+    }
+
+    for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
+    {
+        const auto& contourPoints = it.value();
+        const int pointCount = contourPoints.size();
+        if (pointCount < 3)
+            continue;
+
+        const vtkIdType startId = points->GetNumberOfPoints();
+        for (const auto& p : contourPoints)
+            points->InsertNextPoint(p[0], p[1], p[2]);
+
+        for (int i = 0; i < pointCount; ++i)
+        {
+            const vtkIdType a = startId + i;
+            const vtkIdType b = startId + ((i + 1) % pointCount);
+            lines->InsertNextCell(2);
+            lines->InsertCellPoint(a);
+            lines->InsertCellPoint(b);
+        }
+    }
+
+    if (lines->GetNumberOfCells() == 0 || points->GetNumberOfPoints() == 0)
+        return;
+
+    mContourOverlayMesh = vtkSmartPointer<vtkPolyData>::New();
+    mContourOverlayMesh->SetPoints(points);
+    mContourOverlayMesh->SetLines(lines);
+
+    vtkNew<vtkTubeFilter> tube;
+    tube->SetInputData(mContourOverlayMesh);
+    tube->SetRadius(0.35);
+    tube->SetNumberOfSides(18);
+    tube->CappingOn();
+    tube->Update();
+
+    mContourOverlayMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
+    mContourOverlayMapper->SetInputConnection(tube->GetOutputPort());
+
+    mContourOverlayActor = vtkSmartPointer<vtkActor>::New();
+    mContourOverlayActor->SetMapper(mContourOverlayMapper);
+    mContourOverlayActor->GetProperty()->SetColor(1.0, 0.86, 0.25);
+    mContourOverlayActor->GetProperty()->SetOpacity(0.95);
+    mContourOverlayActor->GetProperty()->SetAmbient(0.45);
+    mContourOverlayActor->GetProperty()->SetDiffuse(0.55);
+    mContourOverlayActor->GetProperty()->SetSpecular(0.2);
+    mContourOverlayActor->GetProperty()->SetSpecularPower(12.0);
+    mContourOverlayActor->PickableOff();
+
+    mRenderer->AddActor(mContourOverlayActor);
+}
+
 
 std::array<double, 3> RenderView::worldToSavedStlCoords(const std::array<double, 3>& world) const
 {
@@ -1711,6 +1794,7 @@ void RenderView::onUndo()
             mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
         if (mScissors)
             mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        rebuildContourOverlay();
 
         return;
     }
@@ -1756,6 +1840,7 @@ void RenderView::onRedo()
             mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
         if (mScissors)
             mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        rebuildContourOverlay();
 
         return;
     }
@@ -2094,6 +2179,14 @@ void RenderView::clearStlPreview()
 {
     if (!mRenderer) return;
 
+    if (mContourOverlayActor)
+    {
+        mRenderer->RemoveActor(mContourOverlayActor);
+        mContourOverlayActor = nullptr;
+    }
+    mContourOverlayMapper = nullptr;
+    mContourOverlayMesh = nullptr;
+
     if (mIsoActor) {
         mRenderer->RemoveActor(mIsoActor);
         mIsoActor = nullptr;
@@ -2133,6 +2226,7 @@ void RenderView::addStlPreview()
 
     mIsoActor = MakeSurfaceActor(mIsoMesh);
     if (mIsoActor) mRenderer->AddActor(mIsoActor);
+        rebuildContourOverlay();
 
     if (mClip && mIsoActor) 
     {

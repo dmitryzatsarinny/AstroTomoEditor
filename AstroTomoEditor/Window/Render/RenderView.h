@@ -11,6 +11,9 @@
 #include "TransferFunction.h"
 #include "TransferFunctionEditor.h"
 #include "VolumeStlExporter.h"
+#include <vtkCellArray.h>
+#include <vtkPoints.h>
+#include <vtkTubeFilter.h>
 #include "Tools.h"
 #include "ToolsScissors.h"
 #include "ToolsContour.h"
@@ -29,6 +32,7 @@
 #include "ElectrodePanel.h"
 #include <algorithm>
 #include "ElectrodeSurfaceDetector.h"
+#include <QHash>
 #include <memory>
 #include <limits>
 #include <array>
@@ -48,6 +52,7 @@ class vtkActor;
 class HistogramDialog;
 class VolumeSurfaceFinder;
 class vtkPolyData;
+class vtkPolyDataMapper;
 class vtkColorTransferFunction;
 class vtkPiecewiseFunction;
 class vtkVolumeProperty;
@@ -214,6 +219,9 @@ private:
     QVector<SavedContourPoint> mSavedContourPoints;
     QSet<int> mVisibleContoursNow;
     int mNextContourNumber = 1;
+    vtkSmartPointer<vtkPolyData> mContourOverlayMesh = nullptr;
+    vtkSmartPointer<vtkPolyDataMapper> mContourOverlayMapper = nullptr;
+    vtkSmartPointer<vtkActor> mContourOverlayActor = nullptr;
     vtkSmartPointer<vtkImageData> cloneImage(vtkImageData* src);
     void commitNewImage(vtkImageData* im);
     void setMapperInput(vtkImageData* im);
@@ -223,6 +231,7 @@ private:
     void addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld);
     bool saveContoursSidecar(const QString& stlPath) const;
     std::array<double, 3> worldToSavedStlCoords(const std::array<double, 3>& world) const;
+    void rebuildContourOverlay();
     void updateUndoRedoUi();
     void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);
 

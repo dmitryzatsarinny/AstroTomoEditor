@@ -4,6 +4,7 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QVTKOpenGLNativeWidget.h>
+#include <QDebug>
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +29,7 @@
 #include <vtkRenderer.h>
 #include <vtkSelectPolyData.h>
 #include <vtkSphereSource.h>
+#include <vtkStaticPointLocator.h>
 #include <vtkTriangleFilter.h>
 
 ToolsContour::ToolsContour(QWidget* hostParent)
@@ -51,6 +53,9 @@ void ToolsContour::attach(QVTKOpenGLNativeWidget* vtk,
     m_mesh = mesh;
     m_meshActor = meshActor;
 
+    invalidateCaches();
+    ensureCaches();
+
     if (m_vtk)
         m_vtk->installEventFilter(this);
 }
@@ -66,12 +71,15 @@ bool ToolsContour::handle(Action a)
 
 void ToolsContour::onViewResized()
 {
-    // Ничего не нужно: превью рисуется VTK-акторами.
+    // Ничего отдельно делать не нужно: превью рисуется VTK-акторами.
 }
 
 void ToolsContour::start()
 {
     if (!m_vtk || !m_renderer || !m_mesh || !m_meshActor || m_mesh->GetNumberOfPoints() == 0)
+        return;
+
+    if (!ensureCaches())
         return;
 
     m_state = State::Collecting;
@@ -149,6 +157,12 @@ bool ToolsContour::eventFilter(QObject* obj, QEvent* ev)
 
             if (!pickPoint(me->pos(), pointId, worldPoint))
                 return true;
+
+            if (!m_controlWorldPoints.isEmpty())
+            {
+                if (distanceSquared(m_controlWorldPoints.back(), worldPoint) < 1e-12)
+                    return true;
+            }
 
             m_controlIds.push_back(pointId);
             m_controlWorldPoints.push_back(worldPoint);
@@ -232,19 +246,128 @@ bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, WorldPoi
     return true;
 }
 
+void ToolsContour::invalidateCaches()
+{
+    m_pathMesh = nullptr;
+    m_pathPointLocator = nullptr;
+    m_surfaceLocator = nullptr;
+    m_cacheValid = false;
+}
+
+bool ToolsContour::ensureCaches()
+{
+    if (m_cacheValid && m_pathMesh && m_pathPointLocator && m_surfaceLocator)
+        return true;
+
+    if (!m_mesh || m_mesh->GetNumberOfPoints() == 0 || m_mesh->GetNumberOfCells() == 0)
+        return false;
+
+    rebuildPathCacheFromMesh();
+
+    if (!m_pathMesh || !m_pathPointLocator || !m_surfaceLocator)
+        return false;
+
+    m_cacheValid = true;
+    return true;
+}
+
+void ToolsContour::rebuildPathCacheFromMesh()
+{
+    vtkNew<vtkTriangleFilter> tri;
+    tri->SetInputData(m_mesh);
+    tri->PassLinesOff();
+    tri->PassVertsOff();
+    tri->Update();
+
+    vtkNew<vtkCleanPolyData> clean;
+    clean->SetInputConnection(tri->GetOutputPort());
+    clean->PointMergingOn();
+    clean->Update();
+
+    vtkSmartPointer<vtkPolyData> prepared = vtkSmartPointer<vtkPolyData>::New();
+    prepared->DeepCopy(clean->GetOutput());
+
+    if (!prepared || prepared->GetNumberOfPoints() == 0 || prepared->GetNumberOfCells() == 0)
+        return;
+
+    if (m_pathfindingSubdivisionIterations > 0)
+    {
+        const vtkIdType baseCells = prepared->GetNumberOfCells();
+
+        vtkNew<vtkLinearSubdivisionFilter> subdiv;
+        subdiv->SetInputData(prepared);
+        subdiv->SetNumberOfSubdivisions(m_pathfindingSubdivisionIterations);
+        subdiv->Update();
+
+        vtkPolyData* subdivOut = subdiv->GetOutput();
+        const vtkIdType subdivCells = subdivOut ? subdivOut->GetNumberOfCells() : 0;
+
+        if (subdivOut && subdivCells > 0)
+        {
+            const double growthRatio = (baseCells > 0)
+                ? static_cast<double>(subdivCells) / static_cast<double>(baseCells)
+                : 0.0;
+
+            if (growthRatio <= m_maxPathfindingSubdivisionGrowthRatio)
+            {
+                vtkNew<vtkCleanPolyData> cleanSubdiv;
+                cleanSubdiv->SetInputConnection(subdiv->GetOutputPort());
+                cleanSubdiv->PointMergingOn();
+                cleanSubdiv->Update();
+
+                vtkPolyData* cleanSubdivOut = cleanSubdiv->GetOutput();
+                if (cleanSubdivOut && cleanSubdivOut->GetNumberOfPoints() > 0 && cleanSubdivOut->GetNumberOfCells() > 0)
+                {
+                    prepared = vtkSmartPointer<vtkPolyData>::New();
+                    prepared->DeepCopy(cleanSubdivOut);
+                }
+            }
+        }
+    }
+
+    m_pathMesh = vtkSmartPointer<vtkPolyData>::New();
+    m_pathMesh->DeepCopy(prepared);
+
+    m_pathPointLocator = vtkSmartPointer<vtkStaticPointLocator>::New();
+    m_pathPointLocator->SetDataSet(m_pathMesh);
+    m_pathPointLocator->BuildLocator();
+
+    m_surfaceLocator = vtkSmartPointer<vtkCellLocator>::New();
+    m_surfaceLocator->SetDataSet(m_mesh);
+    m_surfaceLocator->BuildLocator();
+}
+
+vtkIdType ToolsContour::findClosestPathPointId(const double worldPoint[3]) const
+{
+    if (!m_pathPointLocator)
+        return -1;
+
+    return m_pathPointLocator->FindClosestPoint(worldPoint);
+}
+
 bool ToolsContour::computeGeodesicSegment(vtkIdType fromId,
     vtkIdType toId,
     std::vector<WorldPoint>& outPath) const
 {
     outPath.clear();
 
-    if (!m_mesh || fromId < 0 || toId < 0)
+    if (!m_mesh || !m_pathMesh || fromId < 0 || toId < 0)
+        return false;
+
+    double fromPoint[3]{};
+    double toPoint[3]{};
+    m_mesh->GetPoint(fromId, fromPoint);
+    m_mesh->GetPoint(toId, toPoint);
+
+    vtkIdType startVertex = findClosestPathPointId(fromPoint);
+    vtkIdType endVertex = findClosestPathPointId(toPoint);
+    if (startVertex < 0 || endVertex < 0)
         return false;
 
     vtkNew<vtkDijkstraGraphGeodesicPath> dijkstra;
-    dijkstra->SetInputData(m_mesh);
-    dijkstra->SetStartVertex(fromId);
-    dijkstra->SetEndVertex(toId);
+    dijkstra->SetInputData(m_pathMesh);
+    dijkstra->SetStartVertex(startVertex);
+    dijkstra->SetEndVertex(endVertex);
     dijkstra->Update();
 
     vtkPolyData* out = dijkstra->GetOutput();
@@ -258,9 +381,6 @@ bool ToolsContour::computeGeodesicSegment(vtkIdType fromId,
         out->GetPoint(i, p);
         outPath.push_back({ p[0], p[1], p[2] });
     }
-
-    double fromPoint[3]{};
-    m_mesh->GetPoint(fromId, fromPoint);
 
     const auto dist2ToFrom = [&](const WorldPoint& p)
         {
@@ -331,7 +451,7 @@ void ToolsContour::rebuildContourFromControls()
         firstSegment = false;
     }
 
-    // После третьего клика и дальше сразу держим контур замкнутым.
+    // Контур должен быть замкнут уже с 3-й точки.
     if (m_controlIds.size() >= 3)
     {
         appendSegment(m_controlIds.back(), m_controlIds.front(), !m_rawContourWorldPoints.isEmpty());
@@ -356,28 +476,40 @@ void ToolsContour::updateDisplayContour()
     m_displayContourWorldPoints = buildSmoothedClosedLoop(m_rawContourWorldPoints);
 }
 
-QVector<ToolsContour::WorldPoint> ToolsContour::buildSmoothedClosedLoop(const QVector<WorldPoint>& closedLoop) const
+QVector<ToolsContour::WorldPoint> ToolsContour::buildSmoothedClosedLoop(
+    const QVector<WorldPoint>& closedLoop) const
 {
     if (closedLoop.size() < 3 || !m_mesh)
         return closedLoop;
 
     QVector<WorldPoint> loop = closedLoop;
 
-    // Если последний элемент совпадает с первым, убираем дубль для внутренних вычислений.
     if (loop.size() >= 2 && almostEqual(loop.front(), loop.back()))
         loop.removeLast();
 
     if (loop.size() < 3)
         return closedLoop;
 
-    const int targetCount = std::max(m_previewMinSampleCount, (int)loop.size());
+    // 1. Умеренный ресэмплинг, без безумного роста числа точек
+    const int targetCount = std::max(m_previewMinSampleCount, static_cast<int>(loop.size()));
     QVector<WorldPoint> resampled = resampleClosedLoop(loop, targetCount);
-    QVector<WorldPoint> smoothed = smoothClosedLoopOnSurface(
-        resampled,
-        m_previewSmoothIterations,
-        m_previewSmoothFactor);
 
-    return smoothed;
+    // 2. Мягкое оконное сглаживание в 3D
+    QVector<WorldPoint> smoothed = smoothClosedLoopByWindow(
+        resampled,
+        m_previewWindowHalfSize,
+        m_previewWindowIterations);
+
+    // 3. Возвращаем на поверхность
+    QVector<WorldPoint> projected = projectClosedLoopToSurface(smoothed);
+
+    // 4. Совсем лёгкий финальный relax уже по поверхности
+    projected = smoothClosedLoopOnSurface(
+        projected,
+        m_previewSurfaceRelaxIterations,
+        m_previewSurfaceRelaxFactor);
+
+    return projected;
 }
 
 QVector<ToolsContour::WorldPoint> ToolsContour::resampleClosedLoop(const QVector<WorldPoint>& closedLoop,
@@ -411,7 +543,8 @@ QVector<ToolsContour::WorldPoint> ToolsContour::resampleClosedLoop(const QVector
 
     for (int i = 0; i < targetCount; ++i)
     {
-        const double targetLen = totalLength * static_cast<double>(i) / static_cast<double>(targetCount);
+        const double targetLen =
+            totalLength * static_cast<double>(i) / static_cast<double>(targetCount);
 
         auto upper = std::lower_bound(cumulative.begin(), cumulative.end(), targetLen);
         size_t seg = static_cast<size_t>(std::distance(cumulative.begin(), upper));
@@ -439,12 +572,8 @@ QVector<ToolsContour::WorldPoint> ToolsContour::smoothClosedLoopOnSurface(const 
     int iterations,
     double factor) const
 {
-    if (!m_mesh || closedLoop.size() < 3)
+    if (!m_mesh || !m_surfaceLocator || closedLoop.size() < 3)
         return closedLoop;
-
-    vtkNew<vtkCellLocator> locator;
-    locator->SetDataSet(m_mesh);
-    locator->BuildLocator();
 
     QVector<WorldPoint> current = closedLoop;
     QVector<WorldPoint> next = current;
@@ -471,7 +600,7 @@ QVector<ToolsContour::WorldPoint> ToolsContour::smoothClosedLoopOnSurface(const 
             vtkIdType cellId = -1;
             int subId = -1;
 
-            locator->FindClosestPoint(blended.data(), closest, cellId, subId, dist2);
+            m_surfaceLocator->FindClosestPoint(blended.data(), closest, cellId, subId, dist2);
             next[i] = { closest[0], closest[1], closest[2] };
         }
 
@@ -486,12 +615,8 @@ std::vector<ToolsContour::WorldPoint> ToolsContour::smoothOpenPathOnSurface(cons
     double lambda,
     double mu) const
 {
-    if (!m_mesh || path.size() < 3 || iterations <= 0)
+    if (!m_mesh || !m_surfaceLocator || path.size() < 3 || iterations <= 0)
         return path;
-
-    vtkNew<vtkCellLocator> locator;
-    locator->SetDataSet(m_mesh);
-    locator->BuildLocator();
 
     std::vector<WorldPoint> current = path;
     std::vector<WorldPoint> work = current;
@@ -505,7 +630,7 @@ std::vector<ToolsContour::WorldPoint> ToolsContour::smoothOpenPathOnSurface(cons
             double dist2 = 0.0;
             vtkIdType cellId = -1;
             int subId = -1;
-            locator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+            m_surfaceLocator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
             p = { closest[0], closest[1], closest[2] };
         };
 
@@ -539,6 +664,28 @@ std::vector<ToolsContour::WorldPoint> ToolsContour::smoothOpenPathOnSurface(cons
     return current;
 }
 
+vtkSmartPointer<vtkPoints> ToolsContour::projectLoopToMesh(
+    const QVector<WorldPoint>& loop,
+    vtkPolyData* mesh) const
+{
+    vtkNew<vtkCellLocator> locator;
+    locator->SetDataSet(mesh);
+    locator->BuildLocator();
+
+    vtkSmartPointer<vtkPoints> pts = vtkSmartPointer<vtkPoints>::New();
+
+    for (const auto& p : loop)
+    {
+        double closest[3]{};
+        double dist2 = 0.0;
+        vtkIdType cellId = -1;
+        int subId = -1;
+        locator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+        pts->InsertNextPoint(closest);
+    }
+
+    return pts;
+}
 
 bool ToolsContour::applyContourCut()
 {
@@ -558,13 +705,6 @@ bool ToolsContour::applyContourCut()
         return false;
     }
 
-    vtkNew<vtkPoints> loopPts;
-    for (const auto& p : smoothLoop)
-        loopPts->InsertNextPoint(p[0], p[1], p[2]);
-
-    qDebug() << "applyContourCut: loop pts =" << loopPts->GetNumberOfPoints();
-
-    // 1. Готовим исходную сетку.
     vtkNew<vtkTriangleFilter> triInput;
     triInput->SetInputData(m_mesh);
     triInput->PassLinesOff();
@@ -589,59 +729,15 @@ bool ToolsContour::applyContourCut()
 
     vtkSmartPointer<vtkPolyData> selectInput = cleanInputOut;
 
-    // 1.1 Лёгкая subdivision ПЕРЕД select/clip:
-    // это добавляет локально больше треугольников, и линия выреза становится более гладкой.
-    if (m_preCutSubdivisionIterations > 0)
+    vtkSmartPointer<vtkPoints> loopPts = projectLoopToMesh(smoothLoop, selectInput);
+    if (!loopPts || loopPts->GetNumberOfPoints() < 3)
     {
-        const vtkIdType baseCells = cleanInputOut->GetNumberOfCells();
-
-        vtkNew<vtkLinearSubdivisionFilter> preSubdiv;
-        preSubdiv->SetInputData(cleanInputOut);
-        preSubdiv->SetNumberOfSubdivisions(m_preCutSubdivisionIterations);
-        preSubdiv->Update();
-
-        vtkPolyData* preSubdivOut = preSubdiv->GetOutput();
-        const vtkIdType subdivCells = preSubdivOut ? preSubdivOut->GetNumberOfCells() : 0;
-        qDebug() << "pre-cut subdiv cells =" << subdivCells;
-
-        if (preSubdivOut && subdivCells > 0)
-        {
-            const double growthRatio = (baseCells > 0)
-                ? static_cast<double>(subdivCells) / static_cast<double>(baseCells)
-                : 0.0;
-
-            if (growthRatio <= m_maxPreCutSubdivisionGrowthRatio)
-            {
-                vtkNew<vtkCleanPolyData> preSubdivClean;
-                preSubdivClean->SetInputConnection(preSubdiv->GetOutputPort());
-                preSubdivClean->PointMergingOn();
-                preSubdivClean->Update();
-
-                vtkPolyData* preSubdivCleanOut = preSubdivClean->GetOutput();
-                if (preSubdivCleanOut && preSubdivCleanOut->GetNumberOfCells() > 0)
-                {
-                    selectInput = preSubdivCleanOut;
-                    qDebug() << "pre-cut subdiv accepted, cells =" << selectInput->GetNumberOfCells();
-                }
-                else
-                {
-                    qDebug() << "pre-cut subdiv clean failed, keep base mesh";
-                }
-            }
-            else
-            {
-                qDebug() << "pre-cut subdiv skipped, growth ratio =" << growthRatio
-                    << "limit =" << m_maxPreCutSubdivisionGrowthRatio;
-            }
-        }
-        else
-        {
-            qDebug() << "pre-cut subdiv failed, keep base mesh";
-        }
+        qDebug() << "applyContourCut: projected loop is invalid";
+        return false;
     }
 
+    qDebug() << "applyContourCut: loop pts =" << loopPts->GetNumberOfPoints();
 
-    // 2. Строим выделение по ИСХОДНОЙ поверхности
     vtkNew<vtkSelectPolyData> select;
     select->SetInputData(selectInput);
     select->SetLoop(loopPts);
@@ -659,7 +755,6 @@ bool ToolsContour::applyContourCut()
         return false;
     }
 
-    // 3. Вырезаем меньшую область
     vtkNew<vtkClipPolyData> clip;
     clip->SetInputConnection(select->GetOutputPort());
     clip->SetValue(0.0);
@@ -677,7 +772,6 @@ bool ToolsContour::applyContourCut()
         return false;
     }
 
-    // 4. Финальная триангуляция и очистка после выреза
     vtkNew<vtkTriangleFilter> tri;
     tri->SetInputConnection(clip->GetOutputPort());
     tri->PassLinesOff();
@@ -700,10 +794,10 @@ bool ToolsContour::applyContourCut()
 
     qDebug() << "post-clip clean cells =" << result->GetNumberOfCells();
 
-    // 5. И только теперь optional subdivision
     if (m_cutSubdivisionIterations > 0)
     {
         const vtkIdType baseCells = result->GetNumberOfCells();
+
         vtkNew<vtkLinearSubdivisionFilter> subdiv;
         subdiv->SetInputData(result);
         subdiv->SetNumberOfSubdivisions(m_cutSubdivisionIterations);
@@ -837,7 +931,6 @@ void ToolsContour::updatePreviewGeometry()
     if (!m_mesh || !m_previewLineData || !m_previewPointsData)
         return;
 
-    // ---------- ЛИНИЯ ----------
     vtkNew<vtkPoints> linePts;
 
     const bool closedPreview = (m_controlIds.size() >= 3);
@@ -869,7 +962,6 @@ void ToolsContour::updatePreviewGeometry()
     m_previewLineData->SetLines(lines);
     m_previewLineData->Modified();
 
-    // ---------- КОНТРОЛЬНЫЕ ТОЧКИ ----------
     vtkNew<vtkPoints> controlPts;
     for (const auto& p : m_controlWorldPoints)
         controlPts->InsertNextPoint(p[0], p[1], p[2]);
@@ -918,4 +1010,67 @@ double ToolsContour::distanceSquared(const WorldPoint& a, const WorldPoint& b)
 bool ToolsContour::almostEqual(const WorldPoint& a, const WorldPoint& b, double eps2)
 {
     return distanceSquared(a, b) <= eps2;
+}
+
+QVector<ToolsContour::WorldPoint> ToolsContour::projectClosedLoopToSurface(
+    const QVector<WorldPoint>& closedLoop) const
+{
+    if (!m_surfaceLocator || closedLoop.isEmpty())
+        return closedLoop;
+
+    QVector<WorldPoint> projected;
+    projected.reserve(closedLoop.size());
+
+    for (const auto& p : closedLoop)
+    {
+        double closest[3]{};
+        double dist2 = 0.0;
+        vtkIdType cellId = -1;
+        int subId = -1;
+
+        m_surfaceLocator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+        projected.push_back({ closest[0], closest[1], closest[2] });
+    }
+
+    return projected;
+}
+
+QVector<ToolsContour::WorldPoint> ToolsContour::smoothClosedLoopByWindow(
+    const QVector<WorldPoint>& closedLoop,
+    int halfWindow,
+    int iterations) const
+{
+    if (closedLoop.size() < 3 || halfWindow <= 0 || iterations <= 0)
+        return closedLoop;
+
+    QVector<WorldPoint> current = closedLoop;
+    QVector<WorldPoint> next = current;
+
+    const int n = current.size();
+
+    for (int iter = 0; iter < iterations; ++iter)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            WorldPoint avg{ 0.0, 0.0, 0.0 };
+            int count = 0;
+
+            for (int k = -halfWindow; k <= halfWindow; ++k)
+            {
+                const int idx = (i + k + n) % n;
+                for (int axis = 0; axis < 3; ++axis)
+                    avg[axis] += current[idx][axis];
+                ++count;
+            }
+
+            for (int axis = 0; axis < 3; ++axis)
+                avg[axis] /= static_cast<double>(count);
+
+            next[i] = avg;
+        }
+
+        current.swap(next);
+    }
+
+    return current;
 }

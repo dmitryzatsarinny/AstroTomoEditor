@@ -10,12 +10,14 @@
 
 #include <array>
 #include <functional>
+#include <vector>
 
 #include <vtkSmartPointer.h>
 
 class QVTKOpenGLNativeWidget;
 
 class vtkActor;
+class vtkCellLocator;
 class vtkCellPicker;
 class vtkGlyph3DMapper;
 class vtkPoints;
@@ -23,6 +25,7 @@ class vtkPolyData;
 class vtkPolyDataMapper;
 class vtkRenderer;
 class vtkSphereSource;
+class vtkStaticPointLocator;
 
 class ToolsContour final : public QObject
 {
@@ -64,10 +67,15 @@ private:
         Collecting
     };
 
-private:
     using WorldPoint = std::array<double, 3>;
 
+private:
     bool pickPoint(const QPoint& viewPos, vtkIdType& pointId, WorldPoint& worldPoint) const;
+
+    bool ensureCaches();
+    void invalidateCaches();
+    vtkIdType findClosestPathPointId(const double worldPoint[3]) const;
+    void rebuildPathCacheFromMesh();
 
     bool computeGeodesicSegment(vtkIdType fromId,
         vtkIdType toId,
@@ -81,10 +89,15 @@ private:
     QVector<WorldPoint> smoothClosedLoopOnSurface(const QVector<WorldPoint>& closedLoop,
         int iterations,
         double factor) const;
+
     std::vector<WorldPoint> smoothOpenPathOnSurface(const std::vector<WorldPoint>& path,
         int iterations,
         double lambda,
         double mu) const;
+
+    vtkSmartPointer<vtkPoints> projectLoopToMesh(
+        const QVector<WorldPoint>& loop,
+        vtkPolyData* mesh) const;
 
     bool applyContourCut();
 
@@ -96,6 +109,12 @@ private:
     static double distanceSquared(const WorldPoint& a, const WorldPoint& b);
     static bool almostEqual(const WorldPoint& a, const WorldPoint& b, double eps2 = 1e-10);
 
+    QVector<WorldPoint> smoothClosedLoopByWindow(const QVector<WorldPoint>& closedLoop,
+        int halfWindow,
+        int iterations) const;
+
+    QVector<WorldPoint> projectClosedLoopToSurface(const QVector<WorldPoint>& closedLoop) const;
+
 private:
     QWidget* m_host = nullptr;
 
@@ -106,16 +125,21 @@ private:
 
     vtkSmartPointer<vtkCellPicker> m_picker;
 
+    vtkSmartPointer<vtkPolyData> m_pathMesh;
+    vtkSmartPointer<vtkStaticPointLocator> m_pathPointLocator;
+    vtkSmartPointer<vtkCellLocator> m_surfaceLocator;
+    bool m_cacheValid = false;
+
     State m_state = State::Off;
     bool m_finishing = false;
 
     QVector<vtkIdType> m_controlIds;
     QVector<WorldPoint> m_controlWorldPoints;
 
-    // Сырой контур по геодезическим сегментам.
+    // Контур по сегментам геодезики.
     QVector<WorldPoint> m_rawContourWorldPoints;
 
-    // То, что реально рисуем: для >= 3 точек уже сглаженный замкнутый луп.
+    // Сглаженный контур для отображения и для выреза.
     QVector<WorldPoint> m_displayContourWorldPoints;
 
     vtkSmartPointer<vtkPolyData> m_previewLineData;
@@ -131,16 +155,23 @@ private:
     std::function<void()> m_onFinished;
 
 private:
-    // Параметры можно спокойно крутить под сцену.
-    int m_previewMinSampleCount = 140;
-    int m_previewSmoothIterations = 8;
-    double m_previewSmoothFactor = 0.42;
-    int m_segmentSmoothIterations = 12;
-    double m_segmentSmoothLambda = 0.50;
-    double m_segmentSmoothMu = -0.53;
+    // Параметры можно подстраивать под сцену.
+    int m_previewMinSampleCount = 20;
+    int m_previewWindowHalfSize = 2;
+    int m_previewWindowIterations = 1;
+    int m_previewSurfaceRelaxIterations = 1;
+    double m_previewSurfaceRelaxFactor = 0.08;
 
-    // Лёгкая сабдивизия до Select/Clip даёт более гладкую линию разреза
-    // (появляются новые треугольники вдоль контура, меньше «зубцов»).
+    int m_pathfindingSubdivisionIterations = 1;
+    double m_maxPathfindingSubdivisionGrowthRatio = 12.0;
+
+    int m_segmentSmoothIterations = 1;
+    double m_segmentSmoothLambda = 0.08;
+    double m_segmentSmoothMu = -0.04;
+
+
+    // Перед вырезом можно слегка уплотнить сетку,
+    // чтобы линия выреза была менее зубчатой.
     int m_preCutSubdivisionIterations = 1;
     double m_maxPreCutSubdivisionGrowthRatio = 4.5;
 
