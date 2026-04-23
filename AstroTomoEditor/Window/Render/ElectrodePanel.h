@@ -118,6 +118,7 @@ public slots:
     void beginPick(ElectrodeId id);   // пользователь нажал кнопку электрода
     void endPick();
     void setManualAddEnabled(bool on);
+    void resetState();
 
 private:
     class ElectrodeButton; // ниже в cpp

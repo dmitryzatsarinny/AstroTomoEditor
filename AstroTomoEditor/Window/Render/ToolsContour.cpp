@@ -499,7 +499,7 @@ bool ToolsContour::applyContourCut()
 
     qDebug() << "applyContourCut: loop pts =" << loopPts->GetNumberOfPoints();
 
-    // 1. Готовим исходную сетку, но НЕ subdivision перед select
+    // 1. Готовим исходную сетку.
     vtkNew<vtkTriangleFilter> triInput;
     triInput->SetInputData(m_mesh);
     triInput->PassLinesOff();
@@ -522,9 +522,63 @@ bool ToolsContour::applyContourCut()
 
     qDebug() << "cleanInput cells =" << cleanInputOut->GetNumberOfCells();
 
+    vtkSmartPointer<vtkPolyData> selectInput = cleanInputOut;
+
+    // 1.1 Лёгкая subdivision ПЕРЕД select/clip:
+    // это добавляет локально больше треугольников, и линия выреза становится более гладкой.
+    if (m_preCutSubdivisionIterations > 0)
+    {
+        const vtkIdType baseCells = cleanInputOut->GetNumberOfCells();
+
+        vtkNew<vtkLinearSubdivisionFilter> preSubdiv;
+        preSubdiv->SetInputData(cleanInputOut);
+        preSubdiv->SetNumberOfSubdivisions(m_preCutSubdivisionIterations);
+        preSubdiv->Update();
+
+        vtkPolyData* preSubdivOut = preSubdiv->GetOutput();
+        const vtkIdType subdivCells = preSubdivOut ? preSubdivOut->GetNumberOfCells() : 0;
+        qDebug() << "pre-cut subdiv cells =" << subdivCells;
+
+        if (preSubdivOut && subdivCells > 0)
+        {
+            const double growthRatio = (baseCells > 0)
+                ? static_cast<double>(subdivCells) / static_cast<double>(baseCells)
+                : 0.0;
+
+            if (growthRatio <= m_maxPreCutSubdivisionGrowthRatio)
+            {
+                vtkNew<vtkCleanPolyData> preSubdivClean;
+                preSubdivClean->SetInputConnection(preSubdiv->GetOutputPort());
+                preSubdivClean->PointMergingOn();
+                preSubdivClean->Update();
+
+                vtkPolyData* preSubdivCleanOut = preSubdivClean->GetOutput();
+                if (preSubdivCleanOut && preSubdivCleanOut->GetNumberOfCells() > 0)
+                {
+                    selectInput = preSubdivCleanOut;
+                    qDebug() << "pre-cut subdiv accepted, cells =" << selectInput->GetNumberOfCells();
+                }
+                else
+                {
+                    qDebug() << "pre-cut subdiv clean failed, keep base mesh";
+                }
+            }
+            else
+            {
+                qDebug() << "pre-cut subdiv skipped, growth ratio =" << growthRatio
+                    << "limit =" << m_maxPreCutSubdivisionGrowthRatio;
+            }
+        }
+        else
+        {
+            qDebug() << "pre-cut subdiv failed, keep base mesh";
+        }
+    }
+
+
     // 2. Строим выделение по ИСХОДНОЙ поверхности
     vtkNew<vtkSelectPolyData> select;
-    select->SetInputConnection(cleanInput->GetOutputPort());
+    select->SetInputData(selectInput);
     select->SetLoop(loopPts);
     select->GenerateSelectionScalarsOn();
     select->SetSelectionModeToSmallestRegion();

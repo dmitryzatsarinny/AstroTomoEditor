@@ -2979,6 +2979,29 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         rw->AddRenderer(mRenderer);
     }
     pump(25);
+    // Полный сброс состояния "Электродов" при смене серии, чтобы
+    // ничего не наследовалось из предыдущего объёма.
+    if (mElectrodesPreviewActive)
+        endElectrodesPreview();
+
+    if (mAppActive && mCurrentApp == App::Electrodes)
+    {
+        setElectrodesUiActive(false);
+        setAppUiActive(false, mCurrentApp);
+    }
+
+    mElectrodeIJK.clear();
+    mImageBeforeElectrodes = nullptr;
+    mElectrodesPreviewImage = nullptr;
+    mElectrodesPreviewActive = false;
+    mElectrodesPreviewSavedCTF = nullptr;
+    mElectrodesPreviewSavedOTF = nullptr;
+
+    if (mElectrodePanel)
+        mElectrodePanel->resetState();
+
+    if (mRenderer)
+        ElectrodeSurfaceDetector::instance().clear(mRenderer);
 
     // При загрузке нового исследования всегда сбрасываем STL-предпросмотр,
     // чтобы в сцене не оставались старый меш и его оценка размера.

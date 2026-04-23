@@ -132,6 +132,11 @@ private:
     int m_previewSmoothIterations = 8;
     double m_previewSmoothFactor = 0.42;
 
+    // Лёгкая сабдивизия до Select/Clip даёт более гладкую линию разреза
+    // (появляются новые треугольники вдоль контура, меньше «зубцов»).
+    int m_preCutSubdivisionIterations = 1;
+    double m_maxPreCutSubdivisionGrowthRatio = 4.5;
+
     int m_cutSubdivisionIterations = 0;
     double m_maxSubdivisionGrowthRatio = 1.6;
 };

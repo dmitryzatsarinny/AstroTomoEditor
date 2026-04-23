@@ -1094,6 +1094,14 @@ void ElectrodePanel::setModeEnabled(bool on)
     setVisible(on);
 }
 
+void ElectrodePanel::resetState()
+{
+    mManualAddEnabled = false;
+    clearAllElectrodesState();
+    mEnabled = false;
+    setVisible(false);
+}
+
 void ElectrodePanel::setHasCoord(ElectrodeId id, bool has)
 {
     auto it = mById.find(id);
