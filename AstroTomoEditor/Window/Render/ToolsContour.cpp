@@ -634,7 +634,7 @@ bool ToolsContour::applyContourCut()
     if (m_onSurfaceReplaced)
     {
         qDebug() << "calling m_onSurfaceReplaced";
-        m_onSurfaceReplaced(result);
+        m_onSurfaceReplaced(result, smoothLoop);
     }
     else
     {

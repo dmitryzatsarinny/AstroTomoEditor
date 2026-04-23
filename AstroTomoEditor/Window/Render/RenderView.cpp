@@ -42,6 +42,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QStandardPaths>
+#include <QFile>
+#include <QTextStream>
 #include <Window/ServiceWindow/ShellFileDialog.h>
 #include "ElectrodeAutoIdentifier.h"
 
@@ -1559,6 +1561,110 @@ void RenderView::commitNewImage(vtkImageData* im)
     updateAfterImageChange(false);
 }
 
+void RenderView::pushStlUndoSnapshot()
+{
+    if (!mIsoMesh)
+        return;
+
+    mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+
+    mStlStepUndoStack.push_back(mCurrentStlStep);
+    while (mStlStepUndoStack.size() > mHistoryLimit)
+        mStlStepUndoStack.pop_front();
+
+    mContourVisibleUndoStack.push_back(mVisibleContoursNow);
+    while (mContourVisibleUndoStack.size() > mHistoryLimit)
+        mContourVisibleUndoStack.pop_front();
+
+    mStlStepRedoStack.clear();
+    mContourVisibleRedoStack.clear();
+}
+
+void RenderView::resetStlContourHistory()
+{
+    mCurrentStlStep = 0;
+    mStlStepUndoStack.clear();
+    mStlStepRedoStack.clear();
+    mContourVisibleUndoStack.clear();
+    mContourVisibleRedoStack.clear();
+    mSavedContourPoints.clear();
+    mVisibleContoursNow.clear();
+    mNextContourNumber = 1;
+}
+
+void RenderView::applyNewStlSurface(vtkPolyData* poly)
+{
+    if (!poly || poly->GetNumberOfCells() == 0)
+        return;
+
+    pushStlUndoSnapshot();
+    mIsoMesh = clonePolyData(poly);
+    ++mCurrentStlStep;
+}
+
+void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld)
+{
+    if (contourPointsWorld.size() < 3)
+        return;
+
+    const int contourNumber = mNextContourNumber++;
+    int pointIndex = 1;
+    for (const auto& p : contourPointsWorld)
+    {
+        SavedContourPoint rec;
+        rec.contourNumber = contourNumber;
+        rec.pointIndex = pointIndex++;
+        rec.world = p;
+        mSavedContourPoints.push_back(rec);
+    }
+
+    mVisibleContoursNow.insert(contourNumber);
+}
+
+std::array<double, 3> RenderView::worldToSavedStlCoords(const std::array<double, 3>& world) const
+{
+    const double centerWorldX = DI.VolumeOriginX + DI.VolumeCenterX;
+    const double centerWorldY = DI.VolumeOriginY + DI.VolumeCenterY;
+    const double centerWorldZ = DI.VolumeOriginZ + DI.VolumeCenterZ;
+    return {
+        world[0] - centerWorldX,
+        world[1] - centerWorldY,
+        world[2] - centerWorldZ
+    };
+}
+
+bool RenderView::saveContoursSidecar(const QString& stlPath) const
+{
+    if (stlPath.isEmpty())
+        return false;
+
+    const QFileInfo stlInfo(stlPath);
+    const QString txtPath = stlInfo.absolutePath() + "/" + stlInfo.completeBaseName() + "_counters.txt";
+
+    QFile out(txtPath);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Text))
+        return false;
+
+    QTextStream stream(&out);
+    stream.setRealNumberNotation(QTextStream::FixedNotation);
+    stream.setRealNumberPrecision(6);
+
+    for (const auto& rec : mSavedContourPoints)
+    {
+        if (!mVisibleContoursNow.contains(rec.contourNumber))
+            continue;
+
+        const auto xyz = worldToSavedStlCoords(rec.world);
+        stream << rec.contourNumber << ' '
+            << rec.pointIndex << ' '
+            << xyz[0] << ' '
+            << xyz[1] << ' '
+            << xyz[2] << '\n';
+    }
+
+    return stream.status() == QTextStream::Ok;
+}
+
 void RenderView::onUndo()
 {
     if (mStlModeController.isActive())
@@ -1569,6 +1675,14 @@ void RenderView::onUndo()
         auto prevSurface = mStlModeController.undoSurface(mIsoMesh);
         if (!prevSurface)
             return;
+
+        mStlStepRedoStack.push_back(mCurrentStlStep);
+        if (!mStlStepUndoStack.isEmpty())
+            mCurrentStlStep = mStlStepUndoStack.takeLast();
+
+        mContourVisibleRedoStack.push_back(mVisibleContoursNow);
+        if (!mContourVisibleUndoStack.isEmpty())
+            mVisibleContoursNow = mContourVisibleUndoStack.takeLast();
 
         mIsoMesh = prevSurface;
         addStlPreview();
@@ -1606,6 +1720,14 @@ void RenderView::onRedo()
         auto nextSurface = mStlModeController.redoSurface(mIsoMesh);
         if (!nextSurface)
             return;
+
+        mStlStepUndoStack.push_back(mCurrentStlStep);
+        if (!mStlStepRedoStack.isEmpty())
+            mCurrentStlStep = mStlStepRedoStack.takeLast();
+
+        mContourVisibleUndoStack.push_back(mVisibleContoursNow);
+        if (!mContourVisibleRedoStack.isEmpty())
+            mVisibleContoursNow = mContourVisibleRedoStack.takeLast();
 
         mIsoMesh = nextSurface;
         addStlPreview();
@@ -1687,8 +1809,9 @@ bool RenderView::rebuildStlFromEditedImage(vtkImageData* editedImage)
     if (!nextMesh || nextMesh->GetNumberOfCells() == 0)
         return false;
 
-    mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
-    mIsoMesh = clonePolyData(nextMesh);
+    /*mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+    mIsoMesh = clonePolyData(nextMesh);*/
+    applyNewStlSurface(nextMesh);
     addStlPreview();
     updateStlSizeLabel();
     updateUndoRedoUi();
@@ -2021,7 +2144,8 @@ void RenderView::onStlSimplify()
     // если это первое нажатие после построения, целимся сразу в 2-4 MB (в 3 MB)
     if (!mSimplifyStarted)
     {
-        mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+        //mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+        pushStlUndoSnapshot();
         mIsoMesh = VolumeStlExporter::NormalizeSurface(mIsoMesh);
         mSimplifyTargetMB = kFirstAimMB;
         mSimplifyStarted = true;
@@ -2029,7 +2153,8 @@ void RenderView::onStlSimplify()
     else
     {
         // последующие нажатия: уменьшаем цель плавно
-        mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+        //mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
+        pushStlUndoSnapshot();
         mSimplifyTargetMB = std::max(kMinMB, mSimplifyTargetMB * kStepFactor);
     }
 
@@ -2048,6 +2173,8 @@ void RenderView::onStlSimplify()
         emit showWarning(tr("Simplify failed"));
         return;
     }
+
+    ++mCurrentStlStep;
 
     addStlPreview();
     updateStlSizeLabel();
@@ -2157,6 +2284,7 @@ void RenderView::onBuildStl()
 
     mStlModeController.setActive(true);
     mStlModeController.resetSurfaceHistory(clonePolyData(mIsoMesh));
+    resetStlContourHistory();
     addStlPreview();
     updateStlSizeLabel();
 
@@ -2289,7 +2417,13 @@ void RenderView::onSaveBuiltStl()
     );
 
     if (ok)
-        emit showInfo(tr("Saved STL: %1").arg(path));
+    {
+        const bool txtOk = saveContoursSidecar(path);
+        if (!txtOk)
+            emit showWarning(tr("Saved STL, but counters file was not saved"));
+        else
+            emit showInfo(tr("Saved STL: %1").arg(path));
+    }
     else
         emit showWarning(tr("Save failed"));
 
@@ -2834,6 +2968,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     mIsoMesh = nullptr;
     mStlModeController.setActive(false);
     mStlModeController.resetSurfaceHistory(nullptr);
+    resetStlContourHistory();
     updateTopPanelForStlMode(false);
     reloadToolsMenu();
     mSimplifyStarted = false;
@@ -2958,10 +3093,12 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                     return;
                 }
 
-                if (mIsoMesh)
+                /*if (mIsoMesh)
                     mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
 
-                mIsoMesh = clonePolyData(poly);
+                mIsoMesh = clonePolyData(poly);*/
+
+                applyNewStlSurface(poly);
 
                 addStlPreview();
                 updateStlSizeLabel();
@@ -2977,7 +3114,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     if (!mContour)
     {
         mContour = std::make_unique<ToolsContour>(this);
-        mContour->setOnSurfaceReplaced([this](vtkPolyData* poly)
+        mContour->setOnSurfaceReplaced([this](vtkPolyData* poly, QVector<std::array<double, 3>> contourPoints)
             {
                 if (!poly || poly->GetNumberOfCells() == 0)
                 {
@@ -2985,10 +3122,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                     return;
                 }
 
-                if (mIsoMesh)
-                    mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
-
-                mIsoMesh = clonePolyData(poly);
+                applyNewStlSurface(poly);
+                addSavedContour(contourPoints);
                 addStlPreview();
                 updateStlSizeLabel();
                 updateUndoRedoUi();

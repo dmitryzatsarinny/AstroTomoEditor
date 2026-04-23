@@ -44,7 +44,7 @@ public:
     void cancel();
     void finish();
 
-    void setOnSurfaceReplaced(std::function<void(vtkSmartPointer<vtkPolyData>)> cb)
+    void setOnSurfaceReplaced(std::function<void(vtkSmartPointer<vtkPolyData>, QVector<std::array<double, 3>>)> cb)
     {
         m_onSurfaceReplaced = std::move(cb);
     }
@@ -123,7 +123,7 @@ private:
     vtkSmartPointer<vtkSphereSource> m_previewSphereSource;
     vtkSmartPointer<vtkActor> m_previewPointsActor;
 
-    std::function<void(vtkSmartPointer<vtkPolyData>)> m_onSurfaceReplaced;
+    std::function<void(vtkSmartPointer<vtkPolyData>, QVector<std::array<double, 3>>)> m_onSurfaceReplaced;
     std::function<void()> m_onFinished;
 
 private:

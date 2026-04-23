@@ -31,6 +31,7 @@
 #include "ElectrodeSurfaceDetector.h"
 #include <memory>
 #include <limits>
+#include <array>
 
 class QVTKOpenGLNativeWidget;
 class vtkRenderer;
@@ -116,6 +117,13 @@ private slots:
     void onTemplateClearScene();
 
 private:
+    struct SavedContourPoint
+    {
+        int contourNumber = 0;
+        int pointIndex = 0;
+        std::array<double, 3> world{};
+    };
+
     vtkSmartPointer<vtkImageData> mImage;
     QVTKOpenGLNativeWidget* mVtk{ nullptr };
     vtkSmartPointer<vtkRenderer> mRenderer;
@@ -198,9 +206,23 @@ private:
     QVector<vtkSmartPointer<vtkImageData>> mRedoStack;
     int  mHistoryLimit = 128;
     StlModeController mStlModeController;
+    int mCurrentStlStep = 0;
+    QVector<int> mStlStepUndoStack;
+    QVector<int> mStlStepRedoStack;
+    QVector<QSet<int>> mContourVisibleUndoStack;
+    QVector<QSet<int>> mContourVisibleRedoStack;
+    QVector<SavedContourPoint> mSavedContourPoints;
+    QSet<int> mVisibleContoursNow;
+    int mNextContourNumber = 1;
     vtkSmartPointer<vtkImageData> cloneImage(vtkImageData* src);
     void commitNewImage(vtkImageData* im);
     void setMapperInput(vtkImageData* im);
+    void pushStlUndoSnapshot();
+    void resetStlContourHistory();
+    void applyNewStlSurface(vtkPolyData* poly);
+    void addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld);
+    bool saveContoursSidecar(const QString& stlPath) const;
+    std::array<double, 3> worldToSavedStlCoords(const std::array<double, 3>& world) const;
     void updateUndoRedoUi();
     void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);
 

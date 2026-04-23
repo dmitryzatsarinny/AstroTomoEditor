@@ -32,6 +32,7 @@
 #include <QDebug>
 #include <vtkOBBTree.h>
 #include <vtkIdList.h>
+#include <vtkImageDilateErode3D.h>
 
 #include <cmath>
 #include <cstring>
