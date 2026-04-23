@@ -279,6 +279,12 @@ bool ToolsContour::computeGeodesicSegment(vtkIdType fromId,
             std::reverse(outPath.begin(), outPath.end());
     }
 
+    outPath = smoothOpenPathOnSurface(
+        outPath,
+        m_segmentSmoothIterations,
+        m_segmentSmoothLambda,
+        m_segmentSmoothMu);
+
     return !outPath.empty();
 }
 
@@ -474,6 +480,65 @@ QVector<ToolsContour::WorldPoint> ToolsContour::smoothClosedLoopOnSurface(const 
 
     return current;
 }
+
+std::vector<ToolsContour::WorldPoint> ToolsContour::smoothOpenPathOnSurface(const std::vector<WorldPoint>& path,
+    int iterations,
+    double lambda,
+    double mu) const
+{
+    if (!m_mesh || path.size() < 3 || iterations <= 0)
+        return path;
+
+    vtkNew<vtkCellLocator> locator;
+    locator->SetDataSet(m_mesh);
+    locator->BuildLocator();
+
+    std::vector<WorldPoint> current = path;
+    std::vector<WorldPoint> work = current;
+
+    lambda = std::clamp(lambda, 0.0, 1.0);
+    mu = std::clamp(mu, -1.0, -1e-6);
+
+    auto projectToSurface = [&](WorldPoint& p)
+        {
+            double closest[3]{};
+            double dist2 = 0.0;
+            vtkIdType cellId = -1;
+            int subId = -1;
+            locator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+            p = { closest[0], closest[1], closest[2] };
+        };
+
+    auto laplacianPoint = [](const WorldPoint& prev, const WorldPoint& cur, const WorldPoint& next)
+        {
+            WorldPoint lap{};
+            for (int axis = 0; axis < 3; ++axis)
+                lap[axis] = 0.5 * (prev[axis] + next[axis]) - cur[axis];
+            return lap;
+        };
+
+    for (int iter = 0; iter < iterations; ++iter)
+    {
+        for (size_t i = 1; i + 1 < current.size(); ++i)
+        {
+            const WorldPoint lap = laplacianPoint(current[i - 1], current[i], current[i + 1]);
+            for (int axis = 0; axis < 3; ++axis)
+                work[i][axis] = current[i][axis] + lambda * lap[axis];
+            projectToSurface(work[i]);
+        }
+
+        for (size_t i = 1; i + 1 < work.size(); ++i)
+        {
+            const WorldPoint lap = laplacianPoint(work[i - 1], work[i], work[i + 1]);
+            for (int axis = 0; axis < 3; ++axis)
+                current[i][axis] = work[i][axis] + mu * lap[axis];
+            projectToSurface(current[i]);
+        }
+    }
+
+    return current;
+}
+
 
 bool ToolsContour::applyContourCut()
 {

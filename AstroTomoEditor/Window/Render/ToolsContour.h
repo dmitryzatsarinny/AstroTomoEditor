@@ -81,6 +81,10 @@ private:
     QVector<WorldPoint> smoothClosedLoopOnSurface(const QVector<WorldPoint>& closedLoop,
         int iterations,
         double factor) const;
+    std::vector<WorldPoint> smoothOpenPathOnSurface(const std::vector<WorldPoint>& path,
+        int iterations,
+        double lambda,
+        double mu) const;
 
     bool applyContourCut();
 
@@ -131,6 +135,9 @@ private:
     int m_previewMinSampleCount = 140;
     int m_previewSmoothIterations = 8;
     double m_previewSmoothFactor = 0.42;
+    int m_segmentSmoothIterations = 12;
+    double m_segmentSmoothLambda = 0.50;
+    double m_segmentSmoothMu = -0.53;
 
     // Лёгкая сабдивизия до Select/Clip даёт более гладкую линию разреза
     // (появляются новые треугольники вдоль контура, меньше «зубцов»).

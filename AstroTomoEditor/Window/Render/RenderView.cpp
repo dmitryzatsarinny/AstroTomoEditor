@@ -1559,7 +1559,7 @@ void RenderView::commitNewImage(vtkImageData* im)
         mImage = im;
 
     // 3) обновить маппер и перерисовать
-    updateAfterImageChange(false);
+    updateAfterImageChange(true);
 }
 
 void RenderView::pushStlUndoSnapshot()
