@@ -342,6 +342,14 @@ void ClipBoxController::applyNow()
     if (auto* rw = mRenderer ? mRenderer->GetRenderWindow() : nullptr)
         rw->Render();
 }
+
+vtkSmartPointer<vtkPlaneCollection> ClipBoxController::currentClippingPlanes() const
+{
+    if (!mEnabled || !mRep)
+        return nullptr;
+    return mRep->MakeClippingPlanes();
+}
+
 #include <vtkVolumeMapper.h> 
 
 void ClipBoxController::applyClippingFromBox()

@@ -13,6 +13,7 @@
 #include <vtkPointData.h>
 #include <vtkDataArray.h> 
 #include <vtkAutoInit.h>
+#include <vtkPlaneCollection.h>
 #include <vtkGenericOpenGLRenderWindow.h>
 #include <vtkOrientationMarkerWidget.h>
 #include <vtkAxesActor.h>
@@ -48,9 +49,122 @@
 #include <Window/ServiceWindow/ShellFileDialog.h>
 #include <Window/ServiceWindow/CustomMessageBox.h>
 #include "ElectrodeAutoIdentifier.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
 VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
+
+namespace
+{
+    using ContourPoint = std::array<double, 3>;
+
+    double contourDistanceSquared(const ContourPoint& a, const ContourPoint& b)
+    {
+        const double dx = a[0] - b[0];
+        const double dy = a[1] - b[1];
+        const double dz = a[2] - b[2];
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    ContourPoint contourCentroid(const QVector<ContourPoint>& contour)
+    {
+        ContourPoint c{ 0.0, 0.0, 0.0 };
+        if (contour.isEmpty())
+            return c;
+
+        for (const auto& p : contour)
+        {
+            c[0] += p[0];
+            c[1] += p[1];
+            c[2] += p[2];
+        }
+
+        const double invCount = 1.0 / static_cast<double>(contour.size());
+        c[0] *= invCount;
+        c[1] *= invCount;
+        c[2] *= invCount;
+        return c;
+    }
+
+    double contourPerimeter(const QVector<ContourPoint>& contour)
+    {
+        if (contour.size() < 2)
+            return 0.0;
+
+        double length = 0.0;
+        for (int i = 0; i < contour.size(); ++i)
+        {
+            const auto& a = contour[i];
+            const auto& b = contour[(i + 1) % contour.size()];
+            length += std::sqrt(contourDistanceSquared(a, b));
+        }
+        return length;
+    }
+
+    bool sampledNearestStatsWithinLimits(
+        const QVector<ContourPoint>& source,
+        const QVector<ContourPoint>& target,
+        double maxMeanDistance2,
+        double maxSingleDistance2)
+    {
+        if (source.isEmpty() || target.isEmpty())
+            return false;
+
+        const int stride = std::max(1, static_cast<int>(source.size()) / 80);
+        double sumNearest2 = 0.0;
+        int sampleCount = 0;
+
+        for (int i = 0; i < source.size(); i += stride)
+        {
+            double nearest2 = std::numeric_limits<double>::max();
+            for (const auto& p : target)
+                nearest2 = std::min(nearest2, contourDistanceSquared(source[i], p));
+
+            if (nearest2 > maxSingleDistance2)
+                return false;
+
+            sumNearest2 += nearest2;
+            ++sampleCount;
+        }
+
+        if (sampleCount == 0)
+            return false;
+
+        return (sumNearest2 / static_cast<double>(sampleCount)) <= maxMeanDistance2;
+    }
+
+    bool contoursMatchGeometry(const QVector<ContourPoint>& a, const QVector<ContourPoint>& b)
+    {
+        if (a.size() < 3 || b.size() < 3)
+            return false;
+
+        constexpr double kMaxCentroidDistanceMm = 3.0;
+        if (contourDistanceSquared(contourCentroid(a), contourCentroid(b)) >
+            kMaxCentroidDistanceMm * kMaxCentroidDistanceMm)
+        {
+            return false;
+        }
+
+        const double lenA = contourPerimeter(a);
+        const double lenB = contourPerimeter(b);
+        if (lenA <= 0.0 || lenB <= 0.0)
+            return false;
+
+        const double maxLen = std::max(lenA, lenB);
+        if (std::abs(lenA - lenB) / maxLen > 0.15)
+            return false;
+
+        constexpr double kMaxMeanDistanceMm = 1.0;
+        constexpr double kMaxSingleDistanceMm = 3.0;
+        const double maxMeanDistance2 = kMaxMeanDistanceMm * kMaxMeanDistanceMm;
+        const double maxSingleDistance2 = kMaxSingleDistanceMm * kMaxSingleDistanceMm;
+
+        return sampledNearestStatsWithinLimits(a, b, maxMeanDistance2, maxSingleDistance2) &&
+            sampledNearestStatsWithinLimits(b, a, maxMeanDistance2, maxSingleDistance2);
+    }
+}
 
 static vtkMatrix3x3* fetchDirectionMatrix(vtkImageData* img, vtkNew<vtkMatrix3x3>& holder)
 {
@@ -1606,12 +1720,15 @@ void RenderView::applyNewStlSurface(vtkPolyData* poly)
     pushStlUndoSnapshot();
     mIsoMesh = clonePolyData(poly);
     ++mCurrentStlStep;
-    keepOnlyContoursAttachedToCurrentSurface();
+    rebuildContourOverlay();
 }
 
 void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld)
 {
     if (contourPointsWorld.size() < 3)
+        return;
+
+    if (hasMatchingVisibleContour(contourPointsWorld))
         return;
 
     const int contourNumber = mNextContourNumber++;
@@ -1627,6 +1744,28 @@ void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPo
 
     mVisibleContoursNow.insert(contourNumber);
     rebuildContourOverlay();
+}
+
+bool RenderView::hasMatchingVisibleContour(const QVector<std::array<double, 3>>& contourPointsWorld) const
+{
+    if (contourPointsWorld.size() < 3 || mVisibleContoursNow.isEmpty())
+        return false;
+
+    QHash<int, QVector<std::array<double, 3>>> contourToPoints;
+    contourToPoints.reserve(mVisibleContoursNow.size());
+    for (const auto& rec : mSavedContourPoints)
+    {
+        if (mVisibleContoursNow.contains(rec.contourNumber))
+            contourToPoints[rec.contourNumber].push_back(rec.world);
+    }
+
+    for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
+    {
+        if (contoursMatchGeometry(contourPointsWorld, it.value()))
+            return true;
+    }
+
+    return false;
 }
 
 void RenderView::addSavedContours(const QVector<QVector<std::array<double, 3>>>& contoursWorld)
@@ -1700,8 +1839,6 @@ void RenderView::rebuildContourOverlay()
 
     if (!mStlModeController.isActive())
         return;
-    if (mBtnClip && mBtnClip->isChecked())
-        return;
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
         return;
     if (mSavedContourPoints.isEmpty() || mVisibleContoursNow.isEmpty())
@@ -1757,7 +1894,6 @@ void RenderView::rebuildContourOverlay()
 
         const vtkIdType startId = points->GetNumberOfPoints();
         for (const auto& p : snappedPoints)
-        for (const auto& p : contourPoints)
             points->InsertNextPoint(p[0], p[1], p[2]);
 
         for (int i = 0; i < pointCount; ++i)
@@ -1786,6 +1922,11 @@ void RenderView::rebuildContourOverlay()
 
     mContourOverlayMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
     mContourOverlayMapper->SetInputConnection(tube->GetOutputPort());
+    if (mClip && mClip->isEnabled())
+    {
+        if (auto planes = mClip->currentClippingPlanes())
+            mContourOverlayMapper->SetClippingPlanes(planes);
+    }
 
     mContourOverlayActor = vtkSmartPointer<vtkActor>::New();
     mContourOverlayActor->SetMapper(mContourOverlayMapper);
@@ -1821,17 +1962,93 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
     const QFileInfo stlInfo(stlPath);
     const QString txtPath = stlInfo.absolutePath() + "/" + stlInfo.completeBaseName() + "_counters.txt";
 
-    bool hasVisibleContourPoints = false;
-    for (const auto& rec : mSavedContourPoints)
+    QSet<int> contoursToSave = mVisibleContoursNow;
+    if (!contoursToSave.isEmpty() && mIsoMesh && mIsoMesh->GetNumberOfCells() > 0)
     {
-        if (mVisibleContoursNow.contains(rec.contourNumber))
+        vtkNew<vtkCellLocator> surfaceLocator;
+        surfaceLocator->SetDataSet(mIsoMesh);
+        surfaceLocator->BuildLocator();
+
+        QHash<int, QVector<std::array<double, 3>>> contourToPoints;
+        contourToPoints.reserve(contoursToSave.size());
+        for (const auto& rec : mSavedContourPoints)
         {
-            hasVisibleContourPoints = true;
-            break;
+            if (contoursToSave.contains(rec.contourNumber))
+                contourToPoints[rec.contourNumber].push_back(rec.world);
         }
+
+        QSet<int> stillVisibleOnCurrentSurface;
+        constexpr double kMaxAttachDistanceMm = 1.5;
+        const double maxDist2 = kMaxAttachDistanceMm * kMaxAttachDistanceMm;
+        for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
+        {
+            const auto& points = it.value();
+            if (points.size() < 3)
+                continue;
+
+            bool isOnSurface = true;
+            for (const auto& p : points)
+            {
+                double closest[3]{};
+                double dist2 = std::numeric_limits<double>::max();
+                vtkIdType cellId = -1;
+                int subId = 0;
+                surfaceLocator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+                if (cellId < 0 || dist2 > maxDist2)
+                {
+                    isOnSurface = false;
+                    break;
+                }
+            }
+
+            if (isOnSurface)
+                stillVisibleOnCurrentSurface.insert(it.key());
+        }
+
+        contoursToSave = std::move(stillVisibleOnCurrentSurface);
     }
 
-    if (!hasVisibleContourPoints)
+    QHash<int, QVector<std::array<double, 3>>> contoursByNumber;
+    contoursByNumber.reserve(contoursToSave.size());
+    QVector<int> contourNumbersInOrder;
+    QSet<int> seenContourNumbers;
+    for (const auto& rec : mSavedContourPoints)
+    {
+        if (!contoursToSave.contains(rec.contourNumber))
+            continue;
+
+        if (!seenContourNumbers.contains(rec.contourNumber))
+        {
+            seenContourNumbers.insert(rec.contourNumber);
+            contourNumbersInOrder.push_back(rec.contourNumber);
+        }
+
+        contoursByNumber[rec.contourNumber].push_back(rec.world);
+    }
+
+    QVector<QVector<std::array<double, 3>>> uniqueContours;
+    uniqueContours.reserve(contourNumbersInOrder.size());
+    for (const int contourNumber : contourNumbersInOrder)
+    {
+        const auto contourPoints = contoursByNumber.value(contourNumber);
+        if (contourPoints.size() < 3)
+            continue;
+
+        bool duplicate = false;
+        for (const auto& uniqueContour : uniqueContours)
+        {
+            if (contoursMatchGeometry(contourPoints, uniqueContour))
+            {
+                duplicate = true;
+                break;
+            }
+        }
+
+        if (!duplicate)
+            uniqueContours.push_back(contourPoints);
+    }
+
+    if (uniqueContours.isEmpty())
     {
         if (QFile::exists(txtPath))
             QFile::remove(txtPath);
@@ -1846,17 +2063,20 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
     stream.setRealNumberNotation(QTextStream::FixedNotation);
     stream.setRealNumberPrecision(6);
 
-    for (const auto& rec : mSavedContourPoints)
+    for (int contourIndex = 0; contourIndex < uniqueContours.size(); ++contourIndex)
     {
-        if (!mVisibleContoursNow.contains(rec.contourNumber))
-            continue;
+        const int outputContourNumber = contourIndex + 1;
+        const auto& contour = uniqueContours[contourIndex];
 
-        const auto xyz = worldToSavedStlCoords(rec.world);
-        stream << rec.contourNumber << ' '
-            << rec.pointIndex << ' '
-            << xyz[0] << ' '
-            << xyz[1] << ' '
-            << xyz[2] << '\n';
+        for (int pointIndex = 0; pointIndex < contour.size(); ++pointIndex)
+        {
+            const auto xyz = worldToSavedStlCoords(contour[pointIndex]);
+            stream << outputContourNumber << ' '
+                << (pointIndex + 1) << ' '
+                << xyz[0] << ' '
+                << xyz[1] << ' '
+                << xyz[2] << '\n';
+        }
     }
 
     return stream.status() == QTextStream::Ok;
@@ -3647,15 +3867,8 @@ void RenderView::reloadAppsMenu()
         {
             setElectrodesUiActive(false);
             endElectrodesPreview();
+            setAppUiActive(false, mCurrentApp);
         }
-
-
-        if (!mAppActive) return;
-
-        if (mHistDlg)     mHistDlg->close();
-        if (mTemplateDlg) mTemplateDlg->close();
-
-        setAppUiActive(false, mCurrentApp);
         });
 
     mBtnApps->setMenu(mAppsMenu);

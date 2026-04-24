@@ -230,6 +230,7 @@ private:
     void applyNewStlSurface(vtkPolyData* poly);
     void addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld);
     void addSavedContours(const QVector<QVector<std::array<double, 3>>>& contoursWorld);
+    bool hasMatchingVisibleContour(const QVector<std::array<double, 3>>& contourPointsWorld) const;
     void keepOnlyContoursAttachedToCurrentSurface();
     bool saveContoursSidecar(const QString& stlPath) const;
     std::array<double, 3> worldToSavedStlCoords(const std::array<double, 3>& world) const;

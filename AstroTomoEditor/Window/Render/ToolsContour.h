@@ -77,9 +77,11 @@ private:
     vtkIdType findClosestPathPointId(const double worldPoint[3]) const;
     void rebuildPathCacheFromMesh();
 
-    bool computeGeodesicSegment(vtkIdType fromId,
-        vtkIdType toId,
+    bool computeGeodesicSegment(const WorldPoint& fromPoint,
+        const WorldPoint& toPoint,
         std::vector<WorldPoint>& outPath) const;
+    std::vector<WorldPoint> resampleOpenPath(const std::vector<WorldPoint>& path,
+        int targetCount) const;
 
     void rebuildContourFromControls();
     void updateDisplayContour();
@@ -114,6 +116,7 @@ private:
         int iterations) const;
 
     QVector<WorldPoint> projectClosedLoopToSurface(const QVector<WorldPoint>& closedLoop) const;
+    QVector<WorldPoint> pinLoopToControlPoints(const QVector<WorldPoint>& closedLoop) const;
 
 private:
     QWidget* m_host = nullptr;
@@ -156,18 +159,20 @@ private:
 
 private:
     // Параметры можно подстраивать под сцену.
-    int m_previewMinSampleCount = 180;
+    int m_previewMaxSampleCount = 255;
     int m_previewWindowHalfSize = 5;
-    int m_previewWindowIterations = 4;
-    int m_previewSurfaceRelaxIterations = 4;
-    double m_previewSurfaceRelaxFactor = 0.22;
+    int m_previewWindowIterations = 8;
+    int m_previewSurfaceRelaxIterations = 2;
+    double m_previewSurfaceRelaxFactor = 0.12;
 
     int m_pathfindingSubdivisionIterations = 1;
     double m_maxPathfindingSubdivisionGrowthRatio = 12.0;
 
-    int m_segmentSmoothIterations = 3;
+    int m_segmentSmoothIterations = 10;
     double m_segmentSmoothLambda = 0.18;
     double m_segmentSmoothMu = -0.19;
+    double m_segmentResampleSpacingMm = 0.85;
+    int m_segmentMaxSampleCount = 160;
 
 
     // Перед вырезом можно слегка уплотнить сетку,

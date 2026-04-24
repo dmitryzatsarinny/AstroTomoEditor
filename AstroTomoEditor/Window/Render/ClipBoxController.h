@@ -22,6 +22,7 @@ class vtkGPUVolumeRayCastMapper;
 class vtkActor;
 class vtkPlanes;
 class vtkPolyDataMapper;
+class vtkPlaneCollection;
 
 class ClipBoxController : public QObject
 {
@@ -44,6 +45,8 @@ public:
     // Положить коробку заново по границам объёма
     void resetToBounds();
     void applyNow();
+    vtkSmartPointer<vtkPlaneCollection> currentClippingPlanes() const;
+
 private:
     // применяет текущие границы виджета как planes в мэппер
     void applyClippingFromBox();

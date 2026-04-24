@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include <vtkActor.h>
@@ -17,6 +18,7 @@
 #include <vtkCleanPolyData.h>
 #include <vtkClipPolyData.h>
 #include <vtkDijkstraGraphGeodesicPath.h>
+#include <vtkFeatureEdges.h>
 #include <vtkGlyph3DMapper.h>
 #include <vtkLinearSubdivisionFilter.h>
 #include <vtkNew.h>
@@ -30,7 +32,141 @@
 #include <vtkSelectPolyData.h>
 #include <vtkSphereSource.h>
 #include <vtkStaticPointLocator.h>
+#include <vtkStripper.h>
 #include <vtkTriangleFilter.h>
+
+namespace
+{
+    QVector<QVector<std::array<double, 3>>> ExtractCutContours(vtkPolyData* surface)
+    {
+        QVector<QVector<std::array<double, 3>>> contours;
+        if (!surface || surface->GetNumberOfCells() == 0)
+            return contours;
+
+        vtkNew<vtkFeatureEdges> edges;
+        edges->SetInputData(surface);
+        edges->BoundaryEdgesOn();
+        edges->FeatureEdgesOff();
+        edges->NonManifoldEdgesOff();
+        edges->ManifoldEdgesOff();
+        edges->Update();
+
+        vtkPolyData* edgeOut = edges->GetOutput();
+        if (!edgeOut || edgeOut->GetNumberOfLines() == 0)
+            return contours;
+
+        vtkNew<vtkStripper> stripper;
+        stripper->SetInputData(edgeOut);
+        stripper->JoinContiguousSegmentsOn();
+        stripper->Update();
+
+        vtkPolyData* loops = stripper->GetOutput();
+        if (!loops)
+            return contours;
+
+        vtkCellArray* lines = loops->GetLines();
+        vtkPoints* points = loops->GetPoints();
+        if (!lines || !points)
+            return contours;
+
+        lines->InitTraversal();
+        vtkIdType npts = 0;
+        const vtkIdType* pts = nullptr;
+        while (lines->GetNextCell(npts, pts))
+        {
+            if (npts < 3 || !pts)
+                continue;
+
+            QVector<std::array<double, 3>> contour;
+            contour.reserve(static_cast<int>(npts));
+            for (vtkIdType i = 0; i < npts; ++i)
+            {
+                double p[3]{};
+                points->GetPoint(pts[i], p);
+                contour.push_back({ p[0], p[1], p[2] });
+            }
+
+            const auto& first = contour.front();
+            const auto& last = contour.back();
+            const double dx = first[0] - last[0];
+            const double dy = first[1] - last[1];
+            const double dz = first[2] - last[2];
+            if ((dx * dx + dy * dy + dz * dz) <= 1e-8)
+                contour.pop_back();
+
+            if (contour.size() >= 3)
+                contours.push_back(contour);
+        }
+
+        return contours;
+    }
+
+    double PolylineLength(const QVector<std::array<double, 3>>& contour)
+    {
+        if (contour.size() < 2)
+            return 0.0;
+
+        double length = 0.0;
+        for (int i = 0; i < contour.size(); ++i)
+        {
+            const auto& a = contour[i];
+            const auto& b = contour[(i + 1) % contour.size()];
+            const double dx = b[0] - a[0];
+            const double dy = b[1] - a[1];
+            const double dz = b[2] - a[2];
+            length += std::sqrt(dx * dx + dy * dy + dz * dz);
+        }
+        return length;
+    }
+
+    double DistanceSquared(const std::array<double, 3>& a, const std::array<double, 3>& b)
+    {
+        const double dx = a[0] - b[0];
+        const double dy = a[1] - b[1];
+        const double dz = a[2] - b[2];
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    QVector<std::array<double, 3>> PickBestCutContour(
+        const QVector<QVector<std::array<double, 3>>>& contours,
+        const QVector<std::array<double, 3>>& intendedLoop)
+    {
+        if (contours.isEmpty())
+            return {};
+
+        int bestIndex = 0;
+        double bestScore = std::numeric_limits<double>::max();
+
+        for (int i = 0; i < contours.size(); ++i)
+        {
+            const auto& contour = contours[i];
+            if (contour.size() < 3)
+                continue;
+
+            double sumMinDist2 = 0.0;
+            int checked = 0;
+            const int stride = std::max(1, static_cast<int>(contour.size()) / 80);
+            for (int c = 0; c < contour.size(); c += stride)
+            {
+                double minDist2 = std::numeric_limits<double>::max();
+                for (const auto& p : intendedLoop)
+                    minDist2 = std::min(minDist2, DistanceSquared(contour[c], p));
+                sumMinDist2 += minDist2;
+                ++checked;
+            }
+
+            const double meanDist2 = checked > 0 ? sumMinDist2 / static_cast<double>(checked) : 0.0;
+            const double score = meanDist2 - 1e-6 * PolylineLength(contour);
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+
+        return contours[bestIndex];
+    }
+}
 
 ToolsContour::ToolsContour(QWidget* hostParent)
     : QObject(nullptr)
@@ -239,9 +375,7 @@ bool ToolsContour::pickPoint(const QPoint& viewPos, vtkIdType& pointId, WorldPoi
     if (pointId < 0)
         return false;
 
-    double pt[3]{};
-    m_mesh->GetPoint(pointId, pt);
-    worldPoint = { pt[0], pt[1], pt[2] };
+    worldPoint = { pickPos[0], pickPos[1], pickPos[2] };
 
     return true;
 }
@@ -345,22 +479,20 @@ vtkIdType ToolsContour::findClosestPathPointId(const double worldPoint[3]) const
     return m_pathPointLocator->FindClosestPoint(worldPoint);
 }
 
-bool ToolsContour::computeGeodesicSegment(vtkIdType fromId,
-    vtkIdType toId,
+bool ToolsContour::computeGeodesicSegment(const WorldPoint& fromPoint,
+    const WorldPoint& toPoint,
     std::vector<WorldPoint>& outPath) const
 {
     outPath.clear();
 
-    if (!m_mesh || !m_pathMesh || fromId < 0 || toId < 0)
+    if (!m_mesh || !m_pathMesh)
         return false;
 
-    double fromPoint[3]{};
-    double toPoint[3]{};
-    m_mesh->GetPoint(fromId, fromPoint);
-    m_mesh->GetPoint(toId, toPoint);
+    const double from[3] = { fromPoint[0], fromPoint[1], fromPoint[2] };
+    const double to[3] = { toPoint[0], toPoint[1], toPoint[2] };
 
-    vtkIdType startVertex = findClosestPathPointId(fromPoint);
-    vtkIdType endVertex = findClosestPathPointId(toPoint);
+    vtkIdType startVertex = findClosestPathPointId(from);
+    vtkIdType endVertex = findClosestPathPointId(to);
     if (startVertex < 0 || endVertex < 0)
         return false;
 
@@ -399,13 +531,95 @@ bool ToolsContour::computeGeodesicSegment(vtkIdType fromId,
             std::reverse(outPath.begin(), outPath.end());
     }
 
+    if (!outPath.empty())
+    {
+        outPath.front() = fromPoint;
+        if (outPath.size() == 1)
+            outPath.push_back(toPoint);
+        else
+            outPath.back() = toPoint;
+    }
+
+    double length = 0.0;
+    for (size_t i = 1; i < outPath.size(); ++i)
+    {
+        const double dx = outPath[i][0] - outPath[i - 1][0];
+        const double dy = outPath[i][1] - outPath[i - 1][1];
+        const double dz = outPath[i][2] - outPath[i - 1][2];
+        length += std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    const int targetCount = std::clamp(
+        std::max(static_cast<int>(outPath.size()), static_cast<int>(std::ceil(length / m_segmentResampleSpacingMm)) + 1),
+        2,
+        m_segmentMaxSampleCount);
+    outPath = resampleOpenPath(outPath, targetCount);
+
     outPath = smoothOpenPathOnSurface(
         outPath,
         m_segmentSmoothIterations,
         m_segmentSmoothLambda,
         m_segmentSmoothMu);
 
+    if (outPath.empty())
+        return false;
+
+    outPath.front() = fromPoint;
+    if (outPath.size() == 1)
+        outPath.push_back(toPoint);
+    else
+        outPath.back() = toPoint;
+
     return !outPath.empty();
+}
+
+std::vector<ToolsContour::WorldPoint> ToolsContour::resampleOpenPath(
+    const std::vector<WorldPoint>& path,
+    int targetCount) const
+{
+    if (path.size() < 2 || targetCount < 2)
+        return path;
+
+    std::vector<double> cumulative(path.size(), 0.0);
+    for (size_t i = 1; i < path.size(); ++i)
+    {
+        const double dx = path[i][0] - path[i - 1][0];
+        const double dy = path[i][1] - path[i - 1][1];
+        const double dz = path[i][2] - path[i - 1][2];
+        cumulative[i] = cumulative[i - 1] + std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    const double totalLength = cumulative.back();
+    if (totalLength <= 1e-12)
+        return path;
+
+    std::vector<WorldPoint> result;
+    result.reserve(static_cast<size_t>(targetCount));
+
+    for (int i = 0; i < targetCount; ++i)
+    {
+        const double targetLen =
+            totalLength * static_cast<double>(i) / static_cast<double>(targetCount - 1);
+
+        auto upper = std::lower_bound(cumulative.begin(), cumulative.end(), targetLen);
+        size_t seg = static_cast<size_t>(std::distance(cumulative.begin(), upper));
+        seg = std::clamp<size_t>(seg, 1, path.size() - 1);
+
+        const double segStart = cumulative[seg - 1];
+        const double segEnd = cumulative[seg];
+        const double span = std::max(1e-12, segEnd - segStart);
+        const double t = (targetLen - segStart) / span;
+
+        WorldPoint p{};
+        for (int axis = 0; axis < 3; ++axis)
+            p[axis] = path[seg - 1][axis] + (path[seg][axis] - path[seg - 1][axis]) * t;
+
+        result.push_back(p);
+    }
+
+    result.front() = path.front();
+    result.back() = path.back();
+    return result;
 }
 
 void ToolsContour::rebuildContourFromControls()
@@ -427,9 +641,9 @@ void ToolsContour::rebuildContourFromControls()
 
     std::vector<WorldPoint> segment;
 
-    auto appendSegment = [&](vtkIdType fromId, vtkIdType toId, bool skipFirstPoint)
+    auto appendSegment = [&](int fromIndex, int toIndex, bool skipFirstPoint)
         {
-            if (!computeGeodesicSegment(fromId, toId, segment))
+            if (!computeGeodesicSegment(m_controlWorldPoints[fromIndex], m_controlWorldPoints[toIndex], segment))
                 return false;
 
             const int beginIndex = skipFirstPoint ? 1 : 0;
@@ -443,7 +657,7 @@ void ToolsContour::rebuildContourFromControls()
 
     for (int i = 1; i < m_controlIds.size(); ++i)
     {
-        if (!appendSegment(m_controlIds[i - 1], m_controlIds[i], !firstSegment))
+        if (!appendSegment(i - 1, i, !firstSegment))
         {
             updateDisplayContour();
             return;
@@ -454,7 +668,7 @@ void ToolsContour::rebuildContourFromControls()
     // Контур должен быть замкнут уже с 3-й точки.
     if (m_controlIds.size() >= 3)
     {
-        appendSegment(m_controlIds.back(), m_controlIds.front(), !m_rawContourWorldPoints.isEmpty());
+        appendSegment(m_controlIds.size() - 1, 0, !m_rawContourWorldPoints.isEmpty());
     }
 
     updateDisplayContour();
@@ -490,8 +704,9 @@ QVector<ToolsContour::WorldPoint> ToolsContour::buildSmoothedClosedLoop(
     if (loop.size() < 3)
         return closedLoop;
 
-    // 1. Умеренный ресэмплинг, без безумного роста числа точек
-    const int targetCount = std::max(m_previewMinSampleCount, static_cast<int>(loop.size()));
+    // 1. Умеренный ресэмплинг с ограничением сверху: контур может иметь
+    // меньшее число сегментов (10/25/80/120...), но не раздувается сверх 255.
+    const int targetCount = std::clamp(static_cast<int>(loop.size()), 3, m_previewMaxSampleCount);
     QVector<WorldPoint> resampled = resampleClosedLoop(loop, targetCount);
 
     // 2. Мягкое оконное сглаживание в 3D
@@ -509,7 +724,7 @@ QVector<ToolsContour::WorldPoint> ToolsContour::buildSmoothedClosedLoop(
         m_previewSurfaceRelaxIterations,
         m_previewSurfaceRelaxFactor);
 
-    return projected;
+    return pinLoopToControlPoints(projected);
 }
 
 QVector<ToolsContour::WorldPoint> ToolsContour::resampleClosedLoop(const QVector<WorldPoint>& closedLoop,
@@ -847,7 +1062,11 @@ bool ToolsContour::applyContourCut()
     if (m_onSurfaceReplaced)
     {
         qDebug() << "calling m_onSurfaceReplaced";
-        m_onSurfaceReplaced(result, smoothLoop);
+        QVector<WorldPoint> savedContour = PickBestCutContour(ExtractCutContours(result), smoothLoop);
+        if (savedContour.size() < 3)
+            savedContour = smoothLoop;
+
+        m_onSurfaceReplaced(result, savedContour);
     }
     else
     {
@@ -1033,6 +1252,53 @@ QVector<ToolsContour::WorldPoint> ToolsContour::projectClosedLoopToSurface(
     }
 
     return projected;
+}
+
+QVector<ToolsContour::WorldPoint> ToolsContour::pinLoopToControlPoints(
+    const QVector<WorldPoint>& closedLoop) const
+{
+    if (closedLoop.size() < 3 || m_controlWorldPoints.isEmpty())
+        return closedLoop;
+
+    QVector<WorldPoint> pinned = closedLoop;
+
+    for (const auto& control : m_controlWorldPoints)
+    {
+        int nearestIndex = -1;
+        double nearestDist2 = std::numeric_limits<double>::max();
+
+        for (int i = 0; i < pinned.size(); ++i)
+        {
+            const double dist2 = distanceSquared(pinned[i], control);
+            if (dist2 < nearestDist2)
+            {
+                nearestDist2 = dist2;
+                nearestIndex = i;
+            }
+        }
+
+        if (nearestIndex < 0)
+            continue;
+
+        pinned[nearestIndex] = control;
+
+        const int n = pinned.size();
+        constexpr int blendRadius = 6;
+        for (int offset = 1; offset <= blendRadius; ++offset)
+        {
+            const double t = 1.0 - static_cast<double>(offset) / static_cast<double>(blendRadius + 1);
+            const int prevIndex = (nearestIndex - offset + n) % n;
+            const int nextIndex = (nearestIndex + offset) % n;
+
+            for (int axis = 0; axis < 3; ++axis)
+            {
+                pinned[prevIndex][axis] = pinned[prevIndex][axis] * (1.0 - t) + control[axis] * t;
+                pinned[nextIndex][axis] = pinned[nextIndex][axis] * (1.0 - t) + control[axis] * t;
+            }
+        }
+    }
+
+    return projectClosedLoopToSurface(pinned);
 }
 
 QVector<ToolsContour::WorldPoint> ToolsContour::smoothClosedLoopByWindow(
