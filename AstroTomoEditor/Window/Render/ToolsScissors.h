@@ -2,6 +2,7 @@
 #include <QWidget>
 #include <QVector>
 #include <QPoint>
+#include <array>
 #include <functional>
 #include <vtkVolume.h>
 #include <vtkWeakPointer.h>
@@ -36,7 +37,7 @@ public:
 
     // Колбэк, чтобы заменить mImage в RenderView (иначе только маппер обновится)
     void setOnImageReplaced(std::function<void(vtkImageData*)> cb) { m_onImageReplaced = std::move(cb); }
-    void setOnSurfaceReplaced(std::function<void(vtkPolyData*)> cb) { mOnSurfaceReplaced = std::move(cb); }
+    void setOnSurfaceReplaced(std::function<void(vtkPolyData*, QVector<QVector<std::array<double, 3>>>)> cb) { mOnSurfaceReplaced = std::move(cb); }
 
     // Обработка выбора из меню Tools (Scissors / InverseScissors)
     bool handle(Action a);
@@ -74,7 +75,7 @@ private:
     bool mSurfaceMode = false;
 
     std::function<void(vtkImageData*)> m_onImageReplaced;
-    std::function<void(vtkPolyData*)> mOnSurfaceReplaced;
+    std::function<void(vtkPolyData*, QVector<QVector<std::array<double, 3>>>)> mOnSurfaceReplaced;
     std::function<void()> m_onFinished;
 
     double mSurfaceVoxelSpacing[3]{ 0.8, 0.8, 0.8 };

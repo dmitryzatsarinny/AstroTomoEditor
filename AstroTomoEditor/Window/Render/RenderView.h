@@ -229,6 +229,8 @@ private:
     void resetStlContourHistory();
     void applyNewStlSurface(vtkPolyData* poly);
     void addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld);
+    void addSavedContours(const QVector<QVector<std::array<double, 3>>>& contoursWorld);
+    void keepOnlyContoursAttachedToCurrentSurface();
     bool saveContoursSidecar(const QString& stlPath) const;
     std::array<double, 3> worldToSavedStlCoords(const std::array<double, 3>& world) const;
     void rebuildContourOverlay();

@@ -1606,6 +1606,7 @@ void RenderView::applyNewStlSurface(vtkPolyData* poly)
     pushStlUndoSnapshot();
     mIsoMesh = clonePolyData(poly);
     ++mCurrentStlStep;
+    keepOnlyContoursAttachedToCurrentSurface();
 }
 
 void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPointsWorld)
@@ -1625,6 +1626,62 @@ void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPo
     }
 
     mVisibleContoursNow.insert(contourNumber);
+    rebuildContourOverlay();
+}
+
+void RenderView::addSavedContours(const QVector<QVector<std::array<double, 3>>>& contoursWorld)
+{
+    for (const auto& contour : contoursWorld)
+        addSavedContour(contour);
+}
+
+void RenderView::keepOnlyContoursAttachedToCurrentSurface()
+{
+    if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0 || mVisibleContoursNow.isEmpty())
+        return;
+
+    vtkNew<vtkCellLocator> surfaceLocator;
+    surfaceLocator->SetDataSet(mIsoMesh);
+    surfaceLocator->BuildLocator();
+
+    QHash<int, QVector<std::array<double, 3>>> contourToPoints;
+    contourToPoints.reserve(mVisibleContoursNow.size());
+    for (const auto& rec : mSavedContourPoints)
+    {
+        if (mVisibleContoursNow.contains(rec.contourNumber))
+            contourToPoints[rec.contourNumber].push_back(rec.world);
+    }
+
+    QSet<int> validContours;
+    constexpr double kMaxAttachDistanceMm = 1.5;
+    const double maxDist2 = kMaxAttachDistanceMm * kMaxAttachDistanceMm;
+
+    for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
+    {
+        const auto& points = it.value();
+        if (points.size() < 3)
+            continue;
+
+        bool isAttached = true;
+        for (const auto& p : points)
+        {
+            double closest[3]{};
+            double dist2 = std::numeric_limits<double>::max();
+            vtkIdType cellId = -1;
+            int subId = 0;
+            surfaceLocator->FindClosestPoint(p.data(), closest, cellId, subId, dist2);
+            if (cellId < 0 || dist2 > maxDist2)
+            {
+                isAttached = false;
+                break;
+            }
+        }
+
+        if (isAttached)
+            validContours.insert(it.key());
+    }
+
+    mVisibleContoursNow = std::move(validContours);
     rebuildContourOverlay();
 }
 
@@ -3261,7 +3318,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                     commitNewImage(im);
                     mScissors->attach(mVtk, mRenderer, mImage, mVolume);
             });
-        mScissors->setOnSurfaceReplaced([this](vtkPolyData* poly)
+        mScissors->setOnSurfaceReplaced([this](vtkPolyData* poly, QVector<QVector<std::array<double, 3>>> cutContours)
             {
                 if (!poly || poly->GetNumberOfCells() == 0)
                 {
@@ -3275,7 +3332,8 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
                 mIsoMesh = clonePolyData(poly);*/
 
                 applyNewStlSurface(poly);
-                resetStlContourHistory();
+                addSavedContours(cutContours);
+                keepOnlyContoursAttachedToCurrentSurface();
 
                 addStlPreview();
                 updateStlSizeLabel();

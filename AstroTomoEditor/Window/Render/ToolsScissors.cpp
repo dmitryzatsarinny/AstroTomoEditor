@@ -33,6 +33,8 @@
 #include <vtkOBBTree.h>
 #include <vtkIdList.h>
 #include <vtkImageDilateErode3D.h>
+#include <vtkFeatureEdges.h>
+#include <vtkStripper.h>
 
 #include <cmath>
 #include <cstring>
@@ -44,6 +46,74 @@
 #include <QApplication>
 #include <QWheelEvent>
 #include <QWidget>
+
+namespace
+{
+    QVector<QVector<std::array<double, 3>>> ExtractCutContours(vtkPolyData* surface)
+    {
+        QVector<QVector<std::array<double, 3>>> contours;
+        if (!surface || surface->GetNumberOfCells() == 0)
+            return contours;
+
+        vtkNew<vtkFeatureEdges> edges;
+        edges->SetInputData(surface);
+        edges->BoundaryEdgesOn();
+        edges->FeatureEdgesOff();
+        edges->NonManifoldEdgesOff();
+        edges->ManifoldEdgesOff();
+        edges->Update();
+
+        vtkPolyData* edgeOut = edges->GetOutput();
+        if (!edgeOut || edgeOut->GetNumberOfLines() == 0)
+            return contours;
+
+        vtkNew<vtkStripper> stripper;
+        stripper->SetInputData(edgeOut);
+        stripper->JoinContiguousSegmentsOn();
+        stripper->Update();
+
+        vtkPolyData* loops = stripper->GetOutput();
+        if (!loops)
+            return contours;
+
+        vtkCellArray* lines = loops->GetLines();
+        vtkPoints* points = loops->GetPoints();
+        if (!lines || !points)
+            return contours;
+
+        lines->InitTraversal();
+        vtkIdType npts = 0;
+        const vtkIdType* pts = nullptr;
+        while (lines->GetNextCell(npts, pts))
+        {
+            if (npts < 3 || !pts)
+                continue;
+
+            QVector<std::array<double, 3>> contour;
+            contour.reserve(static_cast<int>(npts));
+            for (vtkIdType i = 0; i < npts; ++i)
+            {
+                double p[3]{};
+                points->GetPoint(pts[i], p);
+                contour.push_back({ p[0], p[1], p[2] });
+            }
+
+            const auto& first = contour.front();
+            const auto& last = contour.back();
+            const double dx = first[0] - last[0];
+            const double dy = first[1] - last[1];
+            const double dz = first[2] - last[2];
+            const double eps2 = 1e-8;
+            if ((dx * dx + dy * dy + dz * dz) <= eps2)
+                contour.pop_back();
+
+            if (contour.size() >= 3)
+                contours.push_back(contour);
+        }
+
+        return contours;
+    }
+}
 
 ToolsScissors::ToolsScissors(QWidget* hostParent)
     : QObject(nullptr)
@@ -452,7 +522,7 @@ void ToolsScissors::finish()
             return;
 
         if (mOnSurfaceReplaced)
-            mOnSurfaceReplaced(out);
+            mOnSurfaceReplaced(out, ExtractCutContours(out));
 
         if (m_vtk && m_vtk->renderWindow())
             m_vtk->renderWindow()->Render();
