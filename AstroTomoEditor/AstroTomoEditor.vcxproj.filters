@@ -259,6 +259,9 @@
     <ClInclude Include="Window\Render\StlModeController.h">
       <Filter>Header Files\Window\Render</Filter>
     </ClInclude>
+    <ClInclude Include="Window\Render\ContourFile.h">
+      <Filter>Header Files\Window\Render</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="Window\Explorer\ExplorerDialog.h">

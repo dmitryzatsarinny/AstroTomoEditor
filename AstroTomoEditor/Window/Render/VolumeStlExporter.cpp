@@ -84,7 +84,10 @@ bool VolumeStlExporter::SaveStlMyBinary_NoCenter(
     const QString& filePath,
     double VolumeOriginX, double VolumeOriginY, double VolumeOriginZ,      // world origin (обычно vtkImageData::GetOrigin())
     double VolumeCenterX, double VolumeCenterY, double VolumeCenterZ,      // ВАЖНО: local half-size (dx/2, dy/2, dz/2) в мм
-    bool recomputeNormals)
+    bool recomputeNormals,
+    double* outCenterShiftX,
+    double* outCenterShiftY,
+    double* outCenterShiftZ)
 {
     if (!pd || filePath.isEmpty())
         return false;
@@ -146,6 +149,49 @@ bool VolumeStlExporter::SaveStlMyBinary_NoCenter(
     if (triCount == 0)
         return false;
 
+    if (outCenterShiftX) *outCenterShiftX = 0.0;
+    if (outCenterShiftY) *outCenterShiftY = 0.0;
+    if (outCenterShiftZ) *outCenterShiftZ = 0.0;
+
+    vtkPoints* pts = triPd->GetPoints();
+    double p0[3], p1[3], p2[3];
+    double sumCenterX = 0.0;
+    double sumCenterY = 0.0;
+    double sumCenterZ = 0.0;
+    quint32 centerTriCount = 0;
+
+    for (vtkIdType ci = 0; ci < cellCount; ++ci)
+    {
+        vtkCell* c = triPd->GetCell(ci);
+        if (!c || c->GetNumberOfPoints() != 3)
+            continue;
+
+        pts->GetPoint(c->GetPointId(0), p0);
+        pts->GetPoint(c->GetPointId(1), p1);
+        pts->GetPoint(c->GetPointId(2), p2);
+
+        const double centerX = ((p0[0] + p1[0] + p2[0]) / 3.0) - centerWorldX;
+        const double centerY = ((p0[1] + p1[1] + p2[1]) / 3.0) - centerWorldY;
+        const double centerZ = ((p0[2] + p1[2] + p2[2]) / 3.0) - centerWorldZ;
+
+        sumCenterX += centerX;
+        sumCenterY += centerY;
+        sumCenterZ += centerZ;
+        ++centerTriCount;
+    }
+
+    const double stlCenterShiftX = centerTriCount > 0 ? sumCenterX / centerTriCount : 0.0;
+    const double stlCenterShiftY = centerTriCount > 0 ? sumCenterY / centerTriCount : 0.0;
+    const double stlCenterShiftZ = centerTriCount > 0 ? sumCenterZ / centerTriCount : 0.0;
+
+    if (outCenterShiftX) *outCenterShiftX = stlCenterShiftX;
+    if (outCenterShiftY) *outCenterShiftY = stlCenterShiftY;
+    if (outCenterShiftZ) *outCenterShiftZ = stlCenterShiftZ;
+
+    qDebug() << "STL center shift:"
+        << stlCenterShiftX << stlCenterShiftY << stlCenterShiftZ;
+    qDebug() << "STL triangle centers used:" << centerTriCount;
+
     qDebug() << "Cells total:" << cellCount
         << "Points total:" << triPd->GetNumberOfPoints()
         << "Triangles:" << triCount;
@@ -158,16 +204,15 @@ bool VolumeStlExporter::SaveStlMyBinary_NoCenter(
     // В хедер пишем anchor = VolumeOrigin + VolumeCenterLocal (world-центр объёма)
     MYSTLHEADER h{};
     InitSTLHeader(&h, float(VolumeCenterX), float(VolumeCenterZ), float(VolumeCenterY));
+    //InitSTLHeader(&h, float(VolumeCenterX - stlCenterShiftX), float(VolumeCenterZ - stlCenterShiftZ), float(VolumeCenterY - stlCenterShiftY));
 
     if (!WriteAll(out, &h, sizeof(h))) return false;
 
     const quint32 triCountLE = qToLittleEndian(triCount);
     if (!WriteAll(out, &triCountLE, sizeof(triCountLE))) return false;
 
-    vtkPoints* pts = triPd->GetPoints();
     const quint16 attrLE = qToLittleEndian<quint16>(0);
 
-    double p0[3], p1[3], p2[3];
     double n[3];
 
     bool firstPrinted = false;
@@ -192,9 +237,12 @@ bool VolumeStlExporter::SaveStlMyBinary_NoCenter(
         }
 
         // --- 6) Центрируем относительно centerWorld: в STL координаты станут локальными вокруг (0,0,0) ---
-        const double cp0[3]{ p0[0] - centerWorldX, p0[1] - centerWorldY, p0[2] - centerWorldZ };
-        const double cp1[3]{ p1[0] - centerWorldX, p1[1] - centerWorldY, p1[2] - centerWorldZ };
-        const double cp2[3]{ p2[0] - centerWorldX, p2[1] - centerWorldY, p2[2] - centerWorldZ };
+        //const double cp0[3]{ p0[0] - centerWorldX, p0[1] - centerWorldY, p0[2] - centerWorldZ};
+        //const double cp1[3]{ p1[0] - centerWorldX, p1[1] - centerWorldY, p1[2] - centerWorldZ};
+        //const double cp2[3]{ p2[0] - centerWorldX, p2[1] - centerWorldY, p2[2] - centerWorldZ};
+        const double cp0[3]{ p0[0] - centerWorldX - stlCenterShiftX, p0[1] - centerWorldY - stlCenterShiftY, p0[2] - centerWorldZ - stlCenterShiftZ };
+        const double cp1[3]{ p1[0] - centerWorldX - stlCenterShiftX, p1[1] - centerWorldY - stlCenterShiftY, p1[2] - centerWorldZ - stlCenterShiftZ };
+        const double cp2[3]{ p2[0] - centerWorldX - stlCenterShiftX, p2[1] - centerWorldY - stlCenterShiftY, p2[2] - centerWorldZ - stlCenterShiftZ };
 
         if (!firstPrinted)
         {

@@ -73,6 +73,8 @@ private:
     void buildUi();
     void buildStyles();
     void wireSignals();
+    RenderView* ensureRenderView();
+    void wireRenderViewSignals();
     void startScan(); // запускает сканирование по mDicomPath/mKind
     void applyMaximizedUi(bool maximized);
     void showInfo(const QString& text);
@@ -98,7 +100,7 @@ private:
     SeriesListPanel* mSeries{ nullptr };  // левая панель со списком серий
     QStackedWidget* mViewerStack{ nullptr };  // справа: 2D и 3D стеки
     PlanarView* mPlanar{ nullptr };  // 2D просмотр
-    RenderView* mRenderView{ nullptr };  // 3D просмотр (лениво создаём)
+    RenderView* mRenderView{ nullptr };  // 3D просмотр
     PatientDialog* mPatientDlg{ nullptr };
     SettingsDialog* mSettingsDlg{ nullptr };
     DicomSeriesSaveDialog* mDicomSeriesSaveDlg{ nullptr };

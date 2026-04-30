@@ -41,7 +41,8 @@ public:
         vtkPolyData* in, double targetReduction = 0.25, int smoothIter = 10, double passBand = 0.15);
     
     static bool SaveStlMyBinary_NoCenter(vtkPolyData* pd, const QString& filePath, double VolumeOriginX, double VolumeOriginY, double VolumeOriginZ,
-        double VolumeCenterX, double VolumeCenterY, double VolumeCenterZ, bool recomputeNormals /*= true*/);
+        double VolumeCenterX, double VolumeCenterY, double VolumeCenterZ, bool recomputeNormals /*= true*/,
+        double* outCenterShiftX = nullptr, double* outCenterShiftY = nullptr, double* outCenterShiftZ = nullptr);
 
     static vtkSmartPointer<vtkPolyData> SimplifyToTargetBytes(vtkPolyData* in, std::int64_t targetBytes, int smoothIter, double passBand);
 

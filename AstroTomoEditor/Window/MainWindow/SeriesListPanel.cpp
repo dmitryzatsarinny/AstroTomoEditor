@@ -1,6 +1,7 @@
 ﻿#include "SeriesListPanel.h"
 #include "..\..\Services\DicomParcer.h"
 #include "..\..\Services\PatientInfo.h"
+#include <Services/FastDicomHeaderReader.h>
 #include <Services/VolumeFix3DR.h>
 
 #include <QtConcurrent/QtConcurrentRun>
@@ -774,6 +775,17 @@ static QString makeSeriesKey(vtkDICOMMetaData* d)
     return QString("ST=%1|SN=%2|MD=%3|%4x%5").arg(study, snum, mod).arg(rows).arg(cols);
 }
 
+static QString makeSeriesKey(const FastDicomHeader& h)
+{
+    if (!h.seriesUID.isEmpty())
+        return h.seriesUID;
+
+    return QString("ST=%1|SN=%2|MD=%3|%4x%5")
+        .arg(h.studyUID, h.seriesNumber, h.modality)
+        .arg(h.rows)
+        .arg(h.cols);
+}
+
 
 static bool tryFillPatientInfo(const QString& fp, PatientInfo& out)
 {
@@ -944,11 +956,72 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
 
     QAtomicInt progressed = 0;
     std::atomic_flag gotPatient = ATOMIC_FLAG_INIT;
+    std::atomic_int patientAttempts{ 0 };
 
     auto mapFn = [&](const QString& p) -> MapOut {
         MapOut out;
         out.meta.path = p;
         if (shouldCancel()) return out;
+
+        FastDicomHeader fast;
+        if (FastDicomHeaderReader::readHeader(p, fast, nullptr, 256 * 1024))
+        {
+            out.seriesKey = makeSeriesKey(fast);
+            out.ok = !out.seriesKey.isEmpty();
+
+            if (out.ok)
+            {
+                out.meta.fileName = QFileInfo(p).fileName();
+                out.meta.rows = fast.rows;
+                out.meta.cols = fast.cols;
+                out.meta.bitsAllocated = fast.bitsAllocated;
+                out.meta.samplesPerPixel = fast.samplesPerPixel;
+                out.meta.pixelRepresentation = fast.pixelRepresentation;
+                out.meta.photometric = fast.photometric;
+                out.meta.hasPixelKey = fast.hasPixelKey;
+                out.meta.hasZ = fast.hasIppZ;
+                out.meta.z = fast.ippZ;
+                out.meta.hasInstance = fast.hasInstanceNumber;
+                out.meta.instance = fast.instanceNumber;
+                out.meta.modality = fast.modality;
+                out.meta.seriesDescription = fast.seriesDescription;
+                out.meta.studyUID = fast.studyUID;
+                out.meta.seriesNumber = fast.seriesNumber;
+            }
+
+            if (out.ok && !gotPatient.test_and_set(std::memory_order_acq_rel))
+            {
+                const int attempt = patientAttempts.fetch_add(1, std::memory_order_relaxed);
+                if (attempt < 4) {
+                    PatientInfo pi;
+                    if (tryFillPatientInfo(p, pi)) {
+                        out.pinfo = std::move(pi);
+                        out.pinfoValid = true;
+                    }
+                    else {
+                        gotPatient.clear(std::memory_order_release);
+                    }
+                }
+                else {
+                    // Не даём редкому набору без демографии снова тащить VTK на каждый файл.
+                }
+            }
+
+            int k = ++progressed;
+            if ((k & 0x0F) == 0)
+                emit scanProgress(k, candidates.size(), p);
+
+            return out;
+        }
+
+        if (!isDicomLikelyFast(p))
+        {
+            int k = ++progressed;
+            if ((k & 0x0F) == 0)
+                emit scanProgress(k, candidates.size(), p);
+
+            return out;
+        }
 
         // Парсим метаданные
         auto meta = vtkSmartPointer<vtkDICOMMetaData>::New();
@@ -1039,21 +1112,28 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
      };
 
     SeriesScanResult acc;
-
-    auto reduceFn = [&](SeriesScanResult& a, const MapOut& m) {
-        if (!m.ok) return;
-        a.entriesBySeries[m.seriesKey].push_back(m.meta);
-        if (!a.patientInfoValid && m.pinfoValid) {
-            a.patientInfo = m.pinfo;
-            a.patientInfoValid = true;
+    for (const QString& candidate : candidates)
+    {
+        if (shouldCancel()) {
+            result.canceled = true;
+            return result;
         }
-        };
 
-    QThreadPool pool;
-    pool.setMaxThreadCount(2);
+        const MapOut m = mapFn(candidate);
+        if (shouldCancel()) {
+            result.canceled = true;
+            return result;
+        }
 
-    acc = QtConcurrent::blockingMappedReduced<SeriesScanResult>(
-         &pool, candidates, mapFn, reduceFn, QtConcurrent::SequentialReduce);
+        if (!m.ok)
+            continue;
+
+        acc.entriesBySeries[m.seriesKey].push_back(m.meta);
+        if (!acc.patientInfoValid && m.pinfoValid) {
+            acc.patientInfo = m.pinfo;
+            acc.patientInfoValid = true;
+        }
+    }
 
     if (shouldCancel()) {
         result.canceled = true;
@@ -1155,7 +1235,7 @@ SeriesScanResult SeriesScanWorker::runScan(const QStringList& rootPaths)
             }
             s.description = desc;
 
-            s.thumb = SeriesListPanel::makeThumbImageFromDicom(s.firstFile);
+            s.thumb = {};
             items.push_back(std::move(s));
 
         }

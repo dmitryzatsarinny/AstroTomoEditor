@@ -19,6 +19,7 @@
 #include <vtkAxesActor.h>
 #include <vtkRenderWindowInteractor.h>
 #include <vtkMatrix3x3.h>
+#include <vtkMath.h>
 #include <QShortcut>
 #include <QKeySequence>
 #include "Human.h"
@@ -34,6 +35,7 @@
 #include <vtkProperty.h>
 #include <vtkPolyDataNormals.h>
 #include <vtkCellLocator.h>
+#include <vtkCell.h>
 #include <Services/DicomRange.h>
 #include <QTimer>
 #include <QLineEdit>
@@ -45,13 +47,19 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 #include <QFile>
+#include <QSaveFile>
 #include <QTextStream>
 #include <Window/ServiceWindow/ShellFileDialog.h>
 #include <Window/ServiceWindow/CustomMessageBox.h>
 #include "ElectrodeAutoIdentifier.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <QDialog>
+#include <QFormLayout>
+#include <QDoubleSpinBox>
+#include <QDialogButtonBox>
 
 VTK_MODULE_INIT(vtkRenderingOpenGL2);
 VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
@@ -59,6 +67,280 @@ VTK_MODULE_INIT(vtkRenderingVolumeOpenGL2);
 namespace
 {
     using ContourPoint = std::array<double, 3>;
+
+    constexpr quint32 kStoredContourColor = 0x00CCCCCC;
+    constexpr quint8 kStoredContourWidth = 10;
+    constexpr double kContourSimplifyToleranceMm = 0.2;
+    constexpr double kContourDuplicatePointEps2 = 1e-10;
+    constexpr double kContourNormalOffsetMm = 5.0;
+
+    double pointSegmentDistanceSquared(
+        const ContourPoint& p,
+        const ContourPoint& a,
+        const ContourPoint& b)
+    {
+        const double abx = b[0] - a[0];
+        const double aby = b[1] - a[1];
+        const double abz = b[2] - a[2];
+        const double apx = p[0] - a[0];
+        const double apy = p[1] - a[1];
+        const double apz = p[2] - a[2];
+        const double ab2 = abx * abx + aby * aby + abz * abz;
+
+        if (ab2 <= kContourDuplicatePointEps2)
+            return (apx * apx + apy * apy + apz * apz);
+
+        double t = (apx * abx + apy * aby + apz * abz) / ab2;
+        t = std::clamp(t, 0.0, 1.0);
+
+        const double cx = a[0] + t * abx;
+        const double cy = a[1] + t * aby;
+        const double cz = a[2] + t * abz;
+        const double dx = p[0] - cx;
+        const double dy = p[1] - cy;
+        const double dz = p[2] - cz;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    QVector<ContourPoint> simplifyOpenContourPath(
+        const QVector<ContourPoint>& path,
+        double toleranceSquared)
+    {
+        if (path.size() <= 2)
+            return path;
+
+        QVector<char> keep(path.size(), 0);
+        keep[0] = 1;
+        keep[path.size() - 1] = 1;
+
+        QVector<std::pair<int, int>> stack;
+        stack.push_back({ 0, static_cast<int>(path.size()) - 1 });
+
+        while (!stack.isEmpty())
+        {
+            const auto [first, last] = stack.takeLast();
+            if (last <= first + 1)
+                continue;
+
+            double maxDistance2 = -1.0;
+            int maxIndex = -1;
+            for (int i = first + 1; i < last; ++i)
+            {
+                const double distance2 = pointSegmentDistanceSquared(path[i], path[first], path[last]);
+                if (distance2 > maxDistance2)
+                {
+                    maxDistance2 = distance2;
+                    maxIndex = i;
+                }
+            }
+
+            if (maxIndex >= 0 && maxDistance2 > toleranceSquared)
+            {
+                keep[maxIndex] = 1;
+                stack.push_back({ first, maxIndex });
+                stack.push_back({ maxIndex, last });
+            }
+        }
+
+        QVector<ContourPoint> simplified;
+        simplified.reserve(path.size());
+        for (int i = 0; i < path.size(); ++i)
+        {
+            if (keep[i])
+                simplified.push_back(path[i]);
+        }
+
+        return simplified;
+    }
+
+    QVector<ContourPoint> loopPathBetween(
+        const QVector<ContourPoint>& loop,
+        int first,
+        int last)
+    {
+        QVector<ContourPoint> path;
+        if (loop.isEmpty())
+            return path;
+
+        const int count = static_cast<int>(loop.size());
+        int i = first;
+        for (;;)
+        {
+            path.push_back(loop[i]);
+            if (i == last)
+                break;
+            i = (i + 1) % count;
+        }
+
+        return path;
+    }
+
+    QVector<ContourPoint> simplifyClosedContour(
+        const QVector<ContourPoint>& contour,
+        double toleranceMm)
+    {
+        QVector<ContourPoint> loop;
+        loop.reserve(contour.size());
+        for (const auto& p : contour)
+        {
+            if (loop.isEmpty())
+            {
+                loop.push_back(p);
+                continue;
+            }
+
+            const auto& prev = loop.back();
+            const double dx = p[0] - prev[0];
+            const double dy = p[1] - prev[1];
+            const double dz = p[2] - prev[2];
+            if ((dx * dx + dy * dy + dz * dz) > kContourDuplicatePointEps2)
+                loop.push_back(p);
+        }
+
+        if (loop.size() >= 2)
+        {
+            const auto& first = loop.front();
+            const auto& last = loop.back();
+            const double dx = first[0] - last[0];
+            const double dy = first[1] - last[1];
+            const double dz = first[2] - last[2];
+            if ((dx * dx + dy * dy + dz * dz) <= kContourDuplicatePointEps2)
+                loop.pop_back();
+        }
+
+        if (loop.size() <= 3)
+            return loop;
+
+        int anchorA = 0;
+        int anchorB = 1;
+        double maxDistance2 = -1.0;
+        for (int i = 0; i < loop.size(); ++i)
+        {
+            for (int j = i + 1; j < loop.size(); ++j)
+            {
+                const double dx = loop[i][0] - loop[j][0];
+                const double dy = loop[i][1] - loop[j][1];
+                const double dz = loop[i][2] - loop[j][2];
+                const double distance2 = dx * dx + dy * dy + dz * dz;
+                if (distance2 > maxDistance2)
+                {
+                    maxDistance2 = distance2;
+                    anchorA = i;
+                    anchorB = j;
+                }
+            }
+        }
+
+        const double toleranceSquared = toleranceMm * toleranceMm;
+        const auto pathA = simplifyOpenContourPath(
+            loopPathBetween(loop, anchorA, anchorB),
+            toleranceSquared);
+        const auto pathB = simplifyOpenContourPath(
+            loopPathBetween(loop, anchorB, anchorA),
+            toleranceSquared);
+
+        QVector<ContourPoint> simplified;
+        simplified.reserve(pathA.size() + pathB.size());
+
+        for (int i = 0; i < pathA.size(); ++i)
+            simplified.push_back(pathA[i]);
+        for (int i = 1; i + 1 < pathB.size(); ++i)
+            simplified.push_back(pathB[i]);
+
+        return simplified.size() >= 3 ? simplified : loop;
+    }
+
+    QVector<ContourPoint> fitContourToStoredPointLimit(const QVector<ContourPoint>& contour)
+    {
+        QVector<ContourPoint> simplified = simplifyClosedContour(contour, kContourSimplifyToleranceMm);
+
+        double tolerance = kContourSimplifyToleranceMm;
+        while (simplified.size() > MaxStoredPointPerContour)
+        {
+            tolerance *= 1.35;
+            simplified = simplifyClosedContour(contour, tolerance);
+        }
+
+        return simplified;
+    }
+
+    void setStoredContourName(StoredContourHeader& header, const QString& name)
+    {
+        std::fill(std::begin(header.ContourName), std::end(header.ContourName), char16_t{ 0 });
+        constexpr int kContourNameCapacity =
+            static_cast<int>(sizeof(header.ContourName) / sizeof(header.ContourName[0]));
+        const int count = std::min<int>(name.size(), kContourNameCapacity - 1);
+        for (int i = 0; i < count; ++i)
+            header.ContourName[i] = static_cast<char16_t>(name.at(i).unicode());
+    }
+
+    StoredContourCoord makeStoredContourCoord(const ContourPoint& p)
+    {
+        StoredContourCoord coord{};
+        coord.x = p[0];
+        coord.y = p[1];
+        coord.z = p[2];
+        coord.unused = 0.0;
+        return coord;
+    }
+
+    void setStoredContourPoint(
+        StoredContourPoint& point,
+        const ContourPoint& initialPoint,
+        const ContourPoint& userViewPoint1,
+        const ContourPoint& userViewPoint2)
+    {
+        point = StoredContourPoint{};
+        point.InitialContourPoint = makeStoredContourCoord(initialPoint);
+        point.UserViewPoint1 = makeStoredContourCoord(userViewPoint1);
+        point.UserViewPoint2 = makeStoredContourCoord(userViewPoint2);
+    }
+
+    void swapStoredContourCoordYZ(StoredContourCoord& coord)
+    {
+        std::swap(coord.y, coord.z);
+    }
+
+    void subtractStoredContourCoordShift(StoredContourCoord& coord, const DicomInfo& dicom)
+    {
+        coord.x -= dicom.STLCenterShiftX;
+        coord.y -= dicom.STLCenterShiftY;
+        coord.z -= dicom.STLCenterShiftZ;
+    }
+
+    void swapStoredContourPointYZ(StoredContourPoint& point)
+    {
+        swapStoredContourCoordYZ(point.InitialContourPoint);
+        swapStoredContourCoordYZ(point.UserViewPoint1);
+        swapStoredContourCoordYZ(point.UserViewPoint2);
+    }
+
+    void subtractStoredContourPointShift(StoredContourPoint& point, const DicomInfo& dicom)
+    {
+        subtractStoredContourCoordShift(point.InitialContourPoint, dicom);
+        subtractStoredContourCoordShift(point.UserViewPoint1, dicom);
+        subtractStoredContourCoordShift(point.UserViewPoint2, dicom);
+    }
+
+    void swapStoredContourYZ(StoredContourInfo& contour)
+    {
+        const int pointCount = std::min<int>(
+            static_cast<int>(contour.header.nContourPoint),
+            MaxStoredPointPerContour);
+
+        for (int i = 0; i < pointCount; ++i)
+            swapStoredContourPointYZ(contour.Points[i]);
+    }
+
+    void subtractStoredContourShift(StoredContourInfo& contour, const DicomInfo& dicom)
+    {
+        const int pointCount = std::min<int>(
+            static_cast<int>(contour.header.nContourPoint),
+            MaxStoredPointPerContour);
+
+        for (int i = 0; i < pointCount; ++i)
+            subtractStoredContourPointShift(contour.Points[i], dicom);
+    }
 
     double contourDistanceSquared(const ContourPoint& a, const ContourPoint& b)
     {
@@ -163,6 +445,61 @@ namespace
 
         return sampledNearestStatsWithinLimits(a, b, maxMeanDistance2, maxSingleDistance2) &&
             sampledNearestStatsWithinLimits(b, a, maxMeanDistance2, maxSingleDistance2);
+    }
+
+    bool closestSurfaceNormal(
+        vtkPolyData* surface,
+        vtkCellLocator* locator,
+        const ContourPoint& pointWorld,
+        double normal[3])
+    {
+        if (!surface || !locator || !normal)
+            return false;
+
+        double closest[3]{ 0.0, 0.0, 0.0 };
+        double dist2 = std::numeric_limits<double>::max();
+        vtkIdType cellId = -1;
+        int subId = 0;
+        locator->FindClosestPoint(pointWorld.data(), closest, cellId, subId, dist2);
+        if (cellId < 0)
+            return false;
+
+        vtkCell* cell = surface->GetCell(cellId);
+        if (!cell || cell->GetNumberOfPoints() < 3)
+            return false;
+
+        double p0[3], p1[3], p2[3];
+        cell->GetPoints()->GetPoint(0, p0);
+        cell->GetPoints()->GetPoint(1, p1);
+        cell->GetPoints()->GetPoint(2, p2);
+
+        const double u[3]{ p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2] };
+        const double v[3]{ p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2] };
+        vtkMath::Cross(u, v, normal);
+        if (vtkMath::Normalize(normal) == 0.0)
+            return false;
+
+        double bounds[6];
+        surface->GetBounds(bounds);
+        const double meshCenter[3]{
+            0.5 * (bounds[0] + bounds[1]),
+            0.5 * (bounds[2] + bounds[3]),
+            0.5 * (bounds[4] + bounds[5])
+        };
+        const double outward[3]{
+            closest[0] - meshCenter[0],
+            closest[1] - meshCenter[1],
+            closest[2] - meshCenter[2]
+        };
+
+        if (vtkMath::Dot(normal, outward) < 0.0)
+        {
+            normal[0] = -normal[0];
+            normal[1] = -normal[1];
+            normal[2] = -normal[2];
+        }
+
+        return true;
     }
 }
 
@@ -275,6 +612,13 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
 
     auto sc = new QShortcut(QKeySequence(Qt::Key_F12), this);
     connect(sc, &QShortcut::activated, this, &RenderView::centerOnVolume);
+
+    auto* scMaterialDebug = new QShortcut(QKeySequence(Qt::Key_F9), this);
+    connect(scMaterialDebug, &QShortcut::activated, this, [this]
+        {
+            openStlMaterialDebugDialog();
+        });
+
 
     mOrMarker = vtkSmartPointer<vtkOrientationMarkerWidget>::New();
     mOrMarker->SetOrientationMarker(MakeHumanMarker());
@@ -1586,14 +1930,188 @@ void RenderView::updateUndoRedoUi()
         : ":/icons/Resources/redo-no.svg"));
 }
 
+namespace StlDebugMaterial
+{
+    double frontR = 0.90;
+    double frontG = 0.90;
+    double frontB = 0.90;
+
+    double frontAmbient = 0.36;
+    double frontDiffuse = 0.36;
+    double frontOpacity = 1.00;
+
+    double frontSpecular = 0.09;
+    double frontSpecularPower = 12.0;
+
+    double frontSpecularR = 0.6;
+    double frontSpecularG = 0.6;
+    double frontSpecularB = 0.6;
+
+    double backR = 0.6;
+    double backG = 0.3;
+    double backB = 0.3;
+
+    double backAmbient = 0.63;
+    double backDiffuse = 0.63;
+    double backOpacity = 0.90;
+
+    double backSpecular = 0.36;
+    double backSpecularPower = 12.0;
+
+    double backSpecularR = 0.6;
+    double backSpecularG = 0.3;
+    double backSpecularB = 0.3;
+}
+
+void RenderView::openStlMaterialDebugDialog()
+{
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle("STL material debug");
+    dlg->setAttribute(Qt::WA_DeleteOnClose, true);
+
+    auto* lay = new QFormLayout(dlg);
+    lay->setContentsMargins(12, 12, 12, 12);
+    lay->setSpacing(8);
+
+    auto addSpin = [&](const QString& name, double& value, double minVal, double maxVal, double step)
+        {
+            auto* spin = new QDoubleSpinBox(dlg);
+            spin->setRange(minVal, maxVal);
+            spin->setDecimals(3);
+            spin->setSingleStep(step);
+            spin->setValue(value);
+
+            connect(spin, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+                this, [this, &value](double v)
+                {
+                    value = v;
+                    applyDebugStlMaterial();
+                });
+
+            lay->addRow(name, spin);
+        };
+
+    addSpin("front R", StlDebugMaterial::frontR, 0.0, 1.0, 0.01);
+    addSpin("front G", StlDebugMaterial::frontG, 0.0, 1.0, 0.01);
+    addSpin("front B", StlDebugMaterial::frontB, 0.0, 1.0, 0.01);
+
+    addSpin("front ambient", StlDebugMaterial::frontAmbient, 0.0, 1.0, 0.01);
+    addSpin("front diffuse", StlDebugMaterial::frontDiffuse, 0.0, 1.0, 0.01);
+    addSpin("front opacity", StlDebugMaterial::frontOpacity, 0.0, 1.0, 0.01);
+
+    addSpin("front specular", StlDebugMaterial::frontSpecular, 0.0, 1.0, 0.01);
+    addSpin("front specular power", StlDebugMaterial::frontSpecularPower, 1.0, 80.0, 1.0);
+
+    addSpin("specular R", StlDebugMaterial::frontSpecularR, 0.0, 1.0, 0.01);
+    addSpin("specular G", StlDebugMaterial::frontSpecularG, 0.0, 1.0, 0.01);
+    addSpin("specular B", StlDebugMaterial::frontSpecularB, 0.0, 1.0, 0.01);
+
+    addSpin("back R", StlDebugMaterial::backR, 0.0, 1.0, 0.01);
+    addSpin("back G", StlDebugMaterial::backG, 0.0, 1.0, 0.01);
+    addSpin("back B", StlDebugMaterial::backB, 0.0, 1.0, 0.01);
+
+    addSpin("back ambient", StlDebugMaterial::backAmbient, 0.0, 1.0, 0.01);
+    addSpin("back diffuse", StlDebugMaterial::backDiffuse, 0.0, 1.0, 0.01);
+    addSpin("back opacity", StlDebugMaterial::backOpacity, 0.0, 1.0, 0.01);
+
+    addSpin("back specular", StlDebugMaterial::backSpecular, 0.0, 1.0, 0.01);
+    addSpin("back specular power", StlDebugMaterial::backSpecularPower, 1.0, 80.0, 1.0);
+
+    addSpin("back specular R", StlDebugMaterial::backSpecularR, 0.0, 1.0, 0.01);
+    addSpin("back specular G", StlDebugMaterial::backSpecularG, 0.0, 1.0, 0.01);
+    addSpin("back specular B", StlDebugMaterial::backSpecularB, 0.0, 1.0, 0.01);
+
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, dlg);
+    connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::close);
+    lay->addRow(buttons);
+
+    dlg->resize(340, 520);
+    dlg->show();
+    dlg->raise();
+    dlg->activateWindow();
+}
+
+void RenderView::applyDebugStlMaterial()
+{
+    if (!mIsoActor)
+        return;
+
+    auto* front = mIsoActor->GetProperty();
+    if (!front)
+        return;
+
+    front->SetInterpolationToPhong();
+
+    front->SetColor(
+        StlDebugMaterial::frontR,
+        StlDebugMaterial::frontG,
+        StlDebugMaterial::frontB
+    );
+
+    front->SetAmbient(StlDebugMaterial::frontAmbient);
+    front->SetDiffuse(StlDebugMaterial::frontDiffuse);
+    front->SetOpacity(StlDebugMaterial::frontOpacity);
+
+    front->SetSpecular(StlDebugMaterial::frontSpecular);
+    front->SetSpecularPower(StlDebugMaterial::frontSpecularPower);
+
+    front->SetSpecularColor(
+        StlDebugMaterial::frontSpecularR,
+        StlDebugMaterial::frontSpecularG,
+        StlDebugMaterial::frontSpecularB
+    );
+
+    front->BackfaceCullingOff();
+
+    auto* back = mIsoActor->GetBackfaceProperty();
+    if (!back)
+    {
+        vtkNew<vtkProperty> newBack;
+        mIsoActor->SetBackfaceProperty(newBack);
+        back = mIsoActor->GetBackfaceProperty();
+    }
+
+    if (back)
+    {
+        back->SetInterpolationToPhong();
+
+        back->SetColor(
+            StlDebugMaterial::backR,
+            StlDebugMaterial::backG,
+            StlDebugMaterial::backB
+        );
+
+        back->SetAmbient(StlDebugMaterial::backAmbient);
+        back->SetDiffuse(StlDebugMaterial::backDiffuse);
+        back->SetOpacity(StlDebugMaterial::backOpacity);
+
+        back->SetSpecular(StlDebugMaterial::backSpecular);
+        back->SetSpecularPower(StlDebugMaterial::backSpecularPower);
+
+        back->SetSpecularColor(
+            StlDebugMaterial::backSpecularR,
+            StlDebugMaterial::backSpecularG,
+            StlDebugMaterial::backSpecularB
+        );
+
+        back->Modified();
+    }
+
+    front->Modified();
+    mIsoActor->Modified();
+
+    if (mVtk && mVtk->renderWindow())
+        mVtk->renderWindow()->Render();
+}
+
 static vtkSmartPointer<vtkActor> MakeSurfaceActor(vtkPolyData* pd)
 {
     if (!pd) return nullptr;
 
     vtkNew<vtkPolyDataNormals> normals;
     normals->SetInputData(pd);
-    normals->ConsistencyOn();       // согласованные нормали
-    normals->SplittingOff();        // не ломать по углам
+    normals->ConsistencyOn();
+    normals->SplittingOff();
     normals->ComputePointNormalsOn();
     normals->ComputeCellNormalsOff();
     normals->Update();
@@ -1605,28 +2123,51 @@ static vtkSmartPointer<vtkActor> MakeSurfaceActor(vtkPolyData* pd)
     vtkNew<vtkActor> ac;
     ac->SetMapper(mp);
 
-    // ВНЕШНЯЯ сторона (front faces)
     auto* front = ac->GetProperty();
     front->SetInterpolationToPhong();
-    front->SetColor(0.98, 0.99, 1.00);
-    front->SetAmbient(0.12);
-    front->SetDiffuse(0.88);
-    front->SetSpecular(0.12);
-    front->SetSpecularPower(24.0);
-    front->SetSpecularColor(1.0, 1.0, 1.0);
-    front->SetOpacity(0.86);           // чуть больше просвета
-    front->BackfaceCullingOff();       // важное условие
 
-    // Бек — светлее и со спекуляром
+    front->SetColor(
+        StlDebugMaterial::frontR,
+        StlDebugMaterial::frontG,
+        StlDebugMaterial::frontB
+    );
+
+    front->SetAmbient(StlDebugMaterial::frontAmbient);
+    front->SetDiffuse(StlDebugMaterial::frontDiffuse);
+    front->SetOpacity(StlDebugMaterial::frontOpacity);
+
+    front->SetSpecular(StlDebugMaterial::frontSpecular);
+    front->SetSpecularPower(StlDebugMaterial::frontSpecularPower);
+
+    front->SetSpecularColor(
+        StlDebugMaterial::frontSpecularR,
+        StlDebugMaterial::frontSpecularG,
+        StlDebugMaterial::frontSpecularB
+    );
+
+    front->BackfaceCullingOff();
+
     vtkNew<vtkProperty> back;
     back->SetInterpolationToPhong();
-    back->SetColor(0.75, 0.22, 0.20);  // светлее и теплее
-    back->SetAmbient(0.20);            // «подсветка изнутри»
-    back->SetDiffuse(0.85);
-    back->SetSpecular(0.18);           // добавим блик
-    back->SetSpecularPower(18.0);
-    back->SetSpecularColor(1.0, 0.95, 0.95);
-    back->SetOpacity(0.32);            // чтобы вклад был заметен
+
+    back->SetColor(
+        StlDebugMaterial::backR,
+        StlDebugMaterial::backG,
+        StlDebugMaterial::backB
+    );
+
+    back->SetAmbient(StlDebugMaterial::backAmbient);
+    back->SetDiffuse(StlDebugMaterial::backDiffuse);
+    back->SetOpacity(StlDebugMaterial::backOpacity);
+
+    back->SetSpecular(StlDebugMaterial::backSpecular);
+    back->SetSpecularPower(StlDebugMaterial::backSpecularPower);
+
+    back->SetSpecularColor(
+        StlDebugMaterial::backSpecularR,
+        StlDebugMaterial::backSpecularG,
+        StlDebugMaterial::backSpecularB
+    );
 
     ac->SetBackfaceProperty(back);
 
@@ -1687,6 +2228,10 @@ void RenderView::pushStlUndoSnapshot()
 
     mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
 
+    mStlSaveUndoStack.push_back(clonePolyData(mStlSaveMesh ? mStlSaveMesh.GetPointer() : mIsoMesh.GetPointer()));
+    while (mStlSaveUndoStack.size() > mHistoryLimit)
+        mStlSaveUndoStack.pop_front();
+
     mStlStepUndoStack.push_back(mCurrentStlStep);
     while (mStlStepUndoStack.size() > mHistoryLimit)
         mStlStepUndoStack.pop_front();
@@ -1696,6 +2241,7 @@ void RenderView::pushStlUndoSnapshot()
         mContourVisibleUndoStack.pop_front();
 
     mStlStepRedoStack.clear();
+    mStlSaveRedoStack.clear();
     mContourVisibleRedoStack.clear();
 }
 
@@ -1704,11 +2250,12 @@ void RenderView::resetStlContourHistory()
     mCurrentStlStep = 0;
     mStlStepUndoStack.clear();
     mStlStepRedoStack.clear();
+    mStlSaveUndoStack.clear();
+    mStlSaveRedoStack.clear();
     mContourVisibleUndoStack.clear();
     mContourVisibleRedoStack.clear();
-    mSavedContourPoints.clear();
+    mSavedContours.clear();
     mVisibleContoursNow.clear();
-    mNextContourNumber = 1;
     rebuildContourOverlay();
 }
 
@@ -1731,17 +2278,8 @@ void RenderView::addSavedContour(const QVector<std::array<double, 3>>& contourPo
     if (hasMatchingVisibleContour(contourPointsWorld))
         return;
 
-    const int contourNumber = mNextContourNumber++;
-    int pointIndex = 1;
-    for (const auto& p : contourPointsWorld)
-    {
-        SavedContourPoint rec;
-        rec.contourNumber = contourNumber;
-        rec.pointIndex = pointIndex++;
-        rec.world = p;
-        mSavedContourPoints.push_back(rec);
-    }
-
+    const int contourNumber = mSavedContours.size() + 1;
+    mSavedContours.push_back(makeStoredContour(contourPointsWorld, contourNumber));
     mVisibleContoursNow.insert(contourNumber);
     rebuildContourOverlay();
 }
@@ -1751,17 +2289,13 @@ bool RenderView::hasMatchingVisibleContour(const QVector<std::array<double, 3>>&
     if (contourPointsWorld.size() < 3 || mVisibleContoursNow.isEmpty())
         return false;
 
-    QHash<int, QVector<std::array<double, 3>>> contourToPoints;
-    contourToPoints.reserve(mVisibleContoursNow.size());
-    for (const auto& rec : mSavedContourPoints)
+    for (const int contourNumber : mVisibleContoursNow)
     {
-        if (mVisibleContoursNow.contains(rec.contourNumber))
-            contourToPoints[rec.contourNumber].push_back(rec.world);
-    }
+        const int contourIndex = contourNumber - 1;
+        if (contourIndex < 0 || contourIndex >= mSavedContours.size())
+            continue;
 
-    for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
-    {
-        if (contoursMatchGeometry(contourPointsWorld, it.value()))
+        if (contoursMatchGeometry(contourPointsWorld, storedContourWorldPoints(mSavedContours[contourIndex])))
             return true;
     }
 
@@ -1783,21 +2317,17 @@ void RenderView::keepOnlyContoursAttachedToCurrentSurface()
     surfaceLocator->SetDataSet(mIsoMesh);
     surfaceLocator->BuildLocator();
 
-    QHash<int, QVector<std::array<double, 3>>> contourToPoints;
-    contourToPoints.reserve(mVisibleContoursNow.size());
-    for (const auto& rec : mSavedContourPoints)
-    {
-        if (mVisibleContoursNow.contains(rec.contourNumber))
-            contourToPoints[rec.contourNumber].push_back(rec.world);
-    }
-
     QSet<int> validContours;
     constexpr double kMaxAttachDistanceMm = 1.5;
     const double maxDist2 = kMaxAttachDistanceMm * kMaxAttachDistanceMm;
 
-    for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
+    for (const int contourNumber : mVisibleContoursNow)
     {
-        const auto& points = it.value();
+        const int contourIndex = contourNumber - 1;
+        if (contourIndex < 0 || contourIndex >= mSavedContours.size())
+            continue;
+
+        const auto points = storedContourWorldPoints(mSavedContours[contourIndex]);
         if (points.size() < 3)
             continue;
 
@@ -1817,7 +2347,7 @@ void RenderView::keepOnlyContoursAttachedToCurrentSurface()
         }
 
         if (isAttached)
-            validContours.insert(it.key());
+            validContours.insert(contourNumber);
     }
 
     mVisibleContoursNow = std::move(validContours);
@@ -1841,7 +2371,7 @@ void RenderView::rebuildContourOverlay()
         return;
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
         return;
-    if (mSavedContourPoints.isEmpty() || mVisibleContoursNow.isEmpty())
+    if (mSavedContours.isEmpty() || mVisibleContoursNow.isEmpty())
         return;
 
     vtkNew<vtkCellLocator> surfaceLocator;
@@ -1851,19 +2381,13 @@ void RenderView::rebuildContourOverlay()
     vtkNew<vtkPoints> points;
     vtkNew<vtkCellArray> lines;
 
-    QHash<int, QVector<std::array<double, 3>>> contourToPoints;
-    contourToPoints.reserve(mVisibleContoursNow.size());
-    for (const auto& rec : mSavedContourPoints)
+    for (const int contourNumber : mVisibleContoursNow)
     {
-        if (!mVisibleContoursNow.contains(rec.contourNumber))
+        const int contourIndex = contourNumber - 1;
+        if (contourIndex < 0 || contourIndex >= mSavedContours.size())
             continue;
 
-        contourToPoints[rec.contourNumber].push_back(rec.world);
-    }
-
-    for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
-    {
-        const auto& contourPoints = it.value();
+        const auto contourPoints = storedContourWorldPoints(mSavedContours[contourIndex]);
         const int pointCount = contourPoints.size();
         if (pointCount < 3)
             continue;
@@ -1930,12 +2454,12 @@ void RenderView::rebuildContourOverlay()
 
     mContourOverlayActor = vtkSmartPointer<vtkActor>::New();
     mContourOverlayActor->SetMapper(mContourOverlayMapper);
-    mContourOverlayActor->GetProperty()->SetColor(1.0, 0.86, 0.25);
+    mContourOverlayActor->GetProperty()->SetColor(0.95, 0.72, 0.10);
     mContourOverlayActor->GetProperty()->SetOpacity(0.95);
-    mContourOverlayActor->GetProperty()->SetAmbient(0.45);
-    mContourOverlayActor->GetProperty()->SetDiffuse(0.55);
-    mContourOverlayActor->GetProperty()->SetSpecular(0.2);
-    mContourOverlayActor->GetProperty()->SetSpecularPower(12.0);
+    mContourOverlayActor->GetProperty()->SetAmbient(0.55);
+    mContourOverlayActor->GetProperty()->SetDiffuse(0.45);
+    mContourOverlayActor->GetProperty()->SetSpecular(0.03);
+    mContourOverlayActor->GetProperty()->SetSpecularPower(8.0);
     mContourOverlayActor->PickableOff();
 
     mRenderer->AddActor(mContourOverlayActor);
@@ -1947,11 +2471,109 @@ std::array<double, 3> RenderView::worldToSavedStlCoords(const std::array<double,
     const double centerWorldX = DI.VolumeOriginX + DI.VolumeCenterX;
     const double centerWorldY = DI.VolumeOriginY + DI.VolumeCenterY;
     const double centerWorldZ = DI.VolumeOriginZ + DI.VolumeCenterZ;
+
     return {
         world[0] - centerWorldX,
         world[1] - centerWorldY,
         world[2] - centerWorldZ
     };
+}
+
+std::array<double, 3> RenderView::savedStlToWorldCoords(const std::array<double, 3>& saved) const
+{
+    const double centerWorldX = DI.VolumeOriginX + DI.VolumeCenterX;
+    const double centerWorldY = DI.VolumeOriginY + DI.VolumeCenterY;
+    const double centerWorldZ = DI.VolumeOriginZ + DI.VolumeCenterZ;
+    return {
+        saved[0] + centerWorldX,
+        saved[1] + centerWorldY,
+        saved[2] + centerWorldZ
+    };
+}
+
+StoredContourInfo RenderView::makeStoredContour(
+    const QVector<std::array<double, 3>>& contourPointsWorld,
+    int contourNumber) const
+{
+    StoredContourInfo contour{};
+    auto& header = contour.header;
+
+    // Заголовок
+    std::memcpy(header.ContourSign, "CONT0UR", 7);
+    header.HeaderSize = sizeof(StoredContourHeader);
+    header.Unused = 0;
+    header.StoredContourPointSize = sizeof(StoredContourPoint);
+    header.ContourPurpose = 0;
+    header.UnVisible = 0;
+    header.Width = kStoredContourWidth;
+    header.ContourTypeALL = 0x80000000u;
+    header.ContourColor = kStoredContourColor;
+    setStoredContourName(header, QStringLiteral("Контур%1").arg(contourNumber));
+
+    // Ограничение количества точек
+    const auto fittedPoints = fitContourToStoredPointLimit(contourPointsWorld);
+    header.nContourPoint = static_cast<quint32>(fittedPoints.size());
+    header.TotalDataSize = header.HeaderSize + header.nContourPoint * header.StoredContourPointSize;
+
+    vtkNew<vtkCellLocator> surfaceLocator;
+    vtkPolyData* surface = mIsoMesh.GetPointer();
+    if (surface && surface->GetNumberOfCells() > 0)
+    {
+        surfaceLocator->SetDataSet(surface);
+        surfaceLocator->BuildLocator();
+    }
+    else
+    {
+        surface = nullptr;
+    }
+
+    for (int i = 0; i < fittedPoints.size(); ++i)
+    {
+        const auto savedPoint = worldToSavedStlCoords(fittedPoints[i]);
+
+        ContourPoint viewPointOnSurface{
+            savedPoint[0],
+            savedPoint[1],
+            savedPoint[2]
+        };
+        ContourPoint viewPointAboveNormal = viewPointOnSurface;
+
+        double normal[3]{ 0.0, 0.0, 0.0 };
+        if (closestSurfaceNormal(surface, surfaceLocator.GetPointer(), fittedPoints[i], normal))
+        {
+            const ContourPoint worldAboveNormal{
+                fittedPoints[i][0] + normal[0] * kContourNormalOffsetMm,
+                fittedPoints[i][1] + normal[1] * kContourNormalOffsetMm,
+                fittedPoints[i][2] + normal[2] * kContourNormalOffsetMm
+            };
+            viewPointAboveNormal = worldToSavedStlCoords(worldAboveNormal);
+        }
+
+        setStoredContourPoint(
+            contour.Points[i],
+            savedPoint,
+            viewPointOnSurface,
+            viewPointAboveNormal);
+    }
+
+    return contour;
+}
+
+QVector<std::array<double, 3>> RenderView::storedContourWorldPoints(const StoredContourInfo& contour) const
+{
+    QVector<std::array<double, 3>> points;
+    const int pointCount = std::min<int>(
+        static_cast<int>(contour.header.nContourPoint),
+        MaxStoredPointPerContour);
+    points.reserve(pointCount);
+
+    for (int i = 0; i < pointCount; ++i)
+    {
+        const auto& p = contour.Points[i].InitialContourPoint;
+        points.push_back(savedStlToWorldCoords({ p.x, p.y, p.z }));
+    }
+
+    return points;
 }
 
 bool RenderView::saveContoursSidecar(const QString& stlPath) const
@@ -1960,7 +2582,8 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
         return false;
 
     const QFileInfo stlInfo(stlPath);
-    const QString txtPath = stlInfo.absolutePath() + "/" + stlInfo.completeBaseName() + "_counters.txt";
+    const QString contoursPath = stlInfo.absolutePath() + "/contours";
+    const QString oldTxtPath = stlInfo.absolutePath() + "/" + stlInfo.completeBaseName() + "_counters.txt";
 
     QSet<int> contoursToSave = mVisibleContoursNow;
     if (!contoursToSave.isEmpty() && mIsoMesh && mIsoMesh->GetNumberOfCells() > 0)
@@ -1969,20 +2592,16 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
         surfaceLocator->SetDataSet(mIsoMesh);
         surfaceLocator->BuildLocator();
 
-        QHash<int, QVector<std::array<double, 3>>> contourToPoints;
-        contourToPoints.reserve(contoursToSave.size());
-        for (const auto& rec : mSavedContourPoints)
-        {
-            if (contoursToSave.contains(rec.contourNumber))
-                contourToPoints[rec.contourNumber].push_back(rec.world);
-        }
-
         QSet<int> stillVisibleOnCurrentSurface;
         constexpr double kMaxAttachDistanceMm = 1.5;
         const double maxDist2 = kMaxAttachDistanceMm * kMaxAttachDistanceMm;
-        for (auto it = contourToPoints.constBegin(); it != contourToPoints.constEnd(); ++it)
+        for (const int contourNumber : contoursToSave)
         {
-            const auto& points = it.value();
+            const int contourIndex = contourNumber - 1;
+            if (contourIndex < 0 || contourIndex >= mSavedContours.size())
+                continue;
+
+            const auto points = storedContourWorldPoints(mSavedContours[contourIndex]);
             if (points.size() < 3)
                 continue;
 
@@ -2002,42 +2621,28 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
             }
 
             if (isOnSurface)
-                stillVisibleOnCurrentSurface.insert(it.key());
+                stillVisibleOnCurrentSurface.insert(contourNumber);
         }
 
         contoursToSave = std::move(stillVisibleOnCurrentSurface);
     }
 
-    QHash<int, QVector<std::array<double, 3>>> contoursByNumber;
-    contoursByNumber.reserve(contoursToSave.size());
-    QVector<int> contourNumbersInOrder;
-    QSet<int> seenContourNumbers;
-    for (const auto& rec : mSavedContourPoints)
+    QVector<StoredContourInfo> uniqueContours;
+    uniqueContours.reserve(contoursToSave.size());
+    for (int contourIndex = 0; contourIndex < mSavedContours.size(); ++contourIndex)
     {
-        if (!contoursToSave.contains(rec.contourNumber))
+        const int contourNumber = contourIndex + 1;
+        if (!contoursToSave.contains(contourNumber))
             continue;
 
-        if (!seenContourNumbers.contains(rec.contourNumber))
-        {
-            seenContourNumbers.insert(rec.contourNumber);
-            contourNumbersInOrder.push_back(rec.contourNumber);
-        }
-
-        contoursByNumber[rec.contourNumber].push_back(rec.world);
-    }
-
-    QVector<QVector<std::array<double, 3>>> uniqueContours;
-    uniqueContours.reserve(contourNumbersInOrder.size());
-    for (const int contourNumber : contourNumbersInOrder)
-    {
-        const auto contourPoints = contoursByNumber.value(contourNumber);
+        const auto contourPoints = storedContourWorldPoints(mSavedContours[contourIndex]);
         if (contourPoints.size() < 3)
             continue;
 
         bool duplicate = false;
         for (const auto& uniqueContour : uniqueContours)
         {
-            if (contoursMatchGeometry(contourPoints, uniqueContour))
+            if (contoursMatchGeometry(contourPoints, storedContourWorldPoints(uniqueContour)))
             {
                 duplicate = true;
                 break;
@@ -2045,41 +2650,59 @@ bool RenderView::saveContoursSidecar(const QString& stlPath) const
         }
 
         if (!duplicate)
-            uniqueContours.push_back(contourPoints);
+            uniqueContours.push_back(mSavedContours[contourIndex]);
     }
 
     if (uniqueContours.isEmpty())
     {
-        if (QFile::exists(txtPath))
-            QFile::remove(txtPath);
+        if (QFile::exists(contoursPath))
+            QFile::remove(contoursPath);
+        if (QFile::exists(oldTxtPath))
+            QFile::remove(oldTxtPath);
         return true;
     }
 
-    QFile out(txtPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Text))
+    QSaveFile out(contoursPath);
+    if (!out.open(QIODevice::WriteOnly))
         return false;
-
-    QTextStream stream(&out);
-    stream.setRealNumberNotation(QTextStream::FixedNotation);
-    stream.setRealNumberPrecision(6);
 
     for (int contourIndex = 0; contourIndex < uniqueContours.size(); ++contourIndex)
     {
-        const int outputContourNumber = contourIndex + 1;
-        const auto& contour = uniqueContours[contourIndex];
+        StoredContourInfo contour = uniqueContours[contourIndex];
+        setStoredContourName(contour.header, QStringLiteral("Контур%1").arg(contourIndex + 1));
 
-        for (int pointIndex = 0; pointIndex < contour.size(); ++pointIndex)
-        {
-            const auto xyz = worldToSavedStlCoords(contour[pointIndex]);
-            stream << outputContourNumber << ' '
-                << (pointIndex + 1) << ' '
-                << xyz[0] << ' '
-                << xyz[1] << ' '
-                << xyz[2] << '\n';
-        }
+        contour.header.HeaderSize = sizeof(StoredContourHeader);
+        contour.header.StoredContourPointSize = sizeof(StoredContourPoint);
+        contour.header.nContourPoint = std::min<quint32>(
+            contour.header.nContourPoint,
+            static_cast<quint32>(MaxStoredPointPerContour));
+        contour.header.TotalDataSize =
+            contour.header.HeaderSize +
+            contour.header.nContourPoint * contour.header.StoredContourPointSize;
+
+        subtractStoredContourShift(contour, DI);
+        swapStoredContourYZ(contour);
+
+        const qint64 headerWritten = out.write(
+            reinterpret_cast<const char*>(&contour.header),
+            sizeof(StoredContourHeader));
+        if (headerWritten != static_cast<qint64>(sizeof(StoredContourHeader)))
+            return false;
+
+        const qint64 pointsSize =
+            static_cast<qint64>(contour.header.nContourPoint) *
+            static_cast<qint64>(sizeof(StoredContourPoint));
+        const qint64 pointsWritten = out.write(
+            reinterpret_cast<const char*>(contour.Points),
+            pointsSize);
+        if (pointsWritten != pointsSize)
+            return false;
     }
 
-    return stream.status() == QTextStream::Ok;
+    if (QFile::exists(oldTxtPath))
+        QFile::remove(oldTxtPath);
+
+    return out.commit();
 }
 
 void RenderView::onUndo()
@@ -2092,6 +2715,12 @@ void RenderView::onUndo()
         auto prevSurface = mStlModeController.undoSurface(mIsoMesh);
         if (!prevSurface)
             return;
+
+        mStlSaveRedoStack.push_back(clonePolyData(mStlSaveMesh ? mStlSaveMesh.GetPointer() : mIsoMesh.GetPointer()));
+        while (mStlSaveRedoStack.size() > mHistoryLimit)
+            mStlSaveRedoStack.pop_front();
+        if (!mStlSaveUndoStack.isEmpty())
+            mStlSaveMesh = mStlSaveUndoStack.takeLast();
 
         mStlStepRedoStack.push_back(mCurrentStlStep);
         if (!mStlStepUndoStack.isEmpty())
@@ -2138,6 +2767,12 @@ void RenderView::onRedo()
         auto nextSurface = mStlModeController.redoSurface(mIsoMesh);
         if (!nextSurface)
             return;
+
+        mStlSaveUndoStack.push_back(clonePolyData(mStlSaveMesh ? mStlSaveMesh.GetPointer() : mIsoMesh.GetPointer()));
+        while (mStlSaveUndoStack.size() > mHistoryLimit)
+            mStlSaveUndoStack.pop_front();
+        if (!mStlSaveRedoStack.isEmpty())
+            mStlSaveMesh = mStlSaveRedoStack.takeLast();
 
         mStlStepUndoStack.push_back(mCurrentStlStep);
         if (!mStlStepRedoStack.isEmpty())
@@ -2567,6 +3202,9 @@ void RenderView::onStlSimplify()
         return;
     }
 
+    if (!mStlSaveMesh || mStlSaveMesh->GetNumberOfCells() == 0)
+        mStlSaveMesh = clonePolyData(mIsoMesh);
+
     QApplication::setOverrideCursor(Qt::WaitCursor);
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
 
@@ -2576,6 +3214,7 @@ void RenderView::onStlSimplify()
         //mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
         pushStlUndoSnapshot();
         mIsoMesh = VolumeStlExporter::NormalizeSurface(mIsoMesh);
+        mStlSaveMesh = VolumeStlExporter::NormalizeSurface(mStlSaveMesh);
         mSimplifyTargetMB = kFirstAimMB;
         mSimplifyStarted = true;
     }
@@ -2594,14 +3233,20 @@ void RenderView::onStlSimplify()
     const double passBand = first ? 0.12 : 0.16;;
 
     auto simplified = VolumeStlExporter::SimplifyToTargetBytes(mIsoMesh, targetBytes, smoothIter, passBand);
-    mIsoMesh = clonePolyData(simplified);
+    auto saveSimplified = VolumeStlExporter::SimplifyToTargetBytes(mStlSaveMesh, targetBytes, smoothIter, passBand);
+    auto nextVisibleMesh = clonePolyData(simplified);
+    auto nextSaveMesh = clonePolyData(saveSimplified);
 
-    if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0)
+    if (!nextVisibleMesh || nextVisibleMesh->GetNumberOfCells() == 0 ||
+        !nextSaveMesh || nextSaveMesh->GetNumberOfCells() == 0)
     {
         QApplication::restoreOverrideCursor();
         emit showWarning(tr("Simplify failed"));
         return;
     }
+
+    mIsoMesh = nextVisibleMesh;
+    mStlSaveMesh = nextSaveMesh;
 
     ++mCurrentStlStep;
 
@@ -2637,8 +3282,22 @@ void RenderView::onBuildStl()
         mStlModeController.setActive(false);
         reloadToolsMenu();
         updateUndoRedoUi();
+
+        if (mToolActive &&
+            (mCurrentTool == Action::Scissors ||
+             mCurrentTool == Action::InverseScissors ||
+             mCurrentTool == Action::Scissors2 ||
+             mCurrentTool == Action::InverseScissors2 ||
+             mCurrentTool == Action::Contour))
+        {
+            if (mScissors) mScissors->cancel();
+            if (mContour)  mContour->cancel();
+            setToolUiActive(false, mCurrentTool);
+        }
+
         mRenderer->RemoveActor(mIsoActor);
         mIsoActor = nullptr;
+        mStlSaveMesh = nullptr;
         rebuildContourOverlay();
         mVolume->SetVisibility(true);
         mPrevVolumeVisible = true;
@@ -2668,6 +3327,9 @@ void RenderView::onBuildStl()
             mLblStlSize->setText("");
         }
 
+        if (mScissors)
+            mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+
         emit showInfo(tr("Ready volume"));
         QTimer::singleShot(800, this, [this] {
             emit showInfo(tr("Ready"));
@@ -2687,6 +3349,7 @@ void RenderView::onBuildStl()
 
     rebuildVisibleMaskFromImage(mImage);
     mIsoMesh = VolumeStlExporter::BuildFromBinaryVoxelsNew(mVisibleMask, opt);
+    mStlSaveMesh = clonePolyData(mIsoMesh);
     if (isCtrlDown())
     {
         onStlSimplify();
@@ -2700,6 +3363,7 @@ void RenderView::onBuildStl()
         reloadToolsMenu();
         updateUndoRedoUi();
         if (mBtnSTL) mBtnSTL->setChecked(false);
+        mStlSaveMesh = nullptr;
         mBtnSTLSave->setVisible(false);
         mBtnSTLSave->setEnabled(false);
         mBtnSTLSimplify->setVisible(false);
@@ -2761,7 +3425,8 @@ void RenderView::updateStlSizeLabel()
 {
     if (!mLblStlSize) return;
 
-    if (!mIsoMesh || mIsoMesh->GetNumberOfPolys() == 0)
+    vtkPolyData* sizeMesh = mIsoMesh.GetPointer();
+    if (!sizeMesh || sizeMesh->GetNumberOfPolys() == 0)
     {
         mLblStlSize->setVisible(false);
         mLblStlSize->setText("");
@@ -2769,7 +3434,7 @@ void RenderView::updateStlSizeLabel()
         return;
     }
 
-    mLblStlSize->setText(VolumeStlExporter::makeStlSizeText(mIsoMesh));
+    mLblStlSize->setText(VolumeStlExporter::makeStlSizeText(sizeMesh));
     mLblStlSize->setVisible(true);
 
     mLblStlSize->adjustSize();
@@ -2779,7 +3444,8 @@ void RenderView::updateStlSizeLabel()
 
 void RenderView::onSaveBuiltStl()
 {
-    if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) {
+    vtkPolyData* saveMesh = mIsoMesh.GetPointer();
+    if (!saveMesh || saveMesh->GetNumberOfCells() == 0) {
         emit showWarning(tr("Nothing to save - build STL first"));
         QTimer::singleShot(800, this, [this] {
             emit showInfo(tr("Ready"));
@@ -2835,7 +3501,7 @@ void RenderView::onSaveBuiltStl()
     s.setValue("Paths/LastStlDir", QFileInfo(path).absolutePath());
 
     const bool ok = VolumeStlExporter::SaveStlMyBinary_NoCenter(
-        mIsoMesh,
+        saveMesh,
         path,
         DI.VolumeOriginX,
         DI.VolumeOriginY,
@@ -2843,14 +3509,17 @@ void RenderView::onSaveBuiltStl()
         DI.VolumeCenterX,
         DI.VolumeCenterY,
         DI.VolumeCenterZ,
-        true
+        true,
+        &DI.STLCenterShiftX,
+        &DI.STLCenterShiftY,
+        &DI.STLCenterShiftZ
     );
 
     if (ok)
     {
-        const bool txtOk = saveContoursSidecar(path);
-        if (!txtOk)
-            emit showWarning(tr("Saved STL, but counters file was not saved"));
+        const bool contoursOk = saveContoursSidecar(path);
+        if (!contoursOk)
+            emit showWarning(tr("Saved STL, but contours file was not saved"));
         else
             emit showInfo(tr("Saved STL: %1").arg(path));
     }
@@ -3312,12 +3981,12 @@ void RenderView::setViewPreset(ViewPreset v)
         setPosByDir(A);               // взгляд вдоль Anterior
         break;
     }
-    case ViewPreset::L: { setPosByDir(L); break; }
-    case ViewPreset::R: { double Rv[3]{ -L[0], -L[1], -L[2] }; setPosByDir(Rv); break; }
+    case ViewPreset::L: { double realL[3]{ -L[0], -L[1], -L[2] }; setPosByDir(realL); break; }
+    case ViewPreset::R: { double realR[3]{ L[0], L[1], L[2] }; setPosByDir(realR); break; }
     case ViewPreset::LAO: {
         const double a = std::sqrt(0.5);
-        double A[3]{ -P[0], -P[1], -P[2] };
-        double dir[3]{ a * A[0] + a * L[0], a * A[1] + a * L[1], a * A[2] + a * L[2] };
+        double realL[3]{ -L[0], -L[1], -L[2] };
+        double dir[3]{ a * P[0] + a * realL[0], a * P[1] + a * realL[1], a * P[2] + a * realL[2] };
         const double len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
         for (int i = 0; i < 3; ++i) dir[i] /= (len > 0 ? len : 1);
         setPosByDir(dir);
@@ -3325,9 +3994,8 @@ void RenderView::setViewPreset(ViewPreset v)
     }
     case ViewPreset::RAO: {
         const double a = std::sqrt(0.5);
-        double A[3]{ -P[0], -P[1], -P[2] };
-        double Rv[3]{ -L[0], -L[1], -L[2] };
-        double dir[3]{ a * A[0] + a * Rv[0], a * A[1] + a * Rv[1], a * A[2] + a * Rv[2] };
+        double realR[3]{ L[0], L[1], L[2] };
+        double dir[3]{ a * P[0] + a * realR[0], a * P[1] + a * realR[1], a * P[2] + a * realR[2] };
         const double len = std::sqrt(dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2]);
         for (int i = 0; i < 3; ++i) dir[i] /= (len > 0 ? len : 1);
         setPosByDir(dir);
@@ -3419,6 +4087,7 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
     // чтобы в сцене не оставались старый меш и его оценка размера.
     clearStlPreview();
     mIsoMesh = nullptr;
+    mStlSaveMesh = nullptr;
     mStlModeController.setActive(false);
     mStlModeController.resetSurfaceHistory(nullptr);
     resetStlContourHistory();
@@ -3540,6 +4209,13 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
             });
         mScissors->setOnSurfaceReplaced([this](vtkPolyData* poly, QVector<QVector<std::array<double, 3>>> cutContours)
             {
+                if (!mStlModeController.isActive())
+                {
+                    if (mScissors)
+                        mScissors->attach(mVtk, mRenderer, mImage, mVolume);
+                    return;
+                }
+
                 if (!poly || poly->GetNumberOfCells() == 0)
                 {
                     emit showWarning(tr("STL scissors failed"));
@@ -3571,6 +4247,9 @@ void RenderView::setVolume(vtkSmartPointer<vtkImageData> image, DicomInfo Dicom,
         mContour = std::make_unique<ToolsContour>(this);
         mContour->setOnSurfaceReplaced([this](vtkPolyData* poly, QVector<std::array<double, 3>> contourPoints)
             {
+                if (!mStlModeController.isActive())
+                    return;
+
                 if (!poly || poly->GetNumberOfCells() == 0)
                 {
                     emit showWarning(tr("Contour cut failed"));
@@ -4151,12 +4830,13 @@ void RenderView::onSaveElectrodesCoords()
             << e.x << "\t"
             << e.z << "\t"
             << e.y << "\n";
-        f.close();
-
-        CustomMessageBox::information(
-            this,
-            tr("Save electrodes coords"),
-            tr("Coordinates saved to:\n%1").arg(filePath),
-            ServiceWindow);
     }
+
+    f.close();
+
+    CustomMessageBox::information(
+        this,
+        tr("Save electrodes coords"),
+        tr("Coordinates saved to:\n%1").arg(filePath),
+        ServiceWindow);
 }

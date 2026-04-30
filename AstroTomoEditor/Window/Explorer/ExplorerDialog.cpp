@@ -6,6 +6,42 @@
 #include "..\MainWindow\TitleBar.h"
 #include <QStyledItemDelegate>
 #include <Services/LanguageManager.h>
+#include <QFutureWatcher>
+#include <QStandardItemModel>
+#include <QtConcurrent/QtConcurrentRun>
+
+namespace
+{
+    constexpr int kManualPathRole = Qt::UserRole + 100;
+    constexpr int kManualIsDirRole = Qt::UserRole + 101;
+    constexpr int kManualIsParentRole = Qt::UserRole + 102;
+
+    struct ManualEntry
+    {
+        QString name;
+        QString path;
+        QString sizeText;
+        QString dateText;
+        bool isDir = false;
+        bool isParent = false;
+    };
+
+    QStringList manualHeaderLabels()
+    {
+        if (LanguageManager::instance().language() == "ru")
+            return { QStringLiteral("Имя"), QStringLiteral("Размер"), QStringLiteral("Тип"), QStringLiteral("Дата изменения") };
+
+        return { QStringLiteral("Name"), QStringLiteral("Size"), QStringLiteral("Type"), QStringLiteral("Date Modified") };
+    }
+
+    QString manualFileTypeText(bool isDir)
+    {
+        if (LanguageManager::instance().language() == "ru")
+            return isDir ? QStringLiteral("Папка") : QStringLiteral("Файл");
+
+        return isDir ? QStringLiteral("Folder") : QStringLiteral("File");
+    }
+}
 
 static inline QString normPath(const QString& p)
 {
@@ -47,6 +83,7 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     // модель / прокси
     m_model = new QFileSystemModel(this);
     m_model->setFilter(QDir::AllDirs | QDir::NoDot | QDir::Files);
+    m_model->setNameFilterDisables(false);
     m_model->setRootPath(QDir::rootPath());
 
     m_proxy = new ContentFilterProxy(this);
@@ -54,10 +91,20 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     m_proxy->setDynamicSortFilter(true);
     m_proxy->setMode(ContentFilterProxy::DicomFiles);
     m_proxy->setCheckDicomMagic(m_magicCheck->isChecked());
+    updateModelNameFilters();
+
+    mManualModel = new QStandardItemModel(this);
+    mManualModel->setColumnCount(4);
+    updateManualHeaders();
 
     connect(m_magicCheck, &QCheckBox::toggled, this, [this](bool on) {
         if (m_proxy)
             m_proxy->setCheckDicomMagic(on);
+        updateModelNameFilters();
+
+        const QString currentPath = mManualMode ? mManualRootPath : mCurrentRootPath;
+        if (!currentPath.isEmpty())
+            navigateTo(currentPath);
         });
 
     // дерево
@@ -74,11 +121,8 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
     m_view->setItemDelegate(new NoFocusDelegate(m_view));
     m_view->setAllColumnsShowFocus(false);
 
-    m_view->header()->setStretchLastSection(false);
-    m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_view->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_view->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
-    m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    applyViewHeaderLayout();
+    wireCurrentSelectionModel();
 
     mainLay->addWidget(m_view, 1);
 
@@ -143,8 +187,6 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
         this, &ExplorerDialog::onPathEdited);
     connect(m_view, &QTreeView::doubleClicked,
         this, &ExplorerDialog::onDoubleClicked);
-    connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged,
-        this, &ExplorerDialog::onSelectionChanged);
     connect(m_buttons, &QDialogButtonBox::accepted,
         this, &ExplorerDialog::accept);
     connect(m_buttons, &QDialogButtonBox::rejected,
@@ -300,6 +342,65 @@ ExplorerDialog::ExplorerDialog(QWidget* parent)
 
 ExplorerDialog::~ExplorerDialog() = default;
 
+void ExplorerDialog::updateManualHeaders()
+{
+    if (!mManualModel)
+        return;
+
+    mManualModel->setColumnCount(4);
+    mManualModel->setHorizontalHeaderLabels(manualHeaderLabels());
+
+    for (int row = 0; row < mManualModel->rowCount(); ++row)
+    {
+        auto* typeItem = mManualModel->item(row, 2);
+        auto* nameItem = mManualModel->item(row, 0);
+        if (!typeItem || !nameItem)
+            continue;
+
+        const bool isDir = nameItem->data(kManualIsDirRole).toBool();
+        typeItem->setText(manualFileTypeText(isDir));
+    }
+}
+
+void ExplorerDialog::applyViewHeaderLayout()
+{
+    if (!m_view || !m_view->header())
+        return;
+
+    auto* header = m_view->header();
+    header->setStretchLastSection(false);
+
+    if (mManualMode)
+    {
+        header->setSectionResizeMode(0, QHeaderView::Fixed);
+        header->setSectionResizeMode(1, QHeaderView::Fixed);
+        header->setSectionResizeMode(2, QHeaderView::Fixed);
+        header->setSectionResizeMode(3, QHeaderView::Fixed);
+
+        const QStringList labels = manualHeaderLabels();
+        const QFontMetrics fm = m_view->fontMetrics();
+        const int sizeWidth = std::max(90, fm.horizontalAdvance(labels.value(1)) + 28);
+        const int typeWidth = std::max(76, fm.horizontalAdvance(labels.value(2)) + 28);
+        const int dateWidth = std::max(136, fm.horizontalAdvance(labels.value(3)) + 28);
+        const int viewportWidth = m_view->viewport() ? m_view->viewport()->width() : m_view->width();
+        const int frameReserve = m_view->verticalScrollBar() && m_view->verticalScrollBar()->isVisible()
+            ? m_view->verticalScrollBar()->width()
+            : 0;
+        const int nameWidth = std::max(180, viewportWidth - frameReserve - sizeWidth - typeWidth - dateWidth);
+
+        m_view->setColumnWidth(0, nameWidth);
+        m_view->setColumnWidth(1, sizeWidth);
+        m_view->setColumnWidth(2, typeWidth);
+        m_view->setColumnWidth(3, dateWidth);
+        return;
+    }
+
+    header->setSectionResizeMode(0, QHeaderView::Stretch);
+    header->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    header->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+}
+
 void ExplorerDialog::retranslateUi()
 {
     const QString title = tr("Astrocard DICOM Explorer");
@@ -322,6 +423,9 @@ void ExplorerDialog::retranslateUi()
 
     if (mSettingsDlg)
         mSettingsDlg->retranslateUi();
+
+    updateManualHeaders();
+    applyViewHeaderLayout();
 
     if (m_typeCombo)
     {
@@ -373,6 +477,9 @@ void ExplorerDialog::setNameFilters(const QStringList& filters) {
 
 QString ExplorerDialog::filePathFromViewIndex(const QModelIndex& viewIdx) const {
     if (!viewIdx.isValid()) return {};
+    if (mManualMode)
+        return viewIdx.sibling(viewIdx.row(), 0).data(kManualPathRole).toString();
+
     const QModelIndex src = m_proxy->mapToSource(viewIdx);
     return m_model->filePath(src);
 }
@@ -406,6 +513,7 @@ void ExplorerDialog::onTypeChanged(int index)
         if (enableMagic)
             m_proxy->setCheckDicomMagic(m_magicCheck->isChecked());
     }
+    updateModelNameFilters();
 }
 
 void ExplorerDialog::applyFiltersForType()
@@ -422,6 +530,42 @@ void ExplorerDialog::applyFiltersForType()
         m_model->setNameFilters(filters);
     }
     m_model->setNameFilterDisables(false); // скрывать неподходящее
+}
+
+void ExplorerDialog::updateModelNameFilters()
+{
+    if (!m_model || !m_typeCombo)
+        return;
+
+    const auto mode = static_cast<ContentFilterProxy::Mode>(
+        m_typeCombo->currentData().toInt());
+
+    QStringList filters;
+    if (mode == ContentFilterProxy::Volume3D)
+    {
+        filters << QStringLiteral("*.3dr");
+    }
+    else if (!m_magicCheck || !m_magicCheck->isChecked())
+    {
+        filters << QStringLiteral("*.dcm")
+            << QStringLiteral("*.dicom")
+            << QStringLiteral("*.ima")
+            << QStringLiteral("DICOMDIR")
+            << QStringLiteral("DIRFILE");
+    }
+
+    m_model->setNameFilters(filters);
+    m_model->setNameFilterDisables(false);
+}
+
+void ExplorerDialog::wireCurrentSelectionModel()
+{
+    if (!m_view || !m_view->selectionModel())
+        return;
+
+    connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged,
+        this, &ExplorerDialog::onSelectionChanged,
+        Qt::UniqueConnection);
 }
 
 void ExplorerDialog::populateDrives()
@@ -506,13 +650,262 @@ bool ExplorerDialog::dirHasDicomdir(const QString& dirPath) const {
     return d.exists("DICOMDIR") || d.exists("dicomdir") || d.exists("dirfile") || d.exists("DIRFILE");
 }
 
+bool ExplorerDialog::shouldUseManualListing(const QString& dirPath) const
+{
+    if (!m_typeCombo || !m_magicCheck)
+        return false;
+
+    const auto mode = static_cast<ContentFilterProxy::Mode>(
+        m_typeCombo->currentData().toInt());
+    if (mode != ContentFilterProxy::DicomFiles)
+        return false;
+
+    QDir d(dirPath);
+    if (!d.exists())
+        return false;
+
+    int extensionlessFiles = 0;
+    QDirIterator it(dirPath, QDir::Files | QDir::NoDotAndDotDot);
+    while (it.hasNext()) {
+        it.next();
+        const QString suffix = it.fileInfo().suffix();
+        if (suffix.isEmpty() && ++extensionlessFiles >= 128)
+            return true;
+    }
+
+    return false;
+}
+
+void ExplorerDialog::navigateToManual(const QString& path)
+{
+    const QString want = normPath(path);
+    QFileInfo fi(want);
+    if (!fi.isDir())
+        return;
+
+    ++mDirProbeGeneration;
+    ++mManualGeneration;
+    mPendingDirProbes.clear();
+    mManualMode = true;
+    mManualRootPath = normPath(fi.absoluteFilePath());
+    mCurrentRootPath = mManualRootPath;
+
+    onDirectoryAboutToChange(mManualRootPath);
+
+    if (m_view->model() != mManualModel) {
+        m_view->setModel(mManualModel);
+        wireCurrentSelectionModel();
+    }
+    m_view->setSortingEnabled(false);
+    m_view->setRootIndex(QModelIndex());
+    applyViewHeaderLayout();
+    QTimer::singleShot(0, this, [this] { applyViewHeaderLayout(); });
+
+    rebuildManualModel(mManualRootPath, mManualGeneration);
+
+    int existing = m_pathCombo->findText(mManualRootPath, Qt::MatchFixedString);
+    if (existing < 0) m_pathCombo->insertItem(0, mManualRootPath);
+    m_pathCombo->setCurrentText(mManualRootPath);
+
+    for (int i = 0; i < m_driveCombo->count(); ++i) {
+        const QString root = m_driveCombo->itemData(i).toString();
+        if (mManualRootPath.startsWith(root, Qt::CaseInsensitive)) {
+            m_driveCombo->setCurrentIndex(i);
+            break;
+        }
+    }
+
+    updateOkState(false);
+}
+
+void ExplorerDialog::rebuildManualModel(const QString& path, int generation)
+{
+    if (!mManualModel)
+        return;
+
+    mManualModel->clear();
+    mManualModel->setColumnCount(4);
+    updateManualHeaders();
+
+    auto addRow = [this](const ManualEntry& e)
+    {
+        QList<QStandardItem*> row;
+        row << new QStandardItem(e.name)
+            << new QStandardItem(e.sizeText)
+            << new QStandardItem(manualFileTypeText(e.isDir))
+            << new QStandardItem(e.dateText);
+
+        for (auto* item : row) {
+            item->setEditable(false);
+            item->setData(e.path, kManualPathRole);
+            item->setData(e.isDir, kManualIsDirRole);
+            item->setData(e.isParent, kManualIsParentRole);
+        }
+
+        mManualModel->appendRow(row);
+    };
+
+    const QFileInfo rootInfo(path);
+    const QString parentPath = rootInfo.dir().absolutePath();
+    if (!parentPath.isEmpty() && parentPath != path) {
+        ManualEntry parent;
+        parent.name = QStringLiteral("..");
+        parent.path = parentPath;
+        parent.isDir = true;
+        parent.isParent = true;
+        addRow(parent);
+    }
+
+    auto* watcher = new QFutureWatcher<QVector<ManualEntry>>(this);
+    connect(watcher, &QFutureWatcher<QVector<ManualEntry>>::finished, this,
+        [this, watcher, generation, addRow]()
+        {
+            const QVector<ManualEntry> entries = watcher->result();
+            watcher->deleteLater();
+
+            if (!mManualMode || generation != mManualGeneration)
+                return;
+
+            for (const auto& e : entries)
+                addRow(e);
+
+            applyViewHeaderLayout();
+            QTimer::singleShot(0, this, [this] { applyViewHeaderLayout(); });
+            setStatus(LoadState::Ready, tr("Ready"));
+        });
+
+    const bool deepCheck = m_magicCheck && m_magicCheck->isChecked();
+    watcher->setFuture(QtConcurrent::run([path, deepCheck]() {
+        QVector<ManualEntry> entries;
+        QDir dir(path);
+        if (!dir.exists())
+            return entries;
+
+        const QFileInfoList infos = dir.entryInfoList(
+            QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot,
+            QDir::DirsFirst | QDir::Name | QDir::IgnoreCase);
+
+        entries.reserve(infos.size());
+        for (const QFileInfo& fi : infos) {
+            if (fi.isFile()) {
+                const QString name = fi.fileName();
+                const bool hasDicomName =
+                    name.endsWith(".dcm", Qt::CaseInsensitive) ||
+                    name.endsWith(".dicom", Qt::CaseInsensitive) ||
+                    name.endsWith(".ima", Qt::CaseInsensitive) ||
+                    DicomSniffer::isDicomdirName(name);
+
+                if (!hasDicomName && (!deepCheck || !DicomSniffer::looksLikeDicomFile(fi.absoluteFilePath())))
+                    continue;
+            }
+
+            ManualEntry e;
+            e.name = fi.fileName();
+            e.path = fi.absoluteFilePath();
+            e.isDir = fi.isDir();
+            e.sizeText = fi.isDir() ? QString() : QString::number(fi.size());
+            e.dateText = fi.lastModified().toString(QStringLiteral("dd.MM.yyyy hh:mm"));
+            entries.push_back(std::move(e));
+        }
+
+        return entries;
+        }));
+}
+
+void ExplorerDialog::scheduleDirProbe(const QString& dirPath) const
+{
+    const QString path = normPath(dirPath);
+    if (path.isEmpty() ||
+        mDirKindCache.contains(path) ||
+        mPendingDirProbes.contains(path))
+        return;
+
+    mPendingDirProbes.insert(path);
+    const int generation = mDirProbeGeneration;
+    auto* self = const_cast<ExplorerDialog*>(this);
+    auto* watcher = new QFutureWatcher<SelectionKind>(self);
+
+    connect(watcher, &QFutureWatcher<SelectionKind>::finished, self,
+        [this, self, watcher, path, generation]()
+        {
+            const SelectionKind kind = watcher->result();
+            watcher->deleteLater();
+
+            if (generation != mDirProbeGeneration)
+                return;
+
+            mPendingDirProbes.remove(path);
+            mDirKindCache.insert(path, kind);
+
+            const auto rows = m_view && m_view->selectionModel()
+                ? m_view->selectionModel()->selectedRows(0)
+                : QModelIndexList{};
+            if (!rows.isEmpty() && normPath(filePathFromViewIndex(rows.first())).compare(path, Qt::CaseInsensitive) == 0)
+                self->updateOkState(true);
+        });
+
+    watcher->setFuture(QtConcurrent::run([path]() {
+        QDir d(path);
+        if (!d.exists())
+            return ExplorerDialog::SelectionKind::None;
+
+        if (d.exists("DICOMDIR") || d.exists("dicomdir") ||
+            d.exists("dirfile") || d.exists("DIRFILE"))
+            return ExplorerDialog::SelectionKind::DicomFolder;
+
+        QDirIterator files(path, QDir::Files | QDir::NoDotAndDotDot);
+        int checkedFiles = 0;
+        while (files.hasNext() && checkedFiles < 10) {
+            const QString p = files.next();
+            const QString name = QFileInfo(p).fileName();
+            if (name.endsWith(".dcm", Qt::CaseInsensitive) ||
+                name.endsWith(".dicom", Qt::CaseInsensitive) ||
+                name.endsWith(".ima", Qt::CaseInsensitive) ||
+                DicomSniffer::looksLikeDicomFile(p))
+                return ExplorerDialog::SelectionKind::DicomFolder;
+            ++checkedFiles;
+        }
+
+        QDirIterator dirs(path, QDir::Dirs | QDir::NoDotAndDotDot);
+        int checkedDirs = 0;
+        bool sawDir = false;
+        while (dirs.hasNext() && checkedDirs < 10) {
+            sawDir = true;
+            const QString name = QFileInfo(dirs.next()).fileName();
+            if (!name.startsWith("S", Qt::CaseInsensitive))
+                return ExplorerDialog::SelectionKind::None;
+            ++checkedDirs;
+        }
+
+        return sawDir ? ExplorerDialog::SelectionKind::DicomFolder : ExplorerDialog::SelectionKind::None;
+        }));
+}
+
 void ExplorerDialog::navigateTo(const QString& path)
 {
     qDebug() << "Go to dir: " << path;
 
+    const QString want = normPath(path);
+    if (shouldUseManualListing(want)) {
+        navigateToManual(want);
+        return;
+    }
+
+    ++mDirProbeGeneration;
+    mPendingDirProbes.clear();
+    mManualMode = false;
+    mManualRootPath.clear();
+
     onDirectoryAboutToChange(path); // теперь реально включает "Opening" прямо сейчас
 
-    const QString want = normPath(path);
+    if (m_view->model() != m_proxy) {
+        m_view->setModel(m_proxy);
+        wireCurrentSelectionModel();
+        applyViewHeaderLayout();
+        m_view->setSortingEnabled(true);
+        m_view->sortByColumn(0, Qt::AscendingOrder);
+    }
+
     QModelIndex src = m_model->setRootPath(want);
     
     if (!src.isValid()) { setStatus(LoadState::Ready, tr("Ready")); return; }
@@ -672,8 +1065,15 @@ ExplorerDialog::SelectionKind ExplorerDialog::selectedKind() const {
 
     if (fi.isDir()) 
     {
-        if (mode == ContentFilterProxy::DicomFiles && (dirHasDicom(path) || dirHasSdir(path)))
-            return SelectionKind::DicomFolder;
+        if (mode == ContentFilterProxy::DicomFiles)
+        {
+            const QString key = normPath(path);
+            const auto it = mDirKindCache.constFind(key);
+            if (it != mDirKindCache.constEnd())
+                return it.value();
+
+            scheduleDirProbe(path);
+        }
     }
 
     return SelectionKind::None;

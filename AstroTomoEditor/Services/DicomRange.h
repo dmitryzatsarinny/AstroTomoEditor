@@ -45,6 +45,10 @@ struct DicomInfo
     double VolumeCenterX{ 0.0 };
     double VolumeCenterY{ 0.0 };
     double VolumeCenterZ{ 0.0 };
+
+    double STLCenterShiftX{ 0.0 };
+    double STLCenterShiftY{ 0.0 };
+    double STLCenterShiftZ{ 0.0 };
 };
 
 

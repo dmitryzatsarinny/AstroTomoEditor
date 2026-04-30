@@ -22,6 +22,7 @@
 #include <vtkImageData.h>
 #include "ToolsRemoveConnected.h"
 #include "HistogramDialog.h"
+#include "ContourFile.h"
 #include <vtkDICOMReader.h>
 #include <Services/DicomRange.h>
 #include <QSpinBox>
@@ -122,13 +123,6 @@ private slots:
     void onTemplateClearScene();
 
 private:
-    struct SavedContourPoint
-    {
-        int contourNumber = 0;
-        int pointIndex = 0;
-        std::array<double, 3> world{};
-    };
-
     vtkSmartPointer<vtkImageData> mImage;
     QVTKOpenGLNativeWidget* mVtk{ nullptr };
     vtkSmartPointer<vtkRenderer> mRenderer;
@@ -170,6 +164,8 @@ private:
     void reloadTemplate();
     void reloadElectrodes();
     void updateAfterImageChange(bool reattachTools);
+    void applyDebugStlMaterial();
+    void openStlMaterialDebugDialog();
 
     bool mOverlaysBuilt{ false };
     bool mOverlaysShown{ false };
@@ -177,6 +173,7 @@ private:
     QVector<vtkSmartPointer<vtkActor>> mStlActors;
 
     vtkSmartPointer<vtkPolyData> mIsoMesh = nullptr;
+    vtkSmartPointer<vtkPolyData> mStlSaveMesh = nullptr;
     vtkSmartPointer<vtkActor>    mIsoActor = nullptr;
 
     QToolButton* mBtnTools{ nullptr };
@@ -214,11 +211,12 @@ private:
     int mCurrentStlStep = 0;
     QVector<int> mStlStepUndoStack;
     QVector<int> mStlStepRedoStack;
+    QVector<vtkSmartPointer<vtkPolyData>> mStlSaveUndoStack;
+    QVector<vtkSmartPointer<vtkPolyData>> mStlSaveRedoStack;
     QVector<QSet<int>> mContourVisibleUndoStack;
     QVector<QSet<int>> mContourVisibleRedoStack;
-    QVector<SavedContourPoint> mSavedContourPoints;
+    QVector<StoredContourInfo> mSavedContours;
     QSet<int> mVisibleContoursNow;
-    int mNextContourNumber = 1;
     vtkSmartPointer<vtkPolyData> mContourOverlayMesh = nullptr;
     vtkSmartPointer<vtkPolyDataMapper> mContourOverlayMapper = nullptr;
     vtkSmartPointer<vtkActor> mContourOverlayActor = nullptr;
@@ -234,6 +232,9 @@ private:
     void keepOnlyContoursAttachedToCurrentSurface();
     bool saveContoursSidecar(const QString& stlPath) const;
     std::array<double, 3> worldToSavedStlCoords(const std::array<double, 3>& world) const;
+    std::array<double, 3> savedStlToWorldCoords(const std::array<double, 3>& saved) const;
+    StoredContourInfo makeStoredContour(const QVector<std::array<double, 3>>& contourPointsWorld, int contourNumber) const;
+    QVector<std::array<double, 3>> storedContourWorldPoints(const StoredContourInfo& contour) const;
     void rebuildContourOverlay();
     void updateUndoRedoUi();
     void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);
@@ -318,7 +319,7 @@ private:
     VolumeInterpolation mInterpolation = VolumeInterpolation::Nearest;
 
     double mSamplingFactor = 0.35; // дефолт
-    static constexpr const char* kSamplingFactorKey = "Render/SamplingFactor";
+    static constexpr const char* kSamplingFactorKey = "render/samplingFactor";
 };
 
 static constexpr double kMB = 1024.0 * 1024.0;

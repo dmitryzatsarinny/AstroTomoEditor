@@ -6,6 +6,8 @@
 #include "..\MainWindow\DialogShell.h"
 #include "..\MainWindow\AsyncProgressBar.h"
 #include <Window/MainWindow/SettingsDialog.h>
+#include <QHash>
+#include <QSet>
 
 class QComboBox;                                                // Предварительные объявления (forward declarations) Qt-классов.
 class QTreeView;                                                // Они уменьшают связность/время сборки: нам нужна только ссылка/указатель,
@@ -13,6 +15,7 @@ class QFileSystemModel;                                         // а полны
 class QDialogButtonBox;
 class QModelIndex;
 class QSortFilterProxyModel;                                    // Тоже forward-declaration: используется в сигнатуре слота.
+class QStandardItemModel;
 class ContentFilterProxy;
 class QCheckBox;
 class TitleBar;
@@ -77,6 +80,14 @@ private:
     void showBusy(const QString& text);
     void hideBusy();
     void showSettings();
+    void updateModelNameFilters();
+    void scheduleDirProbe(const QString& dirPath) const;
+    bool shouldUseManualListing(const QString& dirPath) const;
+    void navigateToManual(const QString& path);
+    void rebuildManualModel(const QString& path, int generation);
+    void wireCurrentSelectionModel();
+    void updateManualHeaders();
+    void applyViewHeaderLayout();
 
     // помощник: путь по индексу из вида (нужно мэппить через прокси)
     QString filePathFromViewIndex(const QModelIndex& viewIdx) const;
@@ -96,6 +107,7 @@ private:
     QCheckBox* m_magicCheck = nullptr;                          // Флаг глубокой проверки файлов без расширений.
     QTreeView* m_view = nullptr;                                // Дерево файловой системы.
     QFileSystemModel* m_model = nullptr;                        // Модель файловой системы (лениво читает директории).
+    QStandardItemModel* mManualModel = nullptr;
     ContentFilterProxy* m_proxy = nullptr;
     QDialogButtonBox* m_buttons = nullptr;                      // Кнопки Ok/Cancel.
 
@@ -109,6 +121,13 @@ private:
 
     QString       mPendingPath;
     QString       mCurrentRootPath;
+    QString       mManualRootPath;
+    bool          mManualMode = false;
+
+    mutable QHash<QString, SelectionKind> mDirKindCache;
+    mutable QSet<QString> mPendingDirProbes;
+    mutable int mDirProbeGeneration = 0;
+    int mManualGeneration = 0;
 };
 
 #endif

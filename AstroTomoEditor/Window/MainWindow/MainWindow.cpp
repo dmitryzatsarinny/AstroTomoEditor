@@ -119,10 +119,9 @@ void MainWindow::buildUi()
     mPlanar->setObjectName("PlanarView");
     mViewerStack->addWidget(mPlanar);
 
-    // вид для 3D
-    mRenderView = new RenderView(mViewerStack);
-    mRenderView->setObjectName("RenderView");
-    mViewerStack->addWidget(mRenderView);
+    // 3D/VTK создаём после ExplorerDialog вместе с главным окном,
+    // чтобы первый переход в 3D не пересоздавал OpenGL-контекст на глазах.
+    ensureRenderView();
 
     // по умолчанию показываем 2D
     mViewerStack->setCurrentWidget(mPlanar);
@@ -555,82 +554,6 @@ void MainWindow::wireSignals()
                 }
         });
 
-    // прогресс сканирования (левая панель)
-    connect(mRenderView, &RenderView::renderStarted, this,
-        [this]() {
-            mStatusText->setText(tr("Render 0%"));
-            StartLoading();
-            mProgBox->setVisible(true);
-            if (mProgress) {
-                mProgress->setVisible(true);
-                mProgress->startFill();                     // детерминированный режим
-                mProgress->setRange(0, 100);
-                mProgress->setValue(0);
-            }
-        });
-
-    connect(mRenderView, &RenderView::renderProgress, this,
-        [this](int processed) {
-            mStatusText->setText(tr("Render progress: %1").arg(processed));
-            if (mProgress) {
-                mProgress->setRange(0, std::max(1, 100));
-                mProgress->setValue(std::clamp(processed, 0, 100));
-            }
-        });
-
-    connect(mRenderView, &RenderView::Progress, this,
-        [this](int processed) {
-            if (processed == 0)
-            {
-                StartLoading();
-                mProgBox->setVisible(true);
-                if (mProgress) 
-                {
-                    mProgress->setVisible(true);
-                    mProgress->startLoading();
-                    mProgress->setRange(0, 100);
-                    mProgress->setValue(0);
-                }
-            }
-            else if (processed < 100)
-            {
-                if (mProgress)
-                {
-                    mProgress->setRange(0, 100);
-                    mProgress->setValue(processed);
-                }
-            }
-            else
-            {
-                if (mProgress) 
-                {
-                    mProgress->setValue(mProgress->maximum());
-                    mProgress->hideBar();
-                    mProgress->setVisible(false);
-                }
-                StopLoading();
-            }
-            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-        });
-
-    connect(mRenderView, &RenderView::renderFinished, this,
-        [this]() {
-            mStatusText->setText(tr("Render success"));
-            if (mProgress) {
-                mProgress->setValue(mProgress->maximum());
-                mProgress->hideBar();
-                mProgress->setVisible(false);
-            }
-            StopLoading();
-            QTimer::singleShot(800, this, [this] {
-                mProgBox->setVisible(false);
-                mStatusText->setText(tr("Ready"));
-                });
-        });
-
-    connect(mRenderView, &RenderView::showInfo,
-        this, &MainWindow::showInfo);
-
     connect(mSeries, &SeriesListPanel::scanStarted, this,
         [this](int total) {
             mStatusText->setText(tr("DICOM files detection 0%"));
@@ -729,10 +652,17 @@ void MainWindow::wireSignals()
         });
 
     connect(mSettingsDlg, &SettingsDialog::gradientOpacityChanged,
-        mRenderView, &RenderView::setGradientOpacityEnabled);
+        this, [this](bool on)
+        {
+            if (mRenderView)
+                mRenderView->setGradientOpacityEnabled(on);
+        });
 
-    connect(mRenderView, &RenderView::gradientOpacityChanged,
-        mSettingsDlg, &SettingsDialog::syncGradientOpacityUi);
+    if (mRenderView)
+    {
+        connect(mRenderView, &RenderView::gradientOpacityChanged,
+            mSettingsDlg, &SettingsDialog::syncGradientOpacityUi);
+    }
 
     connect(mTitle, &TitleBar::volumeClicked, this, &MainWindow::onShowVolume3D);
     connect(mTitle, &TitleBar::planarClicked, this, &MainWindow::onShowPlanar2D);
@@ -778,6 +708,109 @@ void MainWindow::wireSignals()
 
             onShowVolume3D();
         });
+}
+
+RenderView* MainWindow::ensureRenderView()
+{
+    if (mRenderView)
+        return mRenderView;
+
+    if (!mViewerStack)
+        return nullptr;
+
+    mRenderView = new RenderView(mViewerStack);
+    mRenderView->setObjectName("RenderView");
+    mViewerStack->addWidget(mRenderView);
+    wireRenderViewSignals();
+
+    return mRenderView;
+}
+
+void MainWindow::wireRenderViewSignals()
+{
+    if (!mRenderView)
+        return;
+
+    connect(mRenderView, &RenderView::renderStarted, this,
+        [this]() {
+            mStatusText->setText(tr("Render 0%"));
+            StartLoading();
+            mProgBox->setVisible(true);
+            if (mProgress) {
+                mProgress->setVisible(true);
+                mProgress->startFill();
+                mProgress->setRange(0, 100);
+                mProgress->setValue(0);
+            }
+        });
+
+    connect(mRenderView, &RenderView::renderProgress, this,
+        [this](int processed) {
+            mStatusText->setText(tr("Render progress: %1").arg(processed));
+            if (mProgress) {
+                mProgress->setRange(0, std::max(1, 100));
+                mProgress->setValue(std::clamp(processed, 0, 100));
+            }
+        });
+
+    connect(mRenderView, &RenderView::Progress, this,
+        [this](int processed) {
+            if (processed == 0)
+            {
+                StartLoading();
+                mProgBox->setVisible(true);
+                if (mProgress)
+                {
+                    mProgress->setVisible(true);
+                    mProgress->startLoading();
+                    mProgress->setRange(0, 100);
+                    mProgress->setValue(0);
+                }
+            }
+            else if (processed < 100)
+            {
+                if (mProgress)
+                {
+                    mProgress->setRange(0, 100);
+                    mProgress->setValue(processed);
+                }
+            }
+            else
+            {
+                if (mProgress)
+                {
+                    mProgress->setValue(mProgress->maximum());
+                    mProgress->hideBar();
+                    mProgress->setVisible(false);
+                }
+                StopLoading();
+            }
+            qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+        });
+
+    connect(mRenderView, &RenderView::renderFinished, this,
+        [this]() {
+            mStatusText->setText(tr("Render success"));
+            if (mProgress) {
+                mProgress->setValue(mProgress->maximum());
+                mProgress->hideBar();
+                mProgress->setVisible(false);
+            }
+            StopLoading();
+            QTimer::singleShot(800, this, [this] {
+                mProgBox->setVisible(false);
+                mStatusText->setText(tr("Ready"));
+                });
+        });
+
+    connect(mRenderView, &RenderView::showInfo,
+        this, &MainWindow::showInfo);
+
+    if (mSettingsDlg)
+    {
+        connect(mRenderView, &RenderView::gradientOpacityChanged,
+            mSettingsDlg, &SettingsDialog::syncGradientOpacityUi);
+    }
 }
 
 void MainWindow::onSave3DR()
@@ -1164,9 +1197,13 @@ void MainWindow::onShowVolume3D()
         return;
     }
 
+    auto* renderView = ensureRenderView();
+    if (!renderView)
+        return;
+
     mCurrentPatient.DicomDirPath = mDicomPath;
-    mRenderView->setVolume(vtkVol, mPlanar->GetDicomInfo(), mCurrentPatient);
-    mViewerStack->setCurrentWidget(mRenderView);
+    renderView->setVolume(vtkVol, mPlanar->GetDicomInfo(), mCurrentPatient);
+    mViewerStack->setCurrentWidget(renderView);
 
     if (mTitle) { mTitle->set3DChecked(true); mTitle->set2DChecked(false); }
     mStatusText->setText(tr("Ready volume"));
