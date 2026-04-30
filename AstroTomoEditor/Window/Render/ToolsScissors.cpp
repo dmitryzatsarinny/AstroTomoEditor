@@ -4,7 +4,6 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QKeyEvent>
-#include "VolumeStlExporter.h"
 
 // VTK
 #include <vtkRenderer.h>
@@ -35,6 +34,8 @@
 #include <vtkImageDilateErode3D.h>
 #include <vtkFeatureEdges.h>
 #include <vtkStripper.h>
+#include <vtkAppendPolyData.h>
+#include <vtkContourTriangulator.h>
 
 #include <cmath>
 #include <cstring>
@@ -113,6 +114,105 @@ namespace
 
         return contours;
     }
+
+    vtkSmartPointer<vtkPolyData> BuildCapSurface(
+        const QVector<QVector<std::array<double, 3>>>& contours)
+    {
+        if (contours.isEmpty())
+            return nullptr;
+
+        vtkNew<vtkAppendPolyData> appendCaps;
+        bool hasCaps = false;
+
+        for (const auto& contour : contours)
+        {
+            const vtkIdType n = static_cast<vtkIdType>(contour.size());
+            if (n < 3)
+                continue;
+
+            vtkNew<vtkPoints> points;
+            points->SetNumberOfPoints(n);
+            for (vtkIdType i = 0; i < n; ++i)
+            {
+                const auto& p = contour[static_cast<int>(i)];
+                points->SetPoint(i, p[0], p[1], p[2]);
+            }
+
+            vtkNew<vtkCellArray> line;
+            line->InsertNextCell(n + 1);
+            for (vtkIdType i = 0; i < n; ++i)
+                line->InsertCellPoint(i);
+            line->InsertCellPoint(0);
+
+            vtkNew<vtkPolyData> loop;
+            loop->SetPoints(points);
+            loop->SetLines(line);
+
+            vtkNew<vtkContourTriangulator> triangulator;
+            triangulator->SetInputData(loop);
+            triangulator->Update();
+
+            vtkPolyData* triangulated = triangulator->GetOutput();
+            if (triangulated && triangulated->GetNumberOfCells() > 0)
+            {
+                appendCaps->AddInputData(triangulated);
+                hasCaps = true;
+                continue;
+            }
+
+            vtkNew<vtkPoints> fanPoints;
+            fanPoints->SetNumberOfPoints(n + 1);
+
+            double center[3]{ 0.0, 0.0, 0.0 };
+            for (vtkIdType i = 0; i < n; ++i)
+            {
+                const auto& p = contour[static_cast<int>(i)];
+                fanPoints->SetPoint(i, p[0], p[1], p[2]);
+                center[0] += p[0];
+                center[1] += p[1];
+                center[2] += p[2];
+            }
+            center[0] /= static_cast<double>(n);
+            center[1] /= static_cast<double>(n);
+            center[2] /= static_cast<double>(n);
+            fanPoints->SetPoint(n, center);
+
+            vtkNew<vtkCellArray> fanTriangles;
+            for (vtkIdType i = 0; i < n; ++i)
+            {
+                fanTriangles->InsertNextCell(3);
+                fanTriangles->InsertCellPoint(n);
+                fanTriangles->InsertCellPoint(i);
+                fanTriangles->InsertCellPoint((i + 1) % n);
+            }
+
+            vtkNew<vtkPolyData> fan;
+            fan->SetPoints(fanPoints);
+            fan->SetPolys(fanTriangles);
+            appendCaps->AddInputData(fan);
+            hasCaps = true;
+        }
+
+        if (!hasCaps)
+            return nullptr;
+
+        appendCaps->Update();
+
+        vtkNew<vtkCleanPolyData> clean;
+        clean->SetInputConnection(appendCaps->GetOutputPort());
+        clean->Update();
+
+        vtkNew<vtkTriangleFilter> tri;
+        tri->SetInputConnection(clean->GetOutputPort());
+        tri->Update();
+
+        if (!tri->GetOutput() || tri->GetOutput()->GetNumberOfCells() == 0)
+            return nullptr;
+
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(tri->GetOutput());
+        return out;
+    }
 }
 
 ToolsScissors::ToolsScissors(QWidget* hostParent)
@@ -163,108 +263,6 @@ void ToolsScissors::attachSurface(QVTKOpenGLNativeWidget* vtk,
     m_volume = nullptr;
 
     onViewResized();
-}
-
-vtkImageData* ToolsScissors::buildVoxelVolumeFromSurface(vtkPolyData* surface) const
-{
-    if (!surface || surface->GetNumberOfPoints() == 0)
-        return nullptr;
-
-    double bounds[6];
-    surface->GetBounds(bounds);
-
-    if (bounds[1] <= bounds[0] ||
-        bounds[3] <= bounds[2] ||
-        bounds[5] <= bounds[4])
-        return nullptr;
-
-    const double sx = mSurfaceVoxelSpacing[0];
-    const double sy = mSurfaceVoxelSpacing[1];
-    const double sz = mSurfaceVoxelSpacing[2];
-    const int pad = std::max(1, mSurfaceVoxelPadding);
-
-    const double halfSx = 0.5 * sx;
-    const double halfSy = 0.5 * sy;
-    const double halfSz = 0.5 * sz;
-
-    const double minX = bounds[0] - halfSx;
-    const double maxX = bounds[1] + halfSx;
-    const double minY = bounds[2] - halfSy;
-    const double maxY = bounds[3] + halfSy;
-    const double minZ = bounds[4] - halfSz;
-    const double maxZ = bounds[5] + halfSz;
-
-    double origin[3];
-    origin[0] = minX - pad * sx;
-    origin[1] = minY - pad * sy;
-    origin[2] = minZ - pad * sz;
-
-    int dims[3];
-    dims[0] = static_cast<int>(std::ceil((maxX - minX) / sx)) + 1 + 2 * pad;
-    dims[1] = static_cast<int>(std::ceil((maxY - minY) / sy)) + 1 + 2 * pad;
-    dims[2] = static_cast<int>(std::ceil((maxZ - minZ) / sz)) + 1 + 2 * pad;
-
-    if (dims[0] <= 1 || dims[1] <= 1 || dims[2] <= 1)
-        return nullptr;
-
-    vtkNew<vtkImageData> binaryMask;
-    binaryMask->SetOrigin(origin);
-    binaryMask->SetSpacing(sx, sy, sz);
-    binaryMask->SetExtent(0, dims[0] - 1,
-        0, dims[1] - 1,
-        0, dims[2] - 1);
-    binaryMask->AllocateScalars(VTK_UNSIGNED_CHAR, 1);
-
-    const vtkIdType voxelCount =
-        static_cast<vtkIdType>(dims[0]) *
-        static_cast<vtkIdType>(dims[1]) *
-        static_cast<vtkIdType>(dims[2]);
-
-    auto* ptr = static_cast<unsigned char*>(binaryMask->GetScalarPointer());
-    if (!ptr || voxelCount <= 0)
-        return nullptr;
-
-    // Весь объём сначала белый
-    std::memset(ptr, 255, static_cast<size_t>(voxelCount));
-
-    vtkNew<vtkCleanPolyData> cleanMesh;
-    cleanMesh->SetInputData(surface);
-    cleanMesh->Update();
-
-    vtkNew<vtkTriangleFilter> triMesh;
-    triMesh->SetInputConnection(cleanMesh->GetOutputPort());
-    triMesh->Update();
-
-    vtkNew<vtkPolyDataToImageStencil> p2s;
-    p2s->SetInputConnection(triMesh->GetOutputPort());
-    p2s->SetOutputOrigin(origin);
-    p2s->SetOutputSpacing(sx, sy, sz);
-    p2s->SetOutputWholeExtent(binaryMask->GetExtent());
-    p2s->Update();
-
-    vtkNew<vtkImageStencil> fillInside;
-    fillInside->SetInputData(binaryMask);
-    fillInside->SetStencilConnection(p2s->GetOutputPort());
-    fillInside->SetReverseStencil(false);
-    fillInside->SetBackgroundValue(0);   // снаружи обнуляем
-    fillInside->Update();
-
-    vtkImageData* out = vtkImageData::New();
-    out->DeepCopy(fillInside->GetOutput());
-
-    double range[2];
-    out->GetScalarRange(range);
-
-    qDebug() << "buildVoxelVolumeFromSurface:"
-        << "bounds =" << bounds[0] << bounds[1]
-        << bounds[2] << bounds[3]
-        << bounds[4] << bounds[5]
-        << "dims =" << dims[0] << dims[1] << dims[2]
-        << "origin =" << origin[0] << origin[1] << origin[2]
-        << "spacing =" << sx << sy << sz
-        << "range =" << range[0] << range[1];
-
-    return out;
 }
 
 static void forwardMouseToWidget(QWidget* target, QMouseEvent* me)
@@ -432,11 +430,11 @@ bool ToolsScissors::eventFilter(QObject* obj, QEvent* ev)
 
 bool ToolsScissors::handle(Action a)
 {
-    mUseVoxelizedSurfaceCut = false;
+    mCloseSurfaceCutHoles = false;
     if (a == Action::Scissors) { start(true);  return true; }
     if (a == Action::InverseScissors) { start(false); return true; }
-    if (a == Action::Scissors2) { mUseVoxelizedSurfaceCut = true; start(true); return true; }
-    if (a == Action::InverseScissors2) { mUseVoxelizedSurfaceCut = true; start(false); return true; }
+    if (a == Action::Scissors2) { mCloseSurfaceCutHoles = true; start(true); return true; }
+    if (a == Action::InverseScissors2) { mCloseSurfaceCutHoles = true; start(false); return true; }
     return false;
 }
 
@@ -511,9 +509,7 @@ void ToolsScissors::finish()
 
     if (mSurfaceMode)
     {
-        vtkPolyData* out = mUseVoxelizedSurfaceCut
-            ? applySurfaceCutVoxelized(m_pts, m_cutInside)
-            : applySurfaceCut(m_pts, m_cutInside);
+        vtkPolyData* out = applySurfaceCut(m_pts, m_cutInside);
         repeat();
 
         qDebug() << "finish surface result =" << (out ? "ok" : "null");
@@ -521,8 +517,20 @@ void ToolsScissors::finish()
         if (!out)
             return;
 
+        const auto cutContours = ExtractCutContours(out);
+        if (mCloseSurfaceCutHoles && !cutContours.isEmpty())
+        {
+            vtkPolyData* closed = closeSurfaceCutHoles(out, cutContours);
+            out->Delete();
+            if (!closed)
+                return;
+            out = closed;
+        }
+
         if (mOnSurfaceReplaced)
-            mOnSurfaceReplaced(out, ExtractCutContours(out));
+            mOnSurfaceReplaced(out, mCloseSurfaceCutHoles
+                ? QVector<QVector<std::array<double, 3>>>{}
+                : cutContours);
 
         if (m_vtk && m_vtk->renderWindow())
             m_vtk->renderWindow()->Render();
@@ -1036,29 +1044,24 @@ vtkPolyData* ToolsScissors::applySurfaceCut(const QVector<QPoint>& pts2D, bool c
     return out;
 }
 
-vtkPolyData* ToolsScissors::applySurfaceCutVoxelized(const QVector<QPoint>& pts2D, bool cutInside)
+vtkPolyData* ToolsScissors::closeSurfaceCutHoles(
+    vtkPolyData* openSurface,
+    const QVector<QVector<std::array<double, 3>>>& cutContours) const
 {
-    if (!mSurfaceMesh || pts2D.size() < 3)
+    if (!openSurface || openSurface->GetNumberOfCells() == 0)
         return nullptr;
 
-    vtkImageData* surfaceVolume = buildVoxelVolumeFromSurface(mSurfaceMesh);
-    if (!surfaceVolume)
+    auto caps = BuildCapSurface(cutContours);
+    if (!caps || caps->GetNumberOfCells() == 0)
         return nullptr;
 
-    vtkImageData* cutVolume = applyPolygonCut(surfaceVolume, pts2D, cutInside);
-    surfaceVolume->Delete();
-
-    if (!cutVolume)
-        return nullptr;
-
-    auto rebuilt = VolumeStlExporter::BuildFromBinaryVoxelsNew(cutVolume, VisibleExportOptions{});
-    cutVolume->Delete();
-
-    if (!rebuilt || rebuilt->GetNumberOfCells() == 0)
-        return nullptr;
+    vtkNew<vtkAppendPolyData> append;
+    append->AddInputData(openSurface);
+    append->AddInputData(caps);
+    append->Update();
 
     vtkNew<vtkCleanPolyData> clean;
-    clean->SetInputData(rebuilt);
+    clean->SetInputConnection(append->GetOutputPort());
     clean->Update();
 
     vtkNew<vtkTriangleFilter> tri;
@@ -1071,7 +1074,9 @@ vtkPolyData* ToolsScissors::applySurfaceCutVoxelized(const QVector<QPoint>& pts2
     vtkPolyData* out = vtkPolyData::New();
     out->DeepCopy(tri->GetOutput());
 
-    qDebug() << "applySurfaceCutVoxelized: final cells =" << out->GetNumberOfCells();
+    qDebug() << "closeSurfaceCutHoles: contours =" << cutContours.size()
+        << "cap cells =" << caps->GetNumberOfCells()
+        << "final cells =" << out->GetNumberOfCells();
 
     return out;
 }

@@ -311,6 +311,8 @@ void ClipBoxController::setEnabled(bool on)
         applyClippingFromBox();
     }
 
+    emit clippingChanged();
+
     if (mRenderer)
         mRenderer->ResetCameraClippingRange();
 
@@ -387,6 +389,8 @@ void ClipBoxController::applyClippingFromBox()
             pm->Modified();
         }
     }
+
+    emit clippingChanged();
 
     if (mRenderer && mRenderer->GetRenderWindow())
         mRenderer->GetRenderWindow()->Render();

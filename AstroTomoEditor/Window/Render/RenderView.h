@@ -200,6 +200,8 @@ private:
     void setToolUiActive(bool on, Action a);
     void updateTopPanelForStlMode(bool stlModeOn);
     bool rebuildStlFromEditedImage(vtkImageData* editedImage);
+    bool simplifyStlOnce(bool showFailureMessages, bool updatePreview, bool recordUndo);
+    int simplifyStlToLimit();
 
     QToolButton* mBtnUndo{ nullptr };
     QToolButton* mBtnRedo{ nullptr };
@@ -235,6 +237,7 @@ private:
     std::array<double, 3> savedStlToWorldCoords(const std::array<double, 3>& saved) const;
     StoredContourInfo makeStoredContour(const QVector<std::array<double, 3>>& contourPointsWorld, int contourNumber) const;
     QVector<std::array<double, 3>> storedContourWorldPoints(const StoredContourInfo& contour) const;
+    void updateContourOverlayClipping();
     void rebuildContourOverlay();
     void updateUndoRedoUi();
     void applyCustomPresetByIndex(int idx, vtkVolumeProperty* prop, double dataMin, double dataMax);

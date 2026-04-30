@@ -47,6 +47,9 @@ public:
     void applyNow();
     vtkSmartPointer<vtkPlaneCollection> currentClippingPlanes() const;
 
+signals:
+    void clippingChanged();
+
 private:
     // применяет текущие границы виджета как planes в мэппер
     void applyClippingFromBox();

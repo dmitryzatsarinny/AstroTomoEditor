@@ -638,6 +638,8 @@ RenderView::RenderView(QWidget* parent) : QWidget(parent)
     mClip = std::make_unique<ClipBoxController>(this);
     mClip->setRenderer(mRenderer);
     mClip->setInteractor(mVtk->interactor());
+    connect(mClip.get(), &ClipBoxController::clippingChanged,
+        this, &RenderView::updateContourOverlayClipping);
 
     connect(mBtnClip, &QToolButton::toggled, this, [this](bool on) {
         mClip->setEnabled(on);
@@ -2354,6 +2356,26 @@ void RenderView::keepOnlyContoursAttachedToCurrentSurface()
     rebuildContourOverlay();
 }
 
+void RenderView::updateContourOverlayClipping()
+{
+    if (!mContourOverlayMapper)
+        return;
+
+    if (mClip && mClip->isEnabled())
+    {
+        if (auto planes = mClip->currentClippingPlanes())
+            mContourOverlayMapper->SetClippingPlanes(planes);
+        else
+            mContourOverlayMapper->RemoveAllClippingPlanes();
+    }
+    else
+    {
+        mContourOverlayMapper->RemoveAllClippingPlanes();
+    }
+
+    mContourOverlayMapper->Modified();
+}
+
 void RenderView::rebuildContourOverlay()
 {
     if (!mRenderer)
@@ -2446,11 +2468,7 @@ void RenderView::rebuildContourOverlay()
 
     mContourOverlayMapper = vtkSmartPointer<vtkPolyDataMapper>::New();
     mContourOverlayMapper->SetInputConnection(tube->GetOutputPort());
-    if (mClip && mClip->isEnabled())
-    {
-        if (auto planes = mClip->currentClippingPlanes())
-            mContourOverlayMapper->SetClippingPlanes(planes);
-    }
+    updateContourOverlayClipping();
 
     mContourOverlayActor = vtkSmartPointer<vtkActor>::New();
     mContourOverlayActor->SetMapper(mContourOverlayMapper);
@@ -2515,21 +2533,44 @@ StoredContourInfo RenderView::makeStoredContour(
     header.nContourPoint = static_cast<quint32>(fittedPoints.size());
     header.TotalDataSize = header.HeaderSize + header.nContourPoint * header.StoredContourPointSize;
 
-    vtkNew<vtkCellLocator> surfaceLocator;
-    vtkPolyData* surface = mIsoMesh.GetPointer();
-    if (surface && surface->GetNumberOfCells() > 0)
+    vtkNew<vtkCellLocator> currentSurfaceLocator;
+    vtkPolyData* currentSurface = mIsoMesh.GetPointer();
+    if (currentSurface && currentSurface->GetNumberOfCells() > 0)
     {
-        surfaceLocator->SetDataSet(surface);
-        surfaceLocator->BuildLocator();
+        currentSurfaceLocator->SetDataSet(currentSurface);
+        currentSurfaceLocator->BuildLocator();
     }
     else
     {
-        surface = nullptr;
+        currentSurface = nullptr;
+    }
+
+    vtkNew<vtkCellLocator> normalSurfaceLocator;
+    vtkPolyData* normalSurface = mStlSaveMesh.GetPointer();
+    if (!normalSurface || normalSurface->GetNumberOfCells() == 0)
+        normalSurface = currentSurface;
+
+    if (normalSurface && normalSurface->GetNumberOfCells() > 0)
+    {
+        normalSurfaceLocator->SetDataSet(normalSurface);
+        normalSurfaceLocator->BuildLocator();
     }
 
     for (int i = 0; i < fittedPoints.size(); ++i)
     {
-        const auto savedPoint = worldToSavedStlCoords(fittedPoints[i]);
+        ContourPoint worldPointOnSurface = fittedPoints[i];
+        if (currentSurface)
+        {
+            double closest[3]{};
+            double dist2 = std::numeric_limits<double>::max();
+            vtkIdType cellId = -1;
+            int subId = 0;
+            currentSurfaceLocator->FindClosestPoint(fittedPoints[i].data(), closest, cellId, subId, dist2);
+            if (cellId >= 0)
+                worldPointOnSurface = { closest[0], closest[1], closest[2] };
+        }
+
+        const auto savedPoint = worldToSavedStlCoords(worldPointOnSurface);
 
         ContourPoint viewPointOnSurface{
             savedPoint[0],
@@ -2537,23 +2578,30 @@ StoredContourInfo RenderView::makeStoredContour(
             savedPoint[2]
         };
         ContourPoint viewPointAboveNormal = viewPointOnSurface;
+        ContourPoint viewPointAboveNormal2 = viewPointOnSurface;
 
         double normal[3]{ 0.0, 0.0, 0.0 };
-        if (closestSurfaceNormal(surface, surfaceLocator.GetPointer(), fittedPoints[i], normal))
+        if (closestSurfaceNormal(normalSurface, normalSurfaceLocator.GetPointer(), worldPointOnSurface, normal))
         {
             const ContourPoint worldAboveNormal{
-                fittedPoints[i][0] + normal[0] * kContourNormalOffsetMm,
-                fittedPoints[i][1] + normal[1] * kContourNormalOffsetMm,
-                fittedPoints[i][2] + normal[2] * kContourNormalOffsetMm
+                worldPointOnSurface[0] + normal[0] * kContourNormalOffsetMm,
+                worldPointOnSurface[1] + normal[1] * kContourNormalOffsetMm,
+                worldPointOnSurface[2] + normal[2] * kContourNormalOffsetMm
+            };
+            const ContourPoint worldAboveNormal2{
+                worldPointOnSurface[0] + normal[0] * (kContourNormalOffsetMm * 2),
+                worldPointOnSurface[1] + normal[1] * (kContourNormalOffsetMm * 2),
+                worldPointOnSurface[2] + normal[2] * (kContourNormalOffsetMm * 2)
             };
             viewPointAboveNormal = worldToSavedStlCoords(worldAboveNormal);
+            viewPointAboveNormal2 = worldToSavedStlCoords(worldAboveNormal2);
         }
 
         setStoredContourPoint(
             contour.Points[i],
             savedPoint,
-            viewPointOnSurface,
-            viewPointAboveNormal);
+            viewPointAboveNormal,
+            viewPointAboveNormal2);
     }
 
     return contour;
@@ -3195,69 +3243,105 @@ void RenderView::addStlPreview()
         mVtk->renderWindow()->Render();
 }
 
-void RenderView::onStlSimplify()
+bool RenderView::simplifyStlOnce(bool showFailureMessages, bool updatePreview, bool recordUndo)
 {
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) {
-        emit showWarning(tr("No surface to simplify"));
-        return;
+        if (showFailureMessages)
+            emit showWarning(tr("No surface to simplify"));
+        return false;
     }
 
     if (!mStlSaveMesh || mStlSaveMesh->GetNumberOfCells() == 0)
         mStlSaveMesh = clonePolyData(mIsoMesh);
 
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
-
-    // если это первое нажатие после построения, целимся сразу в 2-4 MB (в 3 MB)
+    auto visibleSource = mIsoMesh;
+    auto saveSource = mStlSaveMesh;
+    double nextTargetMB = kFirstAimMB;
     if (!mSimplifyStarted)
     {
-        //mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
-        pushStlUndoSnapshot();
-        mIsoMesh = VolumeStlExporter::NormalizeSurface(mIsoMesh);
-        mStlSaveMesh = VolumeStlExporter::NormalizeSurface(mStlSaveMesh);
-        mSimplifyTargetMB = kFirstAimMB;
-        mSimplifyStarted = true;
+        visibleSource = VolumeStlExporter::NormalizeSurface(mIsoMesh);
+        saveSource = VolumeStlExporter::NormalizeSurface(mStlSaveMesh);
+        if (!visibleSource || visibleSource->GetNumberOfCells() == 0 ||
+            !saveSource || saveSource->GetNumberOfCells() == 0)
+        {
+            if (showFailureMessages)
+                emit showWarning(tr("Simplify failed"));
+            return false;
+        }
     }
     else
     {
-        // последующие нажатия: уменьшаем цель плавно
-        //mStlModeController.pushSurfaceUndoState(clonePolyData(mIsoMesh));
-        pushStlUndoSnapshot();
-        mSimplifyTargetMB = std::max(kMinMB, mSimplifyTargetMB * kStepFactor);
+        nextTargetMB = std::max(kMinMB, mSimplifyTargetMB * kStepFactor);
     }
 
-    const std::int64_t targetBytes = static_cast<std::int64_t>(mSimplifyTargetMB * kMB);
+    const std::int64_t targetBytes = static_cast<std::int64_t>(nextTargetMB * kMB);
 
-    const bool first = (mSimplifyTargetMB >= 2.5); // или по mSimplifyStarted==false
+    const bool first = (nextTargetMB >= 2.5); // или по mSimplifyStarted==false
     const int smoothIter = first ? 16 : 10;
     const double passBand = first ? 0.12 : 0.16;;
 
-    auto simplified = VolumeStlExporter::SimplifyToTargetBytes(mIsoMesh, targetBytes, smoothIter, passBand);
-    auto saveSimplified = VolumeStlExporter::SimplifyToTargetBytes(mStlSaveMesh, targetBytes, smoothIter, passBand);
+    auto simplified = VolumeStlExporter::SimplifyToTargetBytes(visibleSource, targetBytes, smoothIter, passBand);
+    auto saveSimplified = VolumeStlExporter::SimplifyToTargetBytes(saveSource, targetBytes, smoothIter, passBand);
     auto nextVisibleMesh = clonePolyData(simplified);
     auto nextSaveMesh = clonePolyData(saveSimplified);
 
     if (!nextVisibleMesh || nextVisibleMesh->GetNumberOfCells() == 0 ||
         !nextSaveMesh || nextSaveMesh->GetNumberOfCells() == 0)
     {
-        QApplication::restoreOverrideCursor();
-        emit showWarning(tr("Simplify failed"));
-        return;
+        if (showFailureMessages)
+            emit showWarning(tr("Simplify failed"));
+        return false;
     }
+
+    if (recordUndo)
+        pushStlUndoSnapshot();
 
     mIsoMesh = nextVisibleMesh;
     mStlSaveMesh = nextSaveMesh;
+    mSimplifyTargetMB = nextTargetMB;
+    mSimplifyStarted = true;
 
     ++mCurrentStlStep;
 
-    addStlPreview();
-    updateStlSizeLabel();
-    updateUndoRedoUi();
+    if (updatePreview)
+    {
+        addStlPreview();
+        updateStlSizeLabel();
+        updateUndoRedoUi();
 
-    if (mContour)
-        mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
-    if (mScissors)
-        mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        if (mContour)
+            mContour->attach(mVtk, mRenderer, mIsoMesh, mIsoActor);
+        if (mScissors)
+            mScissors->attachSurface(mVtk, mRenderer, mIsoMesh, mIsoActor);
+    }
+
+    return true;
+}
+
+int RenderView::simplifyStlToLimit()
+{
+    int steps = 0;
+    constexpr int kMaxAutoSimplifySteps = 64;
+
+    for (int i = 0; i < kMaxAutoSimplifySteps; ++i)
+    {
+        if (!simplifyStlOnce(false, false, false))
+            break;
+
+        ++steps;
+        if (mSimplifyTargetMB <= kMinMB + 1e-9)
+            break;
+    }
+
+    return steps;
+}
+
+void RenderView::onStlSimplify()
+{
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+
+    simplifyStlOnce(true, true, true);
 
     QApplication::restoreOverrideCursor();
     qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
@@ -3337,6 +3421,9 @@ void RenderView::onBuildStl()
         return;
     }
 
+    if (mHistDlg && mHistDlg->isVisible())
+        mHistDlg->close();
+
     emit showInfo(tr("Building surface…"));
     QApplication::setOverrideCursor(Qt::WaitCursor);
 
@@ -3352,10 +3439,10 @@ void RenderView::onBuildStl()
     mStlSaveMesh = clonePolyData(mIsoMesh);
     if (isCtrlDown())
     {
-        onStlSimplify();
+        emit showInfo(tr("Simplifying surface…"));
+        qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
+        simplifyStlToLimit();
     }
-
-    qDebug() << "mIsoMeshNumber" << "  " << mIsoMesh->GetNumberOfCells();
 
     if (!mIsoMesh || mIsoMesh->GetNumberOfCells() == 0) 
     {
@@ -3375,6 +3462,8 @@ void RenderView::onBuildStl()
         qApp->processEvents(QEventLoop::ExcludeUserInputEvents);
         return;
     }
+
+    qDebug() << "mIsoMeshNumber" << "  " << mIsoMesh->GetNumberOfCells();
 
     mStlModeController.setActive(true);
     mStlModeController.resetSurfaceHistory(clonePolyData(mIsoMesh));

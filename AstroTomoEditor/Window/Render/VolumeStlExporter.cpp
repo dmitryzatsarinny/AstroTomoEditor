@@ -23,6 +23,9 @@
 #include <vtkSTLWriter.h>
 #include <vtkQuadricClustering.h>
 #include <vtkMassProperties.h>
+#include <vtkAppendPolyData.h>
+#include <vtkStripper.h>
+#include <vtkContourTriangulator.h>
 #include <QCoreApplication>
 #include <qfile.h>
 #include <qfileinfo.h>
@@ -78,6 +81,179 @@ static inline void FloatToLE(float& v)
 }
 
 static inline float f32(double v) { return static_cast<float>(v); }
+
+namespace
+{
+    vtkSmartPointer<vtkPolyData> BuildPlanarBoundaryCaps(vtkPolyData* surface)
+    {
+        if (!surface || surface->GetNumberOfCells() == 0)
+            return nullptr;
+
+        vtkNew<vtkFeatureEdges> edges;
+        edges->SetInputData(surface);
+        edges->BoundaryEdgesOn();
+        edges->FeatureEdgesOff();
+        edges->NonManifoldEdgesOff();
+        edges->ManifoldEdgesOff();
+        edges->Update();
+
+        vtkPolyData* edgeOut = edges->GetOutput();
+        if (!edgeOut || edgeOut->GetNumberOfLines() == 0)
+            return nullptr;
+
+        vtkNew<vtkStripper> stripper;
+        stripper->SetInputData(edgeOut);
+        stripper->JoinContiguousSegmentsOn();
+        stripper->Update();
+
+        vtkPolyData* loops = stripper->GetOutput();
+        if (!loops || !loops->GetPoints() || !loops->GetLines())
+            return nullptr;
+
+        vtkNew<vtkAppendPolyData> appendCaps;
+        bool hasCaps = false;
+
+        vtkCellArray* lines = loops->GetLines();
+        vtkPoints* loopPoints = loops->GetPoints();
+        lines->InitTraversal();
+
+        vtkIdType npts = 0;
+        const vtkIdType* ids = nullptr;
+        while (lines->GetNextCell(npts, ids))
+        {
+            if (!ids || npts < 3)
+                continue;
+
+            vtkIdType pointCount = npts;
+            if (pointCount > 3)
+            {
+                double first[3]{};
+                double last[3]{};
+                loopPoints->GetPoint(ids[0], first);
+                loopPoints->GetPoint(ids[pointCount - 1], last);
+                const double dx = first[0] - last[0];
+                const double dy = first[1] - last[1];
+                const double dz = first[2] - last[2];
+                if ((dx * dx + dy * dy + dz * dz) <= 1e-8)
+                    --pointCount;
+            }
+
+            if (pointCount < 3)
+                continue;
+
+            vtkNew<vtkPoints> capPoints;
+            vtkNew<vtkCellArray> capLine;
+
+            capLine->InsertNextCell(pointCount + 1);
+            for (vtkIdType i = 0; i < pointCount; ++i)
+            {
+                double p[3]{};
+                loopPoints->GetPoint(ids[i], p);
+                const vtkIdType newId = capPoints->InsertNextPoint(p);
+                capLine->InsertCellPoint(newId);
+            }
+            capLine->InsertCellPoint(0);
+
+            vtkNew<vtkPolyData> capLoop;
+            capLoop->SetPoints(capPoints);
+            capLoop->SetLines(capLine);
+
+            vtkNew<vtkContourTriangulator> triangulator;
+            triangulator->SetInputData(capLoop);
+            triangulator->Update();
+
+            vtkPolyData* cap = triangulator->GetOutput();
+            if (cap && cap->GetNumberOfCells() > 0)
+            {
+                appendCaps->AddInputData(cap);
+                hasCaps = true;
+            }
+        }
+
+        if (!hasCaps)
+            return nullptr;
+
+        appendCaps->Update();
+
+        vtkNew<vtkCleanPolyData> clean;
+        clean->SetInputConnection(appendCaps->GetOutputPort());
+        clean->PointMergingOn();
+        clean->Update();
+
+        vtkNew<vtkTriangleFilter> tri;
+        tri->SetInputConnection(clean->GetOutputPort());
+        tri->PassLinesOff();
+        tri->PassVertsOff();
+        tri->Update();
+
+        if (!tri->GetOutput() || tri->GetOutput()->GetNumberOfCells() == 0)
+            return nullptr;
+
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(tri->GetOutput());
+        return out;
+    }
+
+    vtkSmartPointer<vtkPolyData> BuildClosedSurfaceForVolume(vtkPolyData* surface)
+    {
+        if (!surface || surface->GetNumberOfCells() == 0)
+            return nullptr;
+
+        vtkNew<vtkTriangleFilter> triInput;
+        triInput->SetInputData(surface);
+        triInput->PassLinesOff();
+        triInput->PassVertsOff();
+        triInput->Update();
+
+        vtkNew<vtkCleanPolyData> cleanInput;
+        cleanInput->SetInputConnection(triInput->GetOutputPort());
+        cleanInput->PointMergingOn();
+        cleanInput->Update();
+
+        vtkPolyData* base = cleanInput->GetOutput();
+        if (!base || base->GetNumberOfCells() == 0)
+            return nullptr;
+
+        vtkSmartPointer<vtkPolyData> massInput = base;
+        auto caps = BuildPlanarBoundaryCaps(base);
+        if (caps && caps->GetNumberOfCells() > 0)
+        {
+            vtkNew<vtkAppendPolyData> append;
+            append->AddInputData(base);
+            append->AddInputData(caps);
+            append->Update();
+
+            vtkNew<vtkCleanPolyData> cleanClosed;
+            cleanClosed->SetInputConnection(append->GetOutputPort());
+            cleanClosed->PointMergingOn();
+            cleanClosed->Update();
+
+            massInput = cleanClosed->GetOutput();
+        }
+
+        vtkNew<vtkPolyDataNormals> normals;
+        normals->SetInputData(massInput);
+        normals->ComputePointNormalsOff();
+        normals->ComputeCellNormalsOn();
+        normals->SplittingOff();
+        normals->ConsistencyOn();
+        normals->AutoOrientNormalsOn();
+        normals->Update();
+
+        vtkNew<vtkTriangleFilter> triFinal;
+        triFinal->SetInputConnection(normals->GetOutputPort());
+        triFinal->PassLinesOff();
+        triFinal->PassVertsOff();
+        triFinal->Update();
+
+        if (!triFinal->GetOutput() || triFinal->GetOutput()->GetNumberOfCells() == 0)
+            return nullptr;
+
+        auto out = vtkSmartPointer<vtkPolyData>::New();
+        out->DeepCopy(triFinal->GetOutput());
+        return out;
+    }
+}
 
 bool VolumeStlExporter::SaveStlMyBinary_NoCenter(
     vtkPolyData* pd,
@@ -237,12 +413,12 @@ bool VolumeStlExporter::SaveStlMyBinary_NoCenter(
         }
 
         // --- 6) Центрируем относительно centerWorld: в STL координаты станут локальными вокруг (0,0,0) ---
-        //const double cp0[3]{ p0[0] - centerWorldX, p0[1] - centerWorldY, p0[2] - centerWorldZ};
-        //const double cp1[3]{ p1[0] - centerWorldX, p1[1] - centerWorldY, p1[2] - centerWorldZ};
-        //const double cp2[3]{ p2[0] - centerWorldX, p2[1] - centerWorldY, p2[2] - centerWorldZ};
-        const double cp0[3]{ p0[0] - centerWorldX - stlCenterShiftX, p0[1] - centerWorldY - stlCenterShiftY, p0[2] - centerWorldZ - stlCenterShiftZ };
-        const double cp1[3]{ p1[0] - centerWorldX - stlCenterShiftX, p1[1] - centerWorldY - stlCenterShiftY, p1[2] - centerWorldZ - stlCenterShiftZ };
-        const double cp2[3]{ p2[0] - centerWorldX - stlCenterShiftX, p2[1] - centerWorldY - stlCenterShiftY, p2[2] - centerWorldZ - stlCenterShiftZ };
+        const double cp0[3]{ p0[0] - centerWorldX, p0[1] - centerWorldY, p0[2] - centerWorldZ};
+        const double cp1[3]{ p1[0] - centerWorldX, p1[1] - centerWorldY, p1[2] - centerWorldZ};
+        const double cp2[3]{ p2[0] - centerWorldX, p2[1] - centerWorldY, p2[2] - centerWorldZ};
+        //const double cp0[3]{ p0[0] - centerWorldX - stlCenterShiftX, p0[1] - centerWorldY - stlCenterShiftY, p0[2] - centerWorldZ - stlCenterShiftZ };
+        //const double cp1[3]{ p1[0] - centerWorldX - stlCenterShiftX, p1[1] - centerWorldY - stlCenterShiftY, p1[2] - centerWorldZ - stlCenterShiftZ };
+        //const double cp2[3]{ p2[0] - centerWorldX - stlCenterShiftX, p2[1] - centerWorldY - stlCenterShiftY, p2[2] - centerWorldZ - stlCenterShiftZ };
 
         if (!firstPrinted)
         {
@@ -332,17 +508,15 @@ double VolumeStlExporter::estimateEnclosedVolumeCm3(vtkPolyData* pd)
     if (!pd || pd->GetNumberOfCells() == 0)
         return std::numeric_limits<double>::quiet_NaN();
 
-    vtkNew<vtkTriangleFilter> tri;
-    tri->SetInputData(pd);
-    tri->PassLinesOff();
-    tri->PassVertsOff();
-    tri->Update();
+    auto closedForVolume = BuildClosedSurfaceForVolume(pd);
+    if (!closedForVolume || closedForVolume->GetNumberOfCells() == 0)
+        return std::numeric_limits<double>::quiet_NaN();
 
     vtkNew<vtkMassProperties> mass;
-    mass->SetInputConnection(tri->GetOutputPort());
+    mass->SetInputData(closedForVolume);
     mass->Update();
 
-    const double mm3 = mass->GetVolume();
+    const double mm3 = std::abs(mass->GetVolume());
     if (!std::isfinite(mm3) || mm3 <= 0.0)
         return std::numeric_limits<double>::quiet_NaN();
 
